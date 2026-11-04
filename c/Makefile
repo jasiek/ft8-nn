@@ -1,7 +1,7 @@
 # libft8nn: needs ONNX Runtime (brew install onnxruntime). No other dependencies.
 ORT_PREFIX ?= $(shell brew --prefix onnxruntime 2>/dev/null || echo /usr/local)
 CC ?= cc
-CFLAGS ?= -O3 -march=native -Wall -Wextra -Wno-unused-parameter -std=c11
+CFLAGS ?= -O3 -march=native -fcx-limited-range -Wall -Wextra -Wno-unused-parameter -std=c11
 CPPFLAGS += -I$(ORT_PREFIX)/include -D_DEFAULT_SOURCE
 LDLIBS += -L$(ORT_PREFIX)/lib -lonnxruntime -lm -lpthread -Wl,-rpath,$(ORT_PREFIX)/lib
 

@@ -78,13 +78,15 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
      real 00_40m + 08_80m, first 20 slots each: 1231/1231 decodes identical in every output field;
      AWGN 60 files: 418/418 identical payloads.
      `uv run python tools/golden_c.py real <station_dir> --n 20`, `... awgn data/bench/awgn --n 60`.
-   - Speed (single core, `FT8NN_PROFILE=1` prints per-pass stage times): about 8–9 s/slot vs Python 4 s.
-     Per slot: NN 4.3 s, BP 1.5 s, fine sync 0.9 s, classical metrics 0.65 s, candidates 0.33 s.
+   - Speed (single core, `FT8NN_PROFILE=1` prints per-pass stage times): about 6.4 s/slot vs Python 4 s.
+     Per slot: NN 4.3 s, BP 1.1 s, fine sync 0.5 s, candidates 0.3 s, classical metrics 0.2 s.
+     Done so far: `-fcx-limited-range`, BP via expm1/log, split re/im sync grid, per-tone maxima in nsym 2/3
+     metrics. All kept output byte-identical (golden test re-run).
      The NN cost is ONNX Runtime's CPU GEMM: 2.4 ms/hypothesis single-thread vs torch 0.82 ms (torch uses
      Accelerate/AMX). Tried, no gain: ORT transformer fusion, static-batch export. CoreML EP: 1.6 ms, partial
      graph support. **User decision 2026-11-04: keep ONNX Runtime.**
-   - Next for step 2: speed up the non-NN C code (BP is scalar tanh/atanh, fine-sync grid is a plain triple loop),
-     re-running the golden test after each change.
+   - Possible later speedups (would change results, so need Python + C change and an A/B): BP early stop when
+     the unsatisfied-check count stalls (most of the 6000 BP rows per slot are noise running all 30 iterations).
 3. **Local noise whitening** (about 1 h, plus a 25 min real A/B run). It targets the `00_40m` misses described above.
    Keep the change only if the real total goes up and the AWGN 50% point does not get worse.
 4. Optional later work:

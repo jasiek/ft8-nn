@@ -62,7 +62,8 @@ int bp_decode(const double *llr, int iters, uint8_t *out, int *nhard) {
                 }
                 double q = tot[nb] - Rm[j];
                 q = q < -40 ? -40 : (q > 40 ? 40 : q);
-                double t = tanh(q / 2);
+                double e = expm1(q);
+                double t = e / (e + 2); /* tanh(q/2) */
                 T[j] = fabs(t) < 1e-12 ? 1e-12 : t;
             }
             double prod = T[0];
@@ -74,7 +75,7 @@ int bp_decode(const double *llr, int iters, uint8_t *out, int *nhard) {
                 }
                 double ext = prod / T[j];
                 ext = ext < -0.9999999 ? -0.9999999 : (ext > 0.9999999 ? 0.9999999 : ext);
-                Rm[j] = 2 * atanh(ext);
+                Rm[j] = log((1 + ext) / (1 - ext)); /* 2 atanh(ext) */
             }
         }
         for (int n = 0; n < 174; n++) {

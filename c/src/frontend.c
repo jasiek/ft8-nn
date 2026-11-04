@@ -242,7 +242,7 @@ static void spectra_init(void);
 #define DT_SPAN 12
 
 static double dfs[NDF];
-static cplx gridK[21][SPS_BB][NDF];
+static double gridKr[21][SPS_BB][NDF], gridKi[21][SPS_BB][NDF]; /* split re/im so the fi loop vectorises */
 
 void frontend_init(void) {
     /* numpy arange fills start + i * delta with delta = (start + step) - start */
@@ -253,7 +253,8 @@ void frontend_init(void) {
             for (int fi = 0; fi < NDF; fi++) {
                 double f = COSTAS[s % 7] * TONE_SPACING + dfs[fi];
                 double ph = -2 * M_PI * (f * n / FS_BB + dfs[fi] * SPS_BB * SYNC_SYMS[s] / FS_BB);
-                gridK[s][n][fi] = cos(ph) + I * sin(ph);
+                gridKr[s][n][fi] = cos(ph);
+                gridKi[s][n][fi] = sin(ph);
             }
     for (int i = 0; i < TAPER_N; i++) taper[i] = 0.5 * (1 - cos(M_PI * i / (TAPER_N - 1)));
     spectra_init();
@@ -286,19 +287,23 @@ int fine_sync2(const baseband *b, const candidate *c, int n_hyp, sync_hyp *out) 
         double acc[NDF];
         memset(acc, 0, sizeof acc);
         for (int a = 0; a < 3; a++) {
-            cplx z[NDF];
-            memset(z, 0, sizeof z);
+            double zr[NDF], zi[NDF];
+            memset(zr, 0, sizeof zr);
+            memset(zi, 0, sizeof zi);
             for (int k = 0; k < 7; k++) {
                 int s = 7 * a + k, base = start0 + dt + SPS_BB * SYNC_SYMS[s];
                 for (int n = 0; n < SPS_BB; n++) {
                     int idx = base + n;
                     if (idx < 0 || idx >= NBB) continue;
-                    cplx v = y0[idx];
-                    const cplx *K = gridK[s][n];
-                    for (int fi = 0; fi < NDF; fi++) z[fi] += v * K[fi];
+                    double vr = creal(y0[idx]), vi = cimag(y0[idx]);
+                    const double *Kr = gridKr[s][n], *Ki = gridKi[s][n];
+                    for (int fi = 0; fi < NDF; fi++) {
+                        zr[fi] += vr * Kr[fi] - vi * Ki[fi];
+                        zi[fi] += vr * Ki[fi] + vi * Kr[fi];
+                    }
                 }
             }
-            for (int fi = 0; fi < NDF; fi++) acc[fi] += creal(z[fi]) * creal(z[fi]) + cimag(z[fi]) * cimag(z[fi]);
+            for (int fi = 0; fi < NDF; fi++) acc[fi] += zr[fi] * zr[fi] + zi[fi] * zi[fi];
         }
         for (int fi = 0; fi < NDF; fi++) Mp[fi][ti] = acc[fi];
     }
@@ -471,13 +476,22 @@ void coherent_llr(cplx cs[NN][8], int nsym, double *llr) {
             }
             s[c] = cabs(acc);
         }
+        /* per-symbol max over combos with each tone, then per bit max over tones: same maxima as a
+           direct scan over all combos, with nsym*nc instead of 3*nsym*nc comparisons */
+        double mt[3][8];
+        for (int j = 0; j < nsym; j++)
+            for (int t = 0; t < 8; t++) mt[j][t] = -INFINITY;
+        for (int c = 0; c < nc; c++)
+            for (int j = 0; j < nsym; j++) {
+                int t = (c >> (3 * (nsym - 1 - j))) & 7;
+                mt[j][t] = fmax_d(mt[j][t], s[c]);
+            }
         for (int bi = 0; bi < nbits; bi++) {
             int j = bi / 3, b = bi % 3;
             double m1 = -INFINITY, m0 = -INFINITY;
-            for (int c = 0; c < nc; c++) {
-                int t = (c >> (3 * (nsym - 1 - j))) & 7;
-                if ((GRAY_INV[t] >> (2 - b)) & 1) m1 = fmax_d(m1, s[c]);
-                else m0 = fmax_d(m0, s[c]);
+            for (int t = 0; t < 8; t++) {
+                if ((GRAY_INV[t] >> (2 - b)) & 1) m1 = fmax_d(m1, mt[j][t]);
+                else m0 = fmax_d(m0, mt[j][t]);
             }
             llr[3 * g0 + bi] = m1 - m0;
         }
