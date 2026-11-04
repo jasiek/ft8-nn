@@ -43,6 +43,8 @@ def features(y, start=None):
 def _conv_bl(h, conv):
     """'same' Conv1d on (B, L, C) via unfold + matmul. Equivalent to conv(h.transpose(1,2)).transpose(1,2)
     but ~30x faster on ARM CPUs, where torch's conv1d falls back to a slow kernel."""
+    if torch.onnx.is_in_onnx_export():  # unfold doesn't export; ONNX runtimes have fast convs anyway
+        return conv(h.transpose(1, 2)).transpose(1, 2)
     k = conv.kernel_size[0]
     hp = nn.functional.pad(h.transpose(1, 2), (k // 2, k // 2))  # (B, C, L+k-1)
     cols = hp.unfold(2, k, 1).permute(0, 2, 1, 3).reshape(h.shape[0], h.shape[1], -1)  # (B, L, C*k)
