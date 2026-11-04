@@ -22,10 +22,35 @@ class Decode:
     sync: float
     method: str
     info: dict = field(default_factory=dict)
+    snr: float = float("nan")  # dB in 2500 Hz (WSJT-X convention)
 
     @property
     def key(self):
         return "".join(map(str, self.bits77))
+
+
+def _ap_cq():
+    """A-priori pattern for 'CQ <call> <grid>' (WSJT-X AP type 1): n28=2 ('CQ'), ipa=0, i3=1.
+    Returns (bit indices, bit values) within the 77-bit payload (= first 77 codeword bits)."""
+    idx = np.r_[0:29, 74:77]
+    val = np.r_[[(2 >> (27 - i)) & 1 for i in range(28)], 0, 0, 0, 1].astype(np.uint8)
+    return idx, val
+
+
+AP_CQ = _ap_cq()
+
+
+NOISE_BIN = fe.NBB / (int(round(8.5 * ft8.TONE_SPACING / fe.DF_FULL)) + int(round(1.5 * ft8.TONE_SPACING / fe.DF_FULL)))
+SNR_OFFSET = 0.23  # calibration vs true SNR on synthetic AWGN (tools/calib_snr.py)
+
+
+def estimate_snr(h, bits77):
+    """SNR (dB, 2500 Hz ref) from the decoded tone sequence: mean power on the transmitted tones vs
+    the front end's normalised per-bin noise power. 10*log10(2500/6.25) = 26.0 dB bandwidth term."""
+    tones = ft8.encode77(bits77)[1]
+    Z = fe.symbol_spectra(h.y, h.start)
+    ps = float(np.mean(np.abs(Z[np.arange(ft8.NN), tones]) ** 2))
+    return 10 * np.log10(max(ps - NOISE_BIN, 1e-3 * NOISE_BIN) / NOISE_BIN) - 26.0 + SNR_OFFSET
 
 
 def classical_metrics(hyps):
@@ -37,7 +62,7 @@ def classical_metrics(hyps):
     return out
 
 
-def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=3, osd_gate=40.0, osd_metrics=1):
+def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=3, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, cand_kw=None):
     """Decode one 15 s slot (real audio @12 kHz, any scale), with multi-pass subtraction.
 
     llr_fn(hyps) -> per-hypothesis list of LLR vectors to try in order (first success wins).
@@ -45,11 +70,14 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
     overlapping stronger ones become visible to the next pass's candidate search.
     osd_metrics: OSD is tried only for the first `osd_metrics` metrics of each hypothesis (the
     calibrated NN); later fallback metrics get BP only, which keeps false decodes rare.
+    ap: a-priori bit patterns (indices, values) tried on the NN metric when normal decoding fails,
+    for hypotheses whose expected error count is below ap_gate. Default: CQ.
+    cand_kw: extra keyword arguments for frontend.find_candidates (e.g. per_symbol, fmax).
     """
     x = np.array(x, dtype=np.float64, copy=True)
     found = {}
     for p in range(passes):
-        new = _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics)
+        new = _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics, ap, ap_gate, cand_kw or {})
         for d in new:
             d.info["pass"] = p
             found[d.key] = d
@@ -59,8 +87,8 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
     return list(found.values())
 
 
-def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd_gate, osd_metrics):
-    cands = fe.find_candidates(x, max_cand=max_cand)
+def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd_gate, osd_metrics, ap, ap_gate, cand_kw):
+    cands = fe.find_candidates(x, max_cand=max_cand, **cand_kw)
     bb = fe.Baseband(x)
     hyps, owner = [], []
     for ci, c in enumerate(cands):
@@ -94,13 +122,35 @@ def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd
                 cw, crc, dist, nh = ldpc.osd_decode(L[r], osd_order)
                 if crc and nh <= osd_max_hard:
                     a91, info = cw[:91], {"method": "osd", "nhard": nh, "dist": dist}
+            if a91 is None and k == 0 and ap and exp_err[r] < ap_gate:
+                a91, info = _try_ap(L[r], ap, osd_order, osd_max_hard)
             if a91 is None:
                 continue
             if not a91[:77].any():  # all-zero payload: classic false decode
                 break
             d = Decode(a91[:77].copy(), h.f0, h.dt, h.metric, info["method"], {**info, "metric": k, "exp_err": float(exp_err[r])})
+            d.snr = estimate_snr(h, d.bits77)
             if d.key not in known:
                 found.setdefault(d.key, d)
             done_cand.add(ci)
             break
     return list(found.values())
+
+
+def _try_ap(llr, patterns, osd_order, osd_max_hard):
+    """Pin known payload bits to strong LLRs (WSJT-X: apmag = 1.01 * max|llr|), then BP, then OSD."""
+    mag = 1.01 * float(np.abs(llr).max())
+    for pi, (idx, val) in enumerate(patterns):
+        l2 = llr.copy()
+        l2[idx] = np.where(val == 1, mag, -mag)
+        bits, ok, nh = ldpc.bp_decode(l2[None])
+        cand = None
+        if ok[0] and ft8.crc_ok(bits[0, :91]):
+            cand = (bits[0, :91], {"method": f"bp_ap{pi}", "nhard": int(nh[0])})
+        elif osd_order >= 0:
+            cw, crc, dist, nhh = ldpc.osd_decode(l2, osd_order)
+            if crc and nhh <= osd_max_hard:
+                cand = (cw[:91], {"method": f"osd_ap{pi}", "nhard": nhh, "dist": dist})
+        if cand is not None and (cand[0][idx] == val).all():
+            return cand
+    return None, None

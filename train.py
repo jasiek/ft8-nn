@@ -45,8 +45,11 @@ VAL_CHANNELS = {
     "awgn": synth_bb.ChannelCfg(fade_p=0.0, qrm_p=0.0, drift_p=0.0, df_wide_p=0.0),
     "fade1Hz": synth_bb.ChannelCfg(fade_p=1.0, fspread_max=1.0, rician_p=0.0, qrm_p=0.0, drift_p=0.0, df_wide_p=0.0),
     "qrm": synth_bb.ChannelCfg(fade_p=0.0, qrm_p=1.0, drift_p=0.0, df_wide_p=0.0),
+    "qrmclose": synth_bb.ChannelCfg(fade_p=0.0, qrm_p=1.0, qrm_off=(2.0, 10.0), qrm_rel_db=(0.0, 10.0), drift_p=0.0, df_wide_p=0.0, df_sigma=0.08, dt_sigma=0.4),
+    "strong": synth_bb.ChannelCfg(fade_p=0.3, qrm_p=0.5, drift_p=0.0, df_wide_p=0.0, df_sigma=0.08, dt_sigma=0.4),
+    "gainburst": synth_bb.ChannelCfg(fade_p=0.0, qrm_p=0.0, drift_p=0.0, df_wide_p=0.0, df_sigma=0.08, dt_sigma=0.4, gainstep_p=0.5, burst_p=0.5),
 }
-VAL_SNRS = {"awgn": [-20, -21, -22, -23], "fade1Hz": [-17, -19, -21], "qrm": [-19, -21]}
+VAL_SNRS = {"awgn": [-20, -21, -22, -23], "fade1Hz": [-17, -19, -21], "qrm": [-19, -21], "qrmclose": [-12, -16], "strong": [0, 15], "gainburst": [-14, 5]}
 
 
 @torch.no_grad()
@@ -78,6 +81,7 @@ def main():
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--eval-every", type=int, default=500)
     ap.add_argument("--init", default=None, help="checkpoint to fine-tune from")
+    ap.add_argument("--cfg", default="v1", choices=["v1", "v2"], help="training channel distribution")
     a = ap.parse_args()
 
     device = "mps" if torch.backends.mps.is_available() else "cpu"
@@ -88,7 +92,7 @@ def main():
     if a.init:
         net.load_state_dict(torch.load(a.init, map_location=device)["state_dict"])
     opt = torch.optim.AdamW(net.parameters(), lr=a.lr, weight_decay=0.01)
-    warm = 300
+    warm = 100 if a.init else 300
     sched = torch.optim.lr_scheduler.LambdaLR(
         opt, lambda s: min(1, (s + 1) / warm) * 0.5 * (1 + math.cos(math.pi * min(s, a.steps) / a.steps))
     )
@@ -98,7 +102,7 @@ def main():
         for snr in snrs:
             val[f"{ch}@{snr}"] = make_val(512, snr, VAL_CHANNELS[ch], seed=1000 + snr)
 
-    dl = DataLoader(Stream(a.batch, synth_bb.ChannelCfg()), batch_size=None, num_workers=a.workers, prefetch_factor=4, persistent_workers=True)
+    dl = DataLoader(Stream(a.batch, synth_bb.v2_cfg() if a.cfg == "v2" else synth_bb.ChannelCfg()), batch_size=None, num_workers=a.workers, prefetch_factor=4, persistent_workers=True)
     log = []
     t0 = time.time()
     run_loss = 0.0

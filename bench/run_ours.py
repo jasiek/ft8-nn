@@ -39,7 +39,7 @@ def _decode_file(path):
     from ft8nn import decoder
 
     _, x = wavfile.read(path)
-    ds = decoder.decode_slot(x / 100.0, llr_fn=_LLR, n_hyp=_ARGS.n_hyp, osd_order=_ARGS.osd_order, osd_max_hard=_ARGS.osd_max_hard)
+    ds = decoder.decode_slot(x / 100.0, llr_fn=_LLR, n_hyp=_ARGS.n_hyp, osd_order=_ARGS.osd_order, osd_max_hard=_ARGS.osd_max_hard, ap=() if _ARGS.no_ap else (decoder.AP_CQ,), cand_kw=dict(per_symbol=_ARGS.per_symbol, fmax=_ARGS.fmax))
     return Path(path).name, [
         (POOL.get(d.key, "??" + d.key), round(d.f0, 1), round(d.dt, 2), d.method, d.info.get("metric"), d.info.get("nhard"))
         for d in ds
@@ -53,6 +53,9 @@ def main():
     ap.add_argument("--model", default=None)
     ap.add_argument("--also-classical", action="store_true")
     ap.add_argument("--n-hyp", type=int, default=2)
+    ap.add_argument("--per-symbol", action="store_true", help="per-symbol Costas sync ratio")
+    ap.add_argument("--fmax", type=float, default=3000.0)
+    ap.add_argument("--no-ap", action="store_true", help="disable a-priori (CQ) decoding")
     ap.add_argument("--osd-order", type=int, default=2)
     ap.add_argument("--osd-max-hard", type=int, default=40)
     ap.add_argument("--workers", type=int, default=8)

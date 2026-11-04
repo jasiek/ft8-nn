@@ -89,6 +89,48 @@ class ChannelCfg:
     qrm_p: float = 0.35  # prob. of an interfering FT8 signal in-band
     qrm_rel_db: tuple = (-6.0, 20.0)  # interferer power relative to wanted
     random_data: bool = True  # random data tones (labels are bits of tones), not codewords
+    strong_p: float = 0.0  # fraction of samples drawn from the strong-signal range instead
+    strong_hi: float = 25.0  # strong range is [snr_hi, strong_hi]
+    qrm_max: int = 1  # up to this many interferers (each further one with prob. qrm_p again)
+    qrm_off: tuple = (8.0, 60.0)  # |frequency offset| range of interferers, Hz
+    qrm_dt: int = 150  # max interferer time offset, baseband samples (+-0.75 s)
+    gainstep_p: float = 0.0  # prob. of an abrupt level change mid-frame (deep QSB, AGC, TX power)
+    gainstep_db: float = 30.0  # max |step|, dB
+    burst_p: float = 0.0  # prob. of a noise/interference burst covering part of the frame
+    burst_db: tuple = (10.0, 30.0)  # burst power above the noise floor, dB
+    burst_len: tuple = (0.5, 5.0)  # burst duration, s
+
+
+def v2_cfg():
+    """Training distribution v2, built from real-recording failures: strong signals, close and multiple
+    interferers, and sync errors matched to the semi-coherent fine sync."""
+    return ChannelCfg(
+        snr_lo=-27.0, snr_hi=-14.0, strong_p=0.3, strong_hi=25.0,
+        df_sigma=0.08, df_wide_p=0.05, df_wide=0.5, dt_sigma=0.4,
+        qrm_p=0.5, qrm_max=3, qrm_off=(0.0, 60.0), qrm_rel_db=(-10.0, 20.0),
+        gainstep_p=0.15, burst_p=0.15,
+    )
+
+
+def _interferers(q, amp, cfg, U, device):
+    """Signal buffer (B, NBB) holding one random FT8 interferer for rows where q is True."""
+    B = q.shape[0]
+    out = torch.zeros(B, NBB, dtype=torch.complex64, device=device)
+    nq = int(q.sum())
+    qt = np.random.randint(0, 8, size=(nq, 79))
+    for p in ft8.SYNC_POS:
+        qt[:, p : p + 7] = ft8.COSTAS
+    side = torch.where(torch.rand(nq, device=device) < 0.5, -1.0, 1.0)
+    qf = side * U(cfg.qrm_off[0], cfg.qrm_off[1], nq)
+    qw = gfsk_baseband(torch.tensor(qt, device=device), qf, torch.zeros(nq, device=device), device)
+    qamp = amp[q] * 10 ** (U(*cfg.qrm_rel_db, nq) / 20)
+    qph = torch.polar(torch.ones(nq, device=device), U(0, 2 * math.pi, nq))
+    qshift = torch.randint(-cfg.qrm_dt, cfg.qrm_dt + 1, (nq,), device=device)
+    buf = torch.zeros(nq, NBB, dtype=torch.complex64, device=device)
+    buf[:, START0 : START0 + qw.shape[1]] = (qamp * qph)[:, None] * qw
+    idx = (torch.arange(NBB, device=device)[None, :] - qshift[:, None]) % NBB
+    out[q] = torch.gather(buf, 1, idx)
+    return out
 
 
 def make_batch(B, cfg: ChannelCfg, device, snr=None, payload_bits=None):
@@ -118,6 +160,8 @@ def make_batch(B, cfg: ChannelCfg, device, snr=None, payload_bits=None):
 
     if snr is None:
         snr = U(cfg.snr_lo, cfg.snr_hi)
+        if cfg.strong_p > 0:
+            snr = torch.where(torch.rand(B, device=device) < cfg.strong_p, U(cfg.snr_hi, cfg.strong_hi), snr)
     elif not torch.is_tensor(snr):
         snr = torch.full((B,), float(snr), device=device)
 
@@ -133,6 +177,16 @@ def make_batch(B, cfg: ChannelCfg, device, snr=None, payload_bits=None):
     K = torch.where(torch.rand(B, device=device) < cfg.rician_p, U(0.5, 5.0), torch.zeros(B, device=device))
     los = torch.sqrt(K / (K + 1))[:, None]
     g = torch.where((fspread > 0)[:, None], los + torch.sqrt(1 / (K + 1))[:, None] * g, g)
+    if cfg.gainstep_p > 0:
+        # abrupt level change at a random point: level before/after differ by up to gainstep_db,
+        # normalised so the frame-average power still matches the nominal SNR
+        st = torch.rand(B, device=device) < cfg.gainstep_p
+        k = (U(0.1, 0.9) * w.shape[1]).long()
+        step = 10 ** (U(-cfg.gainstep_db, cfg.gainstep_db) / 20)
+        n = torch.arange(w.shape[1], device=device)[None, :]
+        env = torch.where(n < k[:, None], torch.ones_like(step)[:, None], step[:, None])
+        env = env / env.pow(2).mean(1, keepdim=True).sqrt()
+        g = torch.where(st[:, None], g * env, g)
     phase = torch.polar(torch.ones(B, device=device), U(0, 2 * math.pi))
     amp = torch.sqrt(SIG_POW_PER_SNR * 10 ** (snr / 10))
     sig = (amp * phase)[:, None] * g * w
@@ -140,26 +194,24 @@ def make_batch(B, cfg: ChannelCfg, device, snr=None, payload_bits=None):
     y = torch.zeros(B, NBB, dtype=torch.complex64, device=device)
     y[:, START0 : START0 + w.shape[1]] = sig
 
-    # interferer: another FT8 signal, offset in freq/time, possibly much stronger
-    q = torch.rand(B, device=device) < cfg.qrm_p
-    if q.any():
-        nq = int(q.sum())
-        qt = np.random.randint(0, 8, size=(nq, 79))
-        for p in ft8.SYNC_POS:
-            qt[:, p : p + 7] = ft8.COSTAS
-        side = torch.where(torch.rand(nq, device=device) < 0.5, -1.0, 1.0)
-        qf = torch.where(side < 0, U(-60.0, -8.0, nq), U(8.0, 60.0, nq))
-        qw = gfsk_baseband(torch.tensor(qt, device=device), qf, torch.zeros(nq, device=device), device)
-        qrel = U(*cfg.qrm_rel_db, nq)
-        qamp = amp[q] * 10 ** (qrel / 20)
-        qph = torch.polar(torch.ones(nq, device=device), U(0, 2 * math.pi, nq))
-        qshift = torch.randint(-150, 150, (nq,), device=device)
-        buf = torch.zeros(nq, NBB, dtype=torch.complex64, device=device)
-        buf[:, START0 : START0 + qw.shape[1]] = (qamp * qph)[:, None] * qw
-        idx = (torch.arange(NBB, device=device)[None, :] - qshift[:, None]) % NBB
-        y[q] = y[q] + torch.gather(buf, 1, idx)
+    # interferers: other FT8 signals, offset in freq/time, possibly much stronger
+    active = torch.ones(B, dtype=torch.bool, device=device)
+    for _ in range(cfg.qrm_max):
+        active = active & (torch.rand(B, device=device) < cfg.qrm_p)
+        if not active.any():
+            break
+        y = y + _interferers(active, amp, cfg, U, device)
 
     noise = torch.complex(torch.randn(B, NBB, device=device), torch.randn(B, NBB, device=device)) * math.sqrt(NOISE_VAR / 2)
+    if cfg.burst_p > 0:
+        # burst of extra noise over part of the frame (static crash, splatter, a keyed-up neighbour)
+        bu = torch.rand(B, device=device) < cfg.burst_p
+        ln = (U(*cfg.burst_len) * fe.FS_BB).long()
+        b0 = START0 + (U(0, 1) * (79 * SPS)).long() - ln // 2
+        n = torch.arange(NBB, device=device)[None, :]
+        inside = (n >= b0[:, None]) & (n < (b0 + ln)[:, None]) & bu[:, None]
+        boost = 10 ** (U(*cfg.burst_db) / 20)[:, None]
+        noise = torch.where(inside, noise * boost, noise)
     y = y + noise
 
     # timing error (fractional) + band mask in frequency domain

@@ -24,10 +24,11 @@ from scipy.io import wavfile
 
 _LLR = None
 _NHYP = 2
+_CKW = {}
 
 
-def _init(model, also_classical, n_hyp):
-    global _LLR, _NHYP
+def _init(model, also_classical, n_hyp, ckw=None):
+    global _LLR, _NHYP, _CKW
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     import torch
 
@@ -36,6 +37,7 @@ def _init(model, also_classical, n_hyp):
 
     _LLR = nn_metric.make_llr_fn(model, also_classical=also_classical) if model else decoder.classical_metrics
     _NHYP = n_hyp
+    _CKW = ckw or {}
 
 
 def _decode(path):
@@ -48,12 +50,12 @@ def _decode(path):
         x = x.mean(1)
     if len(x) < 180000:
         x = np.pad(x, (0, 180000 - len(x)))
-    ds = decoder.decode_slot(x[:180000] / (np.std(x) + 1e-9), llr_fn=_LLR, n_hyp=_NHYP)
-    return Path(path).stem, [(d.bits77, d.f0, d.dt, d.method, d.info.get("metric")) for d in ds]
+    ds = decoder.decode_slot(x[:180000] / (np.std(x) + 1e-9), llr_fn=_LLR, n_hyp=_NHYP, cand_kw=_CKW)
+    return Path(path).stem, [(d.bits77, d.f0, d.dt, d.method, d.info.get("metric"), d.snr) for d in ds]
 
 
 def norm(t):
-    t = re.sub(r"\s+(\?|a\d)\s*$", "", t.strip()).strip()
+    t = re.sub(r"(\s+(\?|a\d))+\s*$", "", t.strip()).strip()  # jt9 may append both: "... ? a1"
     return re.sub(r"<[^>]*>", "<...>", t)
 
 
@@ -77,8 +79,10 @@ def load_jt9(path):
 def load_ours(path):
     out = defaultdict(list)
     for line in Path(path).read_text().splitlines():
-        slot, f0, dt, meth, text = line.split("\t")[:5]  # optional 6th column: raw 77 bits (hex)
-        out[slot].append((float(f0), float(dt), meth, norm(text)))
+        parts = line.split("\t")  # slot f0 dt method text [hexbits] [snr]
+        slot, f0, dt, meth, text = parts[:5]
+        snr = float(parts[6]) if len(parts) > 6 else float("nan")
+        out[slot].append((float(f0), float(dt), meth, norm(text), snr))
     return out
 
 
@@ -90,16 +94,17 @@ def compare(station, jt9, ours):
     for s in slots:
         a = {d[3] for d in jt9.get(s, [])}
         b = {d[3] for d in ours.get(s, [])}
+        osnr = {d[3]: d[4] for d in ours.get(s, [])}
         tot["jt9"] += len(a)
         tot["ours"] += len(b)
         tot["both"] += len(a & b)
         for t in b - a:
-            only_ours.append((s, t))
+            only_ours.append((s, t, osnr[t]))
         snr = {d[3]: d[0] for d in jt9.get(s, [])}
         for t in a - b:
             only_jt9.append((s, t, snr[t]))
-    corro = [t for _, t in only_ours if calls_in(t) & jt9_calls]
-    nocall = [t for _, t in only_ours if not calls_in(t)]
+    corro = [t for _, t, _ in only_ours if calls_in(t) & jt9_calls]
+    nocall = [t for _, t, _ in only_ours if not calls_in(t)]
     return tot, only_ours, only_jt9, corro, nocall
 
 
@@ -112,6 +117,8 @@ def main():
     ap.add_argument("--n-hyp", type=int, default=2)
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--stations", default=None, help="comma-separated prefixes, e.g. 00,01")
+    ap.add_argument("--per-symbol", action="store_true", help="per-symbol Costas sync ratio")
+    ap.add_argument("--fmax", type=float, default=3000.0)
     ap.add_argument("--compare-only", action="store_true")
     ap.add_argument("--show", type=int, default=8, help="examples to print per category")
     a = ap.parse_args()
@@ -126,16 +133,16 @@ def main():
     outroot = Path("data/real")
 
     if not a.compare_only:
-        with ProcessPoolExecutor(a.workers, initializer=_init, initargs=(a.model, a.also_classical, a.n_hyp)) as ex:
+        with ProcessPoolExecutor(a.workers, initializer=_init, initargs=(a.model, a.also_classical, a.n_hyp, dict(per_symbol=a.per_symbol, fmax=a.fmax))) as ex:
             for st in stations:
                 files = sorted(str(f) for f in (st / "slots").glob("*.wav"))
                 res = dict(ex.map(_decode, files, chunksize=2))
                 ht = message.HashTable()  # learn hashes in time order, like a running WSJT-X session
                 lines = []
                 for slot in sorted(res):
-                    for bits, f0, dt, meth, k in res[slot]:
+                    for bits, f0, dt, meth, k, snr in res[slot]:
                         hexbits = f"{int(''.join(map(str, bits)), 2):020x}"
-                        lines.append(f"{slot}\t{f0:.1f}\t{dt:.2f}\t{meth}{k}\t{message.unpack77(bits, ht)}\t{hexbits}")
+                        lines.append(f"{slot}\t{f0:.1f}\t{dt:.2f}\t{meth}{k}\t{message.unpack77(bits, ht)}\t{hexbits}\t{snr:.1f}")
                 od = outroot / st.name
                 od.mkdir(parents=True, exist_ok=True)
                 (od / f"decodes_{a.tag}.txt").write_text("\n".join(lines) + "\n")
@@ -143,7 +150,7 @@ def main():
 
     print(f"\n{'station':40s} {'jt9':>6s} {'ours':>6s} {'both':>6s} {'ours-only':>10s} {'corrob.':>8s} {'jt9-only':>9s}")
     grand = Counter()
-    examples_o, examples_j, all_jt9_only = [], [], []
+    examples_o, examples_j, all_jt9_only, all_ours_only = [], [], [], []
     for st in stations:
         jf, of = st / "decodes.txt", outroot / st.name / f"decodes_{a.tag}.txt"
         if not (jf.exists() and of.exists()):
@@ -155,7 +162,8 @@ def main():
         grand["corro"] += len(corro)
         grand["only_jt9"] += len(oj)
         all_jt9_only += [x[2] for x in oj]
-        examples_o += [(st.name[:6], t, t in corro) for _, t in oo[: a.show]]
+        examples_o += [(st.name[:6], t, t in corro) for _, t, _ in oo[: a.show]]
+        all_ours_only += [x[2] for x in oo if x[2] == x[2]]
         examples_j += [(st.name[:6], t, snr) for _, t, snr in oj[: a.show]]
         print(f"{st.name:40s} {tot['jt9']:6d} {tot['ours']:6d} {tot['both']:6d} {len(oo):10d} {len(corro):8d} {len(oj):9d}")
     if grand["jt9"]:
@@ -164,6 +172,9 @@ def main():
         if all_jt9_only:
             h = Counter(min(max(s // 3 * 3, -27), 0) for s in all_jt9_only)
             print("jt9-only by jt9 SNR: " + "  ".join(f"{k:+d}:{v}" for k, v in sorted(h.items())))
+        if all_ours_only:
+            h = Counter(min(max(int(s // 3 * 3), -27), 0) for s in all_ours_only)
+            print("ours-only by our SNR: " + "  ".join(f"{k:+d}:{v}" for k, v in sorted(h.items())))
         print("\nexamples ours-only (✓ = callsign also heard by jt9):")
         for st, t, c in examples_o[: 3 * a.show]:
             print(f"  {st} {'✓' if c else ' '} {t}")

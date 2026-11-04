@@ -40,7 +40,7 @@ def spectrogram(x):
     return (X.real**2 + X.imag**2).astype(np.float32)  # (frames, bins), bin = 3.125 Hz
 
 
-def find_candidates(x, fmin=150.0, fmax=3000.0, dtmin=-1.5, dtmax=2.5, max_cand=600, min_score=1.3, lag_excl=10, typ_dt=(-0.6, 1.2)):
+def find_candidates(x, fmin=150.0, fmax=3000.0, dtmin=-1.5, dtmax=2.5, max_cand=600, min_score=1.3, lag_excl=10, typ_dt=(-0.6, 1.2), per_symbol=False):
     """Costas-sync candidates, WSJT-X style: per frequency bin the best and second-best lag
     (second at least lag_excl frames away), peak-picked along frequency only. 2-D local maxima
     let the sidelobes of strong signals exhaust the candidate budget on busy bands."""
@@ -64,8 +64,16 @@ def find_candidates(x, fmin=150.0, fmax=3000.0, dtmin=-1.5, dtmax=2.5, max_cand=
             # median of the other 7 tones: robust to an overlapping strong neighbour occupying a
             # few of this candidate's tone slots (a mean lets it swamp the denominator)
             others = np.median(np.delete(pk, c, axis=-1), axis=-1)
-            num += np.where(valid[:, None], sig, 0)
-            den += np.where(valid[:, None], others, 0)
+            if per_symbol:
+                # ratio per Costas symbol, then average: invariant to gain changes within the
+                # frame (receiver AGC, noise bursts), which otherwise dominate both sums.
+                # A/B 2026-11-04 (v2): worse overall -- real 15808 vs 16055 decodes, strong-signal
+                # misses x7, AWGN 50% -22.18 vs -22.37 dB -- so it is off by default.
+                num += np.where(valid[:, None], sig / np.maximum(others, 1e-12), 0)
+                den += valid[:, None]
+            else:
+                num += np.where(valid[:, None], sig, 0)
+                den += np.where(valid[:, None], others, 0)
     score = num / np.maximum(den, 1e-12)
     # normalise by a robust per-slot baseline so the threshold is noise-level independent
     base = np.percentile(score.max(0), 40)
