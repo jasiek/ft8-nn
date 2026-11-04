@@ -13,7 +13,7 @@ extern "C" {
 
 typedef struct ft8nn_ctx ft8nn_ctx;
 
-enum { FT8NN_BP = 0, FT8NN_OSD = 1, FT8NN_BP_AP = 2, FT8NN_OSD_AP = 3 };
+enum { FT8NN_BP = 0, FT8NN_OSD = 1, FT8NN_BP_AP = 2, FT8NN_OSD_AP = 3, FT8NN_BP_ERASE = 4 };
 
 typedef struct {
     char text[48];      /* decoded message, WSJT-X formatting; hashed calls as <CALL> or <...> */
@@ -21,7 +21,8 @@ typedef struct {
     double dt;          /* s, start time relative to the nominal 0.5 s into the slot */
     double snr;         /* dB in 2500 Hz */
     uint8_t bits77[10]; /* payload, MSB first; bit i is (bits77[i/8] >> (7 - i%8)) & 1 */
-    int method;         /* FT8NN_BP, FT8NN_OSD, FT8NN_BP_AP (CQ a-priori), FT8NN_OSD_AP */
+    int method;         /* FT8NN_BP, FT8NN_OSD, FT8NN_BP_AP (CQ a-priori), FT8NN_OSD_AP,
+                           FT8NN_BP_ERASE (BP with a burst of symbols erased: message changed mid-frame) */
     int metric;         /* soft metric that decoded it: 0 = NN, 1..3 = classical nsym 1..3 */
     int pass;           /* subtraction pass, 0-based */
 } ft8nn_decode_t;

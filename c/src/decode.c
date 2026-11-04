@@ -29,6 +29,7 @@ static double tnow(void) {
 #define OSD_MAX_HARD 40
 #define OSD_GATE 40.0
 #define AP_GATE 44.0
+#define ERASE_GATE 15.0 /* burst-erasure retry for confident NN metrics that still fail */
 #define NMET 4 /* NN + classical nsym 1, 2, 3 */
 #define NN_BATCH 128
 #define BASE_MEDIAN 1 /* candidate score baseline: 1 = 1.77 * median of all cells (A/B 2026-11-04: real +281), 0 = old pct40 of per-freq max */
@@ -177,6 +178,40 @@ static int try_ap(const double *llr, uint8_t *a91) {
     return method;
 }
 
+/* Burst-erasure windows (first, end) over the 58 data symbols, sorted, as decoder.ERASE_WINDOWS */
+static int erase_win[128][2], n_erase;
+static void erase_init(void) {
+    static const int widths[4] = {6, 10, 14, 18};
+    for (int wi = 0; wi < 4; wi++)
+        for (int a = 0; a < ND - widths[wi] + 2; a += 2) {
+            int b = a + widths[wi] < ND ? a + widths[wi] : ND, q = 0, dup = 0;
+            for (int j = 0; j < n_erase; j++) dup |= erase_win[j][0] == a && erase_win[j][1] == b;
+            if (dup) continue;
+            while (q < n_erase && (erase_win[q][0] < a || (erase_win[q][0] == a && erase_win[q][1] < b))) q++;
+            memmove(erase_win[q + 1], erase_win[q], sizeof(erase_win[0]) * (n_erase - q));
+            erase_win[q][0] = a;
+            erase_win[q][1] = b;
+            n_erase++;
+        }
+}
+
+/* Sender changed the message mid-transmission: a burst of confidently wrong symbols. Zero each
+ * window of data-symbol LLRs in turn, BP; first CRC pass wins. Returns FT8NN_BP_ERASE or -1. */
+static int try_erase(const double *llr, uint8_t *a91) {
+    double l2[174];
+    uint8_t bits[174];
+    int nh;
+    for (int w = 0; w < n_erase; w++) {
+        memcpy(l2, llr, sizeof l2);
+        for (int i = 3 * erase_win[w][0]; i < 3 * erase_win[w][1]; i++) l2[i] = 0.0;
+        if (bp_decode(l2, 30, bits, &nh) && crc_ok(bits)) {
+            memcpy(a91, bits, 91);
+            return FT8NN_BP_ERASE;
+        }
+    }
+    return -1;
+}
+
 static int any_bits(const uint8_t *b, int n) {
     for (int i = 0; i < n; i++)
         if (b[i]) return 1;
@@ -256,6 +291,7 @@ static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall,
                 }
             }
             if (method < 0 && k == 0 && exp_err < AP_GATE) method = try_ap(l, a91);
+            if (method < 0 && k == 0 && exp_err < ERASE_GATE) method = try_erase(l, a91);
             if (method < 0) continue;
             if (!any_bits(a91, 77)) break; /* all-zero payload: classic false decode */
             int known = 0;
@@ -287,10 +323,11 @@ done:
     return added;
 }
 
-static pthread_once_t ap_once = PTHREAD_ONCE_INIT;
+static pthread_once_t ap_once = PTHREAD_ONCE_INIT, erase_once = PTHREAD_ONCE_INIT;
 
 int ft8nn_decode(ft8nn_ctx *c, const float *audio, int n, ft8nn_decode_t *out, int max_out) {
     pthread_once(&ap_once, ap_init);
+    pthread_once(&erase_once, erase_init);
     if (n > SLOT_N) n = SLOT_N;
     if (n < NSPS) return 0;
     double *x = malloc(sizeof(double) * n);
