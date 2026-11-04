@@ -40,7 +40,10 @@ def spectrogram(x):
     return (X.real**2 + X.imag**2).astype(np.float32)  # (frames, bins), bin = 3.125 Hz
 
 
-def find_candidates(x, fmin=150.0, fmax=3000.0, dtmin=-1.5, dtmax=2.5, max_cand=600, min_score=1.3, lag_excl=10, typ_dt=(-0.6, 1.2), per_symbol=False):
+BASE_MEDIAN_CAL = 1.77  # pct40(max over lags) / median(all cells) on noise-only and synthetic slots
+
+
+def find_candidates(x, fmin=150.0, fmax=3000.0, dtmin=-1.5, dtmax=2.5, max_cand=600, min_score=1.3, lag_excl=10, typ_dt=(-0.6, 1.2), per_symbol=False, base="median"):
     """Costas-sync candidates, WSJT-X style: per frequency bin the best and second-best lag
     (second at least lag_excl frames away), peak-picked along frequency only. 2-D local maxima
     let the sidelobes of strong signals exhaust the candidate budget on busy bands."""
@@ -75,9 +78,15 @@ def find_candidates(x, fmin=150.0, fmax=3000.0, dtmin=-1.5, dtmax=2.5, max_cand=
                 num += np.where(valid[:, None], sig, 0)
                 den += np.where(valid[:, None], others, 0)
     score = num / np.maximum(den, 1e-12)
-    # normalise by a robust per-slot baseline so the threshold is noise-level independent
-    base = np.percentile(score.max(0), 40)
-    score = score / max(base, 1e-9)
+    # normalise by a robust per-slot baseline so the threshold is noise-level independent.
+    # base="max40": 40th percentile of the per-frequency max -- on a crowded band most frequencies hold a
+    # signal, so this baseline rises (4.3 vs 2.3 on 00_40m) and real signals fall below threshold.
+    # base="median": median over all (lag, freq) cells, which stay mostly noise even on busy bands.
+    if base == "median":
+        b = BASE_MEDIAN_CAL * float(np.median(score))
+    else:
+        b = np.percentile(score.max(0), 40)
+    score = score / max(b, 1e-9)
     fidx = np.arange(nf)
     j1 = score.argmax(0)
     s1 = score[j1, fidx]

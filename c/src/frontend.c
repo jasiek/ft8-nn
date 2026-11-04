@@ -51,7 +51,8 @@ static int cmp_cand(const void *a, const void *b) { /* descending by (score, f, 
     return y->j - x->j;
 }
 
-int find_candidates(const double *x, int n, double fmin, double fmax, int max_cand, double min_score, candidate *out) {
+int find_candidates(const double *x, int n, double fmin, double fmax, int max_cand, double min_score, int base_median,
+                    candidate *out) {
     const double dtmin = -1.5, dtmax = 2.5, typ_lo = -0.6, typ_hi = 1.2;
     const int lag_excl = 10;
     int T = (n - NSPS) / HOP + 1;
@@ -100,19 +101,31 @@ int find_candidates(const double *x, int n, double fmin, double fmax, int max_ca
     double *score = num; /* in place */
     for (size_t i = 0; i < (size_t)nl * nf; i++) score[i] = num[i] / fmax_d(den[i], 1e-12);
     free(den);
-    /* robust baseline: 40th percentile (linear interpolation) of the per-frequency max */
-    double *mx = malloc(sizeof(double) * nf);
-    for (int f = 0; f < nf; f++) {
-        double m = -INFINITY;
-        for (int li = 0; li < nl; li++) m = fmax_d(m, score[(size_t)li * nf + f]);
-        mx[f] = m;
+    double base;
+    if (base_median) {
+        /* 1.77 * median over all (lag, freq) cells: stays a noise statistic on crowded bands */
+        size_t nall = (size_t)nl * nf;
+        double *cp = malloc(sizeof(double) * nall);
+        memcpy(cp, score, sizeof(double) * nall);
+        qsort(cp, nall, sizeof(double), cmp_d);
+        double med = nall % 2 ? cp[nall / 2] : (cp[nall / 2 - 1] + cp[nall / 2]) / 2;
+        free(cp);
+        base = 1.77 * med;
+    } else {
+        /* 40th percentile (linear interpolation) of the per-frequency max */
+        double *mx = malloc(sizeof(double) * nf);
+        for (int f = 0; f < nf; f++) {
+            double m = -INFINITY;
+            for (int li = 0; li < nl; li++) m = fmax_d(m, score[(size_t)li * nf + f]);
+            mx[f] = m;
+        }
+        qsort(mx, nf, sizeof(double), cmp_d);
+        double vi = 0.4 * (nf - 1);
+        int lo = (int)floor(vi);
+        double tt = vi - lo, a = mx[lo], bb = mx[lo + 1 < nf ? lo + 1 : lo];
+        base = tt < 0.5 ? a + (bb - a) * tt : bb - (bb - a) * (1 - tt);
+        free(mx);
     }
-    qsort(mx, nf, sizeof(double), cmp_d);
-    double vi = 0.4 * (nf - 1);
-    int lo = (int)floor(vi);
-    double tt = vi - lo, a = mx[lo], bb = mx[lo + 1 < nf ? lo + 1 : lo], base;
-    base = tt < 0.5 ? a + (bb - a) * tt : bb - (bb - a) * (1 - tt);
-    free(mx);
     double inv = fmax_d(base, 1e-9);
     for (size_t i = 0; i < (size_t)nl * nf; i++) score[i] /= inv;
 

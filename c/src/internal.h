@@ -59,7 +59,8 @@ void frontend_init(void); /* once, before threads */
 typedef struct {
     double f0, dt, score;
 } candidate;
-int find_candidates(const double *x, int n, double fmin, double fmax, int max_cand, double min_score, candidate *out);
+int find_candidates(const double *x, int n, double fmin, double fmax, int max_cand, double min_score, int base_median,
+                    candidate *out);
 
 typedef struct {
     fft_plan *full, *bb;

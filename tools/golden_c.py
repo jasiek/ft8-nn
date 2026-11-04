@@ -30,7 +30,7 @@ def real(a):
     files = sorted((st / "slots").glob("*.wav"))[: a.n]
     slots = {f.stem for f in files}
     ref = defaultdict(list)
-    for l in (ROOT / "data/real" / st.name / "decodes_nn_v2.txt").read_text().splitlines():
+    for l in (ROOT / "data/real" / st.name / f"decodes_{a.tag}.txt").read_text().splitlines():
         p = l.split("\t")
         if p[0] in slots:
             ref[p[0]].append(p)
@@ -61,7 +61,7 @@ def awgn(a):
     root = Path(a.path)
     man = json.loads((root / "manifest.json").read_text())
     pool = {m["bits"]: m["text"] for m in json.loads((ROOT / "ft8nn/data/messages.json").read_text())}
-    ref = json.loads((root / "results_nn_v2.json").read_text())["decodes"]
+    ref = json.loads((root / f"results_{a.tag}.json").read_text())["decodes"]
     # spread over SNRs: every k-th file
     files = [root / e["file"] for e in man][:: max(1, len(man) // a.n)][: a.n]
     chunks = [files[i :: a.workers] for i in range(a.workers)]
@@ -88,6 +88,7 @@ def main():
     ap.add_argument("path")
     ap.add_argument("--n", type=int, default=20)
     ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--tag", default="nn_v2_bm", help="Python result tag to compare against")
     a = ap.parse_args()
     ok = real(a) if a.mode == "real" else awgn(a)
     print("PASS" if ok else "DIFF")

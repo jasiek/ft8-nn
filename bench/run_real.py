@@ -119,6 +119,7 @@ def main():
     ap.add_argument("--stations", default=None, help="comma-separated prefixes, e.g. 00,01")
     ap.add_argument("--per-symbol", action="store_true", help="per-symbol Costas sync ratio")
     ap.add_argument("--fmax", type=float, default=3000.0)
+    ap.add_argument("--base", default="median", choices=["max40", "median"], help="candidate score baseline")
     ap.add_argument("--compare-only", action="store_true")
     ap.add_argument("--show", type=int, default=8, help="examples to print per category")
     a = ap.parse_args()
@@ -133,7 +134,7 @@ def main():
     outroot = Path("data/real")
 
     if not a.compare_only:
-        with ProcessPoolExecutor(a.workers, initializer=_init, initargs=(a.model, a.also_classical, a.n_hyp, dict(per_symbol=a.per_symbol, fmax=a.fmax))) as ex:
+        with ProcessPoolExecutor(a.workers, initializer=_init, initargs=(a.model, a.also_classical, a.n_hyp, dict(per_symbol=a.per_symbol, fmax=a.fmax, base=a.base))) as ex:
             for st in stations:
                 files = sorted(str(f) for f in (st / "slots").glob("*.wav"))
                 res = dict(ex.map(_decode, files, chunksize=2))
