@@ -40,7 +40,10 @@ def spectrogram(x):
     return (X.real**2 + X.imag**2).astype(np.float32)  # (frames, bins), bin = 3.125 Hz
 
 
-def find_candidates(x, fmin=150.0, fmax=3000.0, dtmin=-1.5, dtmax=2.5, max_cand=250, min_score=1.3):
+def find_candidates(x, fmin=150.0, fmax=3000.0, dtmin=-1.5, dtmax=2.5, max_cand=600, min_score=1.3, lag_excl=10, typ_dt=(-0.6, 1.2)):
+    """Costas-sync candidates, WSJT-X style: per frequency bin the best and second-best lag
+    (second at least lag_excl frames away), peak-picked along frequency only. 2-D local maxima
+    let the sidelobes of strong signals exhaust the candidate budget on busy bands."""
     S = spectrogram(x)
     T, F = S.shape
     b0, b1 = int(fmin / 3.125), int(fmax / 3.125)
@@ -58,20 +61,41 @@ def find_candidates(x, fmin=150.0, fmax=3000.0, dtmin=-1.5, dtmax=2.5, max_cand=
             frc = np.clip(fr, 0, T - 1)
             pk = P[frc]  # (nlag, nf, 8)
             sig = pk[:, :, c]
-            tot = pk.sum(-1)
+            # median of the other 7 tones: robust to an overlapping strong neighbour occupying a
+            # few of this candidate's tone slots (a mean lets it swamp the denominator)
+            others = np.median(np.delete(pk, c, axis=-1), axis=-1)
             num += np.where(valid[:, None], sig, 0)
-            den += np.where(valid[:, None], (tot - sig) / 7.0, 0)
+            den += np.where(valid[:, None], others, 0)
     score = num / np.maximum(den, 1e-12)
     # normalise by a robust per-slot baseline so the threshold is noise-level independent
     base = np.percentile(score.max(0), 40)
     score = score / max(base, 1e-9)
-    peaks = (score == maximum_filter(score, size=(5, 3))) & (score >= min_score)
-    li, fi = np.nonzero(peaks)
-    order = np.argsort(-score[li, fi])[:max_cand]
-    return [
-        Candidate(f0=(b0 + fi[o]) * 3.125, dt=lags[li[o]] / FPS, score=float(score[li[o], fi[o]]))
-        for o in order
-    ]
+    fidx = np.arange(nf)
+    j1 = score.argmax(0)
+    s1 = score[j1, fidx]
+    masked = score.copy()
+    near = np.abs(np.arange(len(lags))[:, None] - j1[None, :]) <= lag_excl
+    masked[near] = -np.inf
+    j2 = masked.argmax(0)
+    s2 = masked[j2, fidx]
+    # third track: best lag within the typical DT window. Lags near the ends of the search range
+    # have Costas arrays outside the slot, so their scores average fewer terms and spike spuriously,
+    # which can outrank a real signal's true lag in the global tracks (cf. WSJT-X's narrow search).
+    typ = (lags / FPS >= typ_dt[0]) & (lags / FPS <= typ_dt[1])
+    sub = np.where(typ[:, None], score, -np.inf)
+    j3 = sub.argmax(0)
+    s3 = sub[j3, fidx]
+    out = []
+    seen = set()
+    for j, s in ((j1, s1), (j2, s2), (j3, s3)):
+        # peak along frequency (+-1 bin) for this lag track
+        pk = (s >= np.r_[-np.inf, s[:-1]]) & (s >= np.r_[s[1:], -np.inf]) & (s >= min_score)
+        for f in np.nonzero(pk)[0]:
+            if (f, int(j[f])) not in seen:
+                seen.add((f, int(j[f])))
+                out.append((float(s[f]), f, int(j[f])))
+    out.sort(reverse=True)
+    return [Candidate(f0=(b0 + f) * 3.125, dt=lags[j] / FPS, score=s) for s, f, j in out[:max_cand]]
 
 
 class Baseband:
@@ -155,19 +179,36 @@ _SYNC_REF = np.exp(-2j * np.pi * _SYNC_TONES[:, None] * np.arange(SPS_BB)[None, 
 _T_BB = np.arange(NBB) / FS_BB
 
 
+_GRID_K = {}
+
+
+def _grid_kernel(dfs):
+    """(21, 32, nf) complex kernel: DFT at tone c_k + df for each sync symbol, plus the inter-symbol
+    phase advance of a df offset (so symbols within an array add coherently)."""
+    key = (len(dfs), float(dfs[0]), float(dfs[-1]))
+    if key not in _GRID_K:
+        n = np.arange(SPS_BB)
+        sym = ft8.SYNC_SYMS.astype(float)
+        f = _SYNC_TONES[:, None, None] * ft8.TONE_SPACING + dfs[None, None, :]  # (21,1,nf) Hz
+        ph = -2j * np.pi * (f * n[None, :, None] / FS_BB + dfs[None, None, :] * SPS_BB * sym[:, None, None] / FS_BB)
+        _GRID_K[key] = np.exp(ph)
+    return _GRID_K[key]
+
+
 def costas_grid(y0, start0, dfs, dts):
-    """Semi-coherent Costas metric on a (df, dt) grid.
+    """Semi-coherent Costas metric on a (df, dt) grid -> (nf, nt).
 
     FT8 is continuous-phase FSK with h=1: every symbol advances an integer number of cycles, so the
     7 symbols of each Costas array add coherently. Coherent 1.12 s integration gives ~7x sharper
     frequency selectivity than per-symbol energy. Arrays are combined non-coherently (fading-robust).
+    Implemented as one batched matmul over the 21 sync symbols.
     """
-    Y = y0[None, :] * np.exp(-2j * np.pi * dfs[:, None] * _T_BB[None, :])  # (nf, NBB)
-    idx = start0 + dts[:, None, None] + SPS_BB * ft8.SYNC_SYMS[None, :, None] + np.arange(SPS_BB)[None, None, :]
+    idx = start0 + dts[None, :, None] + SPS_BB * ft8.SYNC_SYMS[:, None, None] + np.arange(SPS_BB)[None, None, :]
     valid = (idx >= 0) & (idx < NBB)
-    seg = Y[:, np.clip(idx, 0, NBB - 1)] * valid[None]  # (nf, nt, 21, 32)
-    z = np.einsum("ftkn,kn->ftk", seg, _SYNC_REF)
-    return (np.abs(z.reshape(len(dfs), len(dts), 3, 7).sum(-1)) ** 2).sum(-1)  # (nf, nt)
+    seg = y0[np.clip(idx, 0, NBB - 1)] * valid  # (21, nt, 32)
+    z = np.matmul(seg, _grid_kernel(dfs))  # (21, nt, nf)
+    z = z.reshape(3, 7, len(dts), len(dfs)).sum(1)
+    return (np.abs(z) ** 2).sum(0).T  # (nf, nt)
 
 
 def _parabolic(m, i):

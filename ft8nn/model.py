@@ -40,6 +40,15 @@ def features(y, start=None):
     return torch.cat([Z.real, Z.imag], -1)
 
 
+def _conv_bl(h, conv):
+    """'same' Conv1d on (B, L, C) via unfold + matmul. Equivalent to conv(h.transpose(1,2)).transpose(1,2)
+    but ~30x faster on ARM CPUs, where torch's conv1d falls back to a slow kernel."""
+    k = conv.kernel_size[0]
+    hp = nn.functional.pad(h.transpose(1, 2), (k // 2, k // 2))  # (B, C, L+k-1)
+    cols = hp.unfold(2, k, 1).permute(0, 2, 1, 3).reshape(h.shape[0], h.shape[1], -1)  # (B, L, C*k)
+    return cols @ conv.weight.reshape(conv.out_channels, -1).T + conv.bias
+
+
 class SoftDemod(nn.Module):
     def __init__(self, d=128, layers=4, heads=4, ff=384, conv_k=5, dropout=0.0):
         super().__init__()
@@ -59,7 +68,9 @@ class SoftDemod(nn.Module):
     def forward(self, x):
         """x: (B,79,F) features -> (B,174) logits of P(bit=1)."""
         h = self.inp(x) + self.pos
-        h = h + self.conv(h.transpose(1, 2)).transpose(1, 2)
+        c1, c2 = self.conv[0], self.conv[2]
+        gelu = nn.functional.gelu  # same as self.conv (Conv, GELU, Conv, GELU), fast path
+        h = h + gelu(_conv_bl(gelu(_conv_bl(h, c1)), c2))
         h = self.tf(h)
         h = self.out(self.norm(h[:, self.data_pos]))  # (B,58,3)
         return h.reshape(h.shape[0], 174)
