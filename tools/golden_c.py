@@ -88,7 +88,7 @@ def main():
     ap.add_argument("path")
     ap.add_argument("--n", type=int, default=20)
     ap.add_argument("--workers", type=int, default=6)
-    ap.add_argument("--tag", default="nn_v2_er", help="Python result tag to compare against")
+    ap.add_argument("--tag", default="nn_v2_f31", help="Python result tag to compare against")
     a = ap.parse_args()
     ok = real(a) if a.mode == "real" else awgn(a)
     print("PASS" if ok else "DIFF")

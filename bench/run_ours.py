@@ -54,7 +54,7 @@ def main():
     ap.add_argument("--also-classical", action="store_true")
     ap.add_argument("--n-hyp", type=int, default=2)
     ap.add_argument("--per-symbol", action="store_true", help="per-symbol Costas sync ratio")
-    ap.add_argument("--fmax", type=float, default=3000.0)
+    ap.add_argument("--fmax", type=float, default=3100.0)
     ap.add_argument("--base", default="median", choices=["max40", "median"], help="candidate score baseline")
     ap.add_argument("--no-ap", action="store_true", help="disable a-priori (CQ) decoding")
     ap.add_argument("--erase-gate", type=float, default=15.0, help="burst-erasure retry below this expected error count (0 = off)")

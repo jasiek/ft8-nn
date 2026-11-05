@@ -33,6 +33,7 @@ static double tnow(void) {
 #define NMET 4 /* NN + classical nsym 1, 2, 3 */
 #define NN_BATCH 128
 #define BASE_MEDIAN 1 /* candidate score baseline: 1 = 1.77 * median of all cells (A/B 2026-11-04: real +281), 0 = old pct40 of per-freq max */
+#define FMAX 3100.0 /* candidate search top (f0, Hz); jt9 decodes up to ~3050 (A/B 2026-11-04: validation run 2 +38) */
 #define NOISE_BIN (3200.0 / 1000.0)
 #define SNR_OFFSET 0.23
 
@@ -224,7 +225,7 @@ static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall,
     double t0 = tnow(), t1, t2, t3, t4, t5;
     long n_bp = 0, n_osd = 0;
     candidate *cands = malloc(sizeof(candidate) * MAX_CAND);
-    int nc = find_candidates(x, n, 150.0, 3000.0, MAX_CAND, 1.3, BASE_MEDIAN, cands);
+    int nc = find_candidates(x, n, 150.0, FMAX, MAX_CAND, 1.3, BASE_MEDIAN, cands);
     t1 = tnow();
     baseband bb;
     baseband_init(&bb, x, n);

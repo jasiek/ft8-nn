@@ -43,7 +43,7 @@ def spectrogram(x):
 BASE_MEDIAN_CAL = 1.77  # pct40(max over lags) / median(all cells) on noise-only and synthetic slots
 
 
-def find_candidates(x, fmin=150.0, fmax=3000.0, dtmin=-1.5, dtmax=2.5, max_cand=600, min_score=1.3, lag_excl=10, typ_dt=(-0.6, 1.2), per_symbol=False, base="median"):
+def find_candidates(x, fmin=150.0, fmax=3100.0, dtmin=-1.5, dtmax=2.5, max_cand=600, min_score=1.3, lag_excl=10, typ_dt=(-0.6, 1.2), per_symbol=False, base="median"):
     """Costas-sync candidates, WSJT-X style: per frequency bin the best and second-best lag
     (second at least lag_excl frames away), peak-picked along frequency only. 2-D local maxima
     let the sidelobes of strong signals exhaust the candidate budget on busy bands."""

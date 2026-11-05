@@ -1,6 +1,6 @@
 # Status and plan (resume here)
 
-Last updated 2026-11-04 (ONNX export, C library, candidate-baseline fix, burst-erasure retry done; validation set scored).
+Last updated 2026-11-04 (ONNX export, C library, candidate-baseline fix, burst-erasure retry, fmax 3100 done; validation set scored).
 
 ## Where we are
 
@@ -10,7 +10,7 @@ Recipe: v1 (6000 steps, `--cfg v1`), then fine-tune with
 
 Decoder defaults: `decoder.decode_slot`. These are 3 passes with subtraction, 2 fine-sync hypotheses,
 NN metric with classical nsym 1/2/3 fallback (`--also-classical`), OSD order 2 gated on expected errors < 40,
-CQ a-priori decoding (expected errors < 44), and burst-erasure retry (expected errors < 15).
+CQ a-priori decoding (expected errors < 44), burst-erasure retry (expected errors < 15), candidate search 150–3100 Hz.
 
 ### Results vs WSJT-X jt9 (`-d 3`)
 
@@ -24,9 +24,9 @@ CQ a-priori decoding (expected errors < 44), and burst-erasure retry (expected e
 | noise only, 100 slots | – | 0 false | **0 false** |
 
 Real KiwiSDR recordings (10 stations, 1197 slots, `../ft8-training-data/recordings`, read-only; another agent owns it):
-**v2 + median baseline + burst erasure (tag `nn_v2_er`, current default) decodes 16443, jt9 decodes 15729 (+4.5%).**
-1180 decodes are ours only (94% name a callsign jt9 heard at that station); 466 are jt9 only.
-History: `nn_v2` 16055 (jt9-only 663) → baseline fix `nn_v2_bm` 16336 (jt9-only 512) → erasure `nn_v2_er` 16443 (jt9-only 466).
+**v2 + median baseline + burst erasure + fmax 3100 (tag `nn_v2_f31`, current default) decodes 16452, jt9 decodes 15729 (+4.6%).**
+1186 decodes are ours only (94% name a callsign jt9 heard at that station); 463 are jt9 only.
+History: `nn_v2` 16055 (jt9-only 663) → baseline fix `nn_v2_bm` 16336 (jt9-only 512) → erasure `nn_v2_er` 16443 (jt9-only 466) → fmax 3100 `nn_v2_f31` 16452 (jt9-only 463).
 08_80m: 3314 vs jt9 3258.
 
 ### Validation set with ground truth (`../ft8-validation-set`, added by the user 2026-11-04)
@@ -40,33 +40,36 @@ Treat the folder as read-only; our decodes go to `data/val/run{1,2}/<station>/de
 
 ```sh
 V=/Users/jps/tmp/ft8-validation-set
-uv run python bench/run_real.py $V/recordings --model runs/v2/model.pt --also-classical --tag nn_v2_er --workers 6 --out data/val/run1
-uv run python bench/run_real.py $V/run2/recordings --model runs/v2/model.pt --also-classical --tag nn_v2_er --workers 6 --out data/val/run2
-python3 $V/tools/verify.py --decodes data/val/run1 --tag nn_v2_er --list
-python3 $V/tools/verify.py --recordings $V/run2/recordings --spots $V/run2/pskr_spots.jsonl --decodes data/val/run2 --tag nn_v2_er --list
+uv run python bench/run_real.py $V/recordings --model runs/v2/model.pt --also-classical --tag nn_v2_f31 --workers 6 --out data/val/run1
+uv run python bench/run_real.py $V/run2/recordings --model runs/v2/model.pt --also-classical --tag nn_v2_f31 --workers 6 --out data/val/run2
+python3 $V/tools/verify.py --decodes data/val/run1 --tag nn_v2_f31 --list
+python3 $V/tools/verify.py --recordings $V/run2/recordings --spots $V/run2/pskr_spots.jsonl --decodes data/val/run2 --tag nn_v2_f31 --list
 ```
 
-Scores (`nn_v2_er` vs jt9 baseline, checkable = sender call is spotted-checkable):
+Scores (vs jt9 baseline, checkable = sender call is spotted-checkable):
 
 | run | decoder | decodes | slot-confirmed | unconf (≈ false) | jt9-only | ours-only (99% callsign-corroborated) |
 |---|---|---|---|---|---|---|
 | 1 (training sites) | jt9 | 27,730 | 21,492 | 13 | – | – |
-| 1 | **nn_v2_er** | **29,372 (+5.9%)** | **22,669 (+5.5%)** | **3** | 1543 | 3185 |
+| 1 | nn_v2_er | 29,372 (+5.9%) | 22,669 (+5.5%) | 3 | 1543 | 3185 |
+| 1 | **nn_v2_f31** | **29,497 (+6.4%)** | **22,792 (+6.0%)** | **3** | | |
 | 2 (unseen sites) | jt9 | 24,291 | 17,993 | 16 | – | – |
-| 2 | **nn_v2_er** | **25,994 (+7.0%)** | **19,244 (+7.0%)** | **1** | 886 | 2590 |
+| 2 | nn_v2_er | 25,994 (+7.0%) | 19,244 (+7.0%) | 1 | 886 | 2590 |
+| 2 | **nn_v2_f31** | **26,032 (+7.2%)** | **19,281 (+7.2%)** | **1** | 850 | |
 
 The gain is larger on unseen receivers than on training sites, and it holds up against outside spots:
 false decodes are below jt9's. Odd: jt9-only includes many strong signals (run 1: 289 at ≥ 0 dB, run 2: 114),
-e.g. run 2 00_40m `E70A KU2X FN13` at +4…+9 dB missed in 3 slots. Not yet diagnosed (see plan step 7).
+e.g. run 2 00_40m `E70A KU2X FN13` at +4…+9 dB missed in 3 slots. Many were above our old 3000 Hz search limit
+(fixed by `nn_v2_f31`: run 2 strong jt9-only 114 → 82); the rest are plan step 7.1.
 
 ### Reproduce the numbers
 
 ```sh
 uv run pytest -q                                                    # 26 tests
-uv run python bench/run_ours.py data/bench/awgn --model runs/v2/model.pt --also-classical --tag nn_v2_er --workers 6
+uv run python bench/run_ours.py data/bench/awgn --model runs/v2/model.pt --also-classical --tag nn_v2_f31 --workers 6
 uv run python bench/report.py data/bench/awgn --dt-max 0.5
-uv run python bench/run_real.py /Users/jps/tmp/ft8-training-data/recordings --model runs/v2/model.pt --also-classical --tag nn_v2_er --workers 6
-uv run python bench/run_real.py /Users/jps/tmp/ft8-training-data/recordings --compare-only --tag nn_v2_er
+uv run python bench/run_real.py /Users/jps/tmp/ft8-training-data/recordings --model runs/v2/model.pt --also-classical --tag nn_v2_f31 --workers 6
+uv run python bench/run_real.py /Users/jps/tmp/ft8-training-data/recordings --compare-only --tag nn_v2_f31
 ```
 
 Real decode run is about 20 min with 6 workers (about 4 s/slot/core). The synthetic sets take about 5 min each.
@@ -97,7 +100,7 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
   strong-signal misses went from 35 to 254, and AWGN was 0.2 dB worse.
 - Not tried: frequency-dependent noise whitening. That means estimating the noise floor per ~50 Hz from the spectrogram
   and normalising both the candidate search and `Baseband.downsample` by the local floor rather than the global one.
-- 5 jt9 decodes are above 3000 Hz, our search limit. `--fmax 3100` exists but was not A/B'd on its own.
+- jt9 decodes above 3000 Hz (our old search limit): fixed, default is now 3100 Hz (plan step 7.1).
 
 ## Plan
 
@@ -114,8 +117,8 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
      `ft8nn_reset_hashes`, `ft8nn_close`. One context per thread; the context's hash table learns callsigns.
      `ft8nn_decode` normalises audio to unit std internally (as `bench/run_real.py` does).
    - LDPC tables: `c/src/ldpc_tables.h`, generated by `tools/gen_c_tables.py`.
-   - Golden test `tools/golden_c.py` (uses `runs/v2/ft8nn.onnx`; compares against tag `nn_v2_er` by default; re-verified
-     after the baseline fix: 1264/1264 real, 418/418 AWGN):
+   - Golden test `tools/golden_c.py` (uses `runs/v2/ft8nn.onnx`; compares against tag `nn_v2_f31` by default; last
+     verified after fmax 3100: 684/684 + 582/582 real, 419/419 AWGN):
      real 00_40m + 08_80m, first 20 slots each: 1231/1231 decodes identical in every output field;
      AWGN 60 files: 418/418 identical payloads.
      `uv run python tools/golden_c.py real <station_dir> --n 20`, `... awgn data/bench/awgn --n 60`.
@@ -156,14 +159,17 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
    +7.0% slot-confirmed on unseen receivers, 1 unconfirmed vs jt9's 16. From now on every decoder change is A/B'd here as well (run 2 is the deciding set),
    because `ours-only corroborated` on the training recordings only checks the callsign, not that the station sent it.
 7. **Next, ranked:**
-   1. **Strong jt9-only misses on the validation set — IN PROGRESS.** Run 1: 289 at ≥ 0 dB, of which **119 are
-      above 2990 Hz**; run 2: 114, of which 33. jt9 decodes up to f0 = 3052 Hz (169 decodes at 3000–3024 Hz across
-      all sets); our candidate search stops at `fmax` = 3000. Spot check with `fmax=3100`: both test slots gain exactly
-      the missing jt9 decode (run 2 00_40m 222900 `E70A KU2X FN13` 3014 Hz; run 1 01_40m 221800 3001 Hz).
-      A/B running: tag `nn_v2_f31` (`--fmax 3100`) on validation run 2 + noise, then run 1 + training recordings.
-      If kept: change the C default (`find_candidates(..., 3000.0, ...)` in `c/src/decode.c`) and Python default, golden.
-      Then diagnose the remaining strong misses with `tools/diag_strong_miss.py ... --root <recordings> --out data/val/run2`
-      (script now takes `--root`, `--out`, `--max-snr`).
+   1. **Strong jt9-only misses on the validation set.**
+      - **fmax 3100 — DONE (2026-11-04).** Run 1 had 289 strong (≥ 0 dB) jt9-only misses, 119 above 2990 Hz; run 2 had
+        114, 33 above. jt9 decodes up to f0 = 3052 Hz; our search stopped at 3000. Now `frontend.find_candidates(fmax=3100)`,
+        bench `--fmax 3100`, C `FMAX` in `c/src/decode.c` (the noise-estimate band 200–3000 Hz is unchanged).
+        A/B `nn_v2_er` → `nn_v2_f31`: run 2 25,994 → 26,032 decodes, slot-confirmed 19,244 → 19,281, unconf 1 → 1,
+        jt9-only 886 → 850 (strong 114 → 82); run 1 29,372 → 29,497, slot-confirmed 22,669 → 22,792, unconf 3 → 3;
+        training recordings 16,443 → 16,452 (jt9-only 466 → 463); AWGN 50% −22.37 unchanged; noise 0 false / 998.
+        Golden C vs Python (`nn_v2_f31`): 00_40m 684/684, 08_80m 582/582 all fields; AWGN 419/419.
+      - **Next: diagnose the remaining strong misses on run 2** (82 at ≥ 0 dB):
+        `uv run python tools/diag_strong_miss.py runs/v2/model.pt nn_v2_f31 0 2000 --root $V/run2/recordings --out data/val/run2`
+        (script takes `--root`, `--out`, `--max-snr`). Sort into NOCAND / FAIL (by expected errors) / OK, as in step 4.
    2. Deeper OSD or more AP types for expected-error 13–40 FAILs; training with
    slow (seconds) signal fades.
    3. Re-measure C decode time per slot on an idle machine, busiest stations (00_40m, validation 01_40m), single core

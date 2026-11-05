@@ -1,6 +1,8 @@
 """Classify jt9-only decodes above an SNR threshold by the stage that loses them.
 
-  uv run python tools/diag_strong_miss.py runs/v2/model.pt nn_v2 -9 [max_slots]
+  uv run python tools/diag_strong_miss.py runs/v2/model.pt nn_v2 -9 [max_slots] [--root REC] [--out OUT] [--max-snr S]
+
+--root: recordings root (default ../ft8-training-data/recordings); --out: our decodes root (default data/real).
 
 For each slot: subtract our saved decodes, then look for a candidate near the jt9 signal in the
 residual. Stages: NOCAND (no candidate within 5 Hz / 0.2 s), FAIL (candidate, NN decode fails;
@@ -18,14 +20,21 @@ import run_real as rr  # noqa: E402
 from ft8nn import frontend as fe, ft8, ldpc, nn_metric  # noqa: E402
 from ft8nn.subtract import subtract  # noqa: E402
 
-model, tag, thr = sys.argv[1], sys.argv[2], int(sys.argv[3])
-max_slots = int(sys.argv[4]) if len(sys.argv) > 4 else 40
-root = Path("/Users/jps/tmp/ft8-training-data/recordings")
+import argparse
+_ap = argparse.ArgumentParser()
+_ap.add_argument("model"); _ap.add_argument("tag"); _ap.add_argument("thr", type=int)
+_ap.add_argument("max_slots", type=int, nargs="?", default=40)
+_ap.add_argument("--root", default="/Users/jps/tmp/ft8-training-data/recordings")
+_ap.add_argument("--out", default="data/real")
+_ap.add_argument("--max-snr", type=int, default=99)
+_a = _ap.parse_args()
+model, tag, thr, max_slots = _a.model, _a.tag, _a.thr, _a.max_slots
+root, outroot = Path(_a.root), Path(_a.out)
 fn = nn_metric.make_llr_fn(model)
 
 todo = []
 for st in sorted(p for p in root.iterdir() if (p / "slots").is_dir()):
-    ours = rr.load_ours(Path("data/real") / st.name / f"decodes_{tag}.txt")
+    ours = rr.load_ours(outroot / st.name / f"decodes_{tag}.txt")
     raw = {}
     for line in (st / "decodes.txt").read_text().splitlines():
         p = line.split("~")
@@ -35,7 +44,7 @@ for st in sorted(p for p in root.iterdir() if (p / "slots").is_dir()):
     for s, v in rr.load_jt9(st / "decodes.txt").items():
         names = {d[3] for d in ours.get(s, [])}
         for snr, dt, f, t in v:
-            if snr >= thr and t not in names and not raw[(s, t)].rstrip().endswith(("a1", "a2", "a3")):
+            if thr <= snr <= _a.max_snr and t not in names and not raw[(s, t)].rstrip().endswith(("a1", "a2", "a3")):
                 miss[s].append((snr, dt, f, t))
     todo += [(st, s, m, ours.get(s, [])) for s, m in miss.items()]
 
@@ -45,7 +54,7 @@ for st, s, misses, ours in todo[:max_slots]:
     x = x.astype(float)
     x = np.pad(x, (0, max(0, 180000 - len(x))))[:180000] / (x.std() + 1e-9)
     # re-synthesise our decodes from the hex payloads for subtraction
-    lines = (Path("data/real") / st.name / f"decodes_{tag}.txt").read_text().splitlines()
+    lines = (outroot / st.name / f"decodes_{tag}.txt").read_text().splitlines()
     for ln in lines:
         p = ln.split("\t")
         if p[0] == s:

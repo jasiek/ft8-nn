@@ -120,7 +120,7 @@ def main():
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--stations", default=None, help="comma-separated prefixes, e.g. 00,01")
     ap.add_argument("--per-symbol", action="store_true", help="per-symbol Costas sync ratio")
-    ap.add_argument("--fmax", type=float, default=3000.0)
+    ap.add_argument("--fmax", type=float, default=3100.0)
     ap.add_argument("--base", default="median", choices=["max40", "median"], help="candidate score baseline")
     ap.add_argument("--erase-gate", type=float, default=15.0, help="burst-erasure retry below this expected error count (0 = off)")
     ap.add_argument("--out", default="data/real", help="output root: <out>/<station>/decodes_<tag>.txt")
