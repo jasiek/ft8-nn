@@ -1,6 +1,28 @@
 # Status and plan (resume here)
 
-Last updated 2026-11-04 (ONNX export, C library, candidate-baseline fix, burst-erasure retry, fmax 3100 done; validation set scored).
+Last updated 2026-11-05 (fmax 3100 committed; early-DT track + osd_er in flight, see below; Mac mini tooling).
+
+## In flight (2026-11-05, uncommitted)
+
+- Working tree holds the early-DT candidate track, the wide-window OSD erasure stage (`osd_er`) and its ghost
+  filter, in Python and C (plan step 7.1). Quick A/B (tag `nn_v2_eg`) **passed**: run 2 26,032 → 26,091 decodes,
+  slot-confirmed 19,281 → 19,320, unconf 1 → 1, noise 0 false.
+- **Full validation of `nn_v2_eg` failed on run 1** (stopped after run 1): 29,497 → 29,587 decodes, slot-confirmed
+  22,792 → 22,852, but **unconf 3 → 6**. The 3 new ones are all garbage-shaped:
+  - `CQ BS9XWU LI12`: early-DT candidate (DT −2.22) decoded by CQ a-priori OSD (`osd_ap`).
+  - `CY3MTJ/P NN2ZPX/P R BD72`: early-DT candidate + `osd_er`; strong `NE2M VA3BOO -01` sits 12.7 Hz (2 tones)
+    away at DT 0.0 → a ghost shifted by 2.24 s **and 2 tone bins**.
+  - `4K1XSU/P 1I7BML/P R HC46`: `osd_er`, strong `N2AJO W5VX RR73` 6.2 Hz (1 tone) away, DT 0.32 s apart → ghost
+    shifted by one tone bin; the 3 Hz / 0.5 s ghost filter misses it.
+  Tiers across both runs: early-DT decodes via plain BP / OSD / `bp_ap`: 79 + 46, all slot or active (0 false);
+  the 2 false early ones came from `osd_ap` and `osd_er`. `osd_er`: run 1 30 (2 unconf, 2 n/a = `SP9HPI <SX200H>`
+  decoded on 2 receivers, real), run 2 27 (0 unconf).
+- **Fix plan:** (1) early-DT candidates accept only BP / OSD / `bp_ap` (no `osd_ap`, no `osd_er`): they have only
+  2 of 3 Costas arrays, so less sync evidence; (2) replace the 3 Hz / 0.5 s ghost test with a tone-pattern test:
+  drop an `osd_er` decode whose tone sequence matches a neighbour's (stronger decode within ±50 Hz) shifted by
+  whole symbols in time and whole tones in frequency. Then rerun `tools/ab_run2.sh`, and run 1 (where the failures are).
+- Experiment scripts: `tools/ab_run2.sh TAG` (quick A/B), `tools/validate_full.sh TAG` (pre-commit checks).
+- Second machine: a Mac mini (2024) for experiments, set up per `docs/mac-mini.md`; `tools/mini.sh push|run|pull`.
 
 ## Where we are
 
@@ -170,6 +192,42 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       - **Next: diagnose the remaining strong misses on run 2** (82 at ≥ 0 dB):
         `uv run python tools/diag_strong_miss.py runs/v2/model.pt nn_v2_f31 0 2000 --root $V/run2/recordings --out data/val/run2`
         (script takes `--root`, `--out`, `--max-snr`). Sort into NOCAND / FAIL (by expected errors) / OK, as in step 4.
+      - **Diagnosis run 2 (2026-11-04):** 80 strong misses in 68 slots = 47 NOCAND, 32 FAIL, 1 OK.
+        **19 of the 47 NOCAND have DT −2.2…−2.3 s** (station SO3O and partners, clock ≈ 2.3 s early, seen on 3 Kiwis).
+        Our search starts at `dtmin` −1.5; jt9 searches to −2.5. Spot check with `dtmin=-2.5`: 4/4 test slots decode
+        with plain BP. **Plain `dtmin=-2.5` (tag `nn_v2_dt25`) fails the A/B:** run 2 26,032 → 25,988 decodes,
+        slot-confirmed 19,281 → 19,249, unconf 1 → 2 (+56 decodes at DT < −1.5, ~100 lost elsewhere: edge lags,
+        where only 2 Costas arrays are in the slot, spike and steal the main lag tracks; noise 0 false).
+        **Replacement: separate early-DT track** (`find_candidates(early_dt=-2.5, early_min=3.0)`, uncommitted):
+        main search unchanged (verified: identical candidate list), plus per frequency the best lag in [−2.5, −1.5),
+        kept if it is a frequency peak, ≥ 3.0, and beats every main lag at that frequency (strong on-time signals
+        also score high at early lags). Appended after the 600 budget. ~35 extra candidates per real slot, 0 on noise.
+        C ported (`EARLY_DT`, `EARLY_MIN` in `c/src/decode.c`; candidate buffer now MAX_CAND + nf).
+        **A/B `nn_v2_et` (early track only): passes.** Run 2 26,032 → 26,061 decodes, slot-confirmed 19,281 → 19,304,
+        unconf 1 → 1, 46 decodes at DT < −1.5; noise 0 false.
+      - **A/B `nn_v2_eo` (early track + osd_er): fails.** 26,095 decodes, slot 19,320, but unconf 1 → 2 and 31 osd_er
+        decodes of which 4 are garbage (`<5:…>`, `<6:…>`, `U+LVARAJ CD?C`, `4Q9OIV LQ7Q H R LL46`); 14 slot-confirmed,
+        13 active. Distance/expected errors don't separate them. **All 4 garbage sit within 1 Hz of a real decode in
+        the same slot at a DT 1.2–2.6 s away; none of the 27 real ones does** → time-shifted ghosts of strong signals
+        (wrong lag, NN confidently reads the real tones in the wrong places, OSD fits a CRC-valid random message).
+      - **Ghost filter** (`decoder.GHOST_DF/GHOST_DDT` = 3 Hz / 0.5 s, C same names): at the end of each pass, drop an
+        osd_er decode if another decode (earlier pass, or this pass and not osd_er) is that close in frequency and
+        that far in DT. bp_er left alone (its neighbour cases are real, e.g. `AP5ARS EA3FCQ 73` also decoded by jt9).
+        **A/B `nn_v2_eg` (early + osd_er + ghost filter): passes.** Run 2 26,061 (`nn_v2_et`) → 26,091 decodes,
+        slot-confirmed 19,304 → 19,320, unconf 1 → 1 (the same old `CQ 0V1YXG GG88`), noise 0 false / 998.
+        osd_er decodes 31 → 27: exactly the 4 ghosts removed, all 27 left are plausible messages
+        (e.g. `CQ F4CTJ JN09` on two Kiwis, `SP3JHZ CT3HQ RR73` on two Kiwis).
+        The 32 FAILs: expected errors mostly 20–45 (weak/faded, plan item 7.2); 2 at E=2 are mid-transmission
+        message changes with bursts wider than the 18-symbol BP erasure windows: 02_80m 223430 `CQ F4CTJ JN09` (data
+        symbols 35–57 wrong) and 08_80m 223530 `K0VM CT3HQ -15` (3–28, plus stray errors). BP fails at every width
+        20–30 (too many erasures). **OSD-0 on the erased window works** for F4CTJ: window (34,58) → correct, distance 0.0.
+      - **Wide-window OSD erasure stage (`osd_er`)** (A/B'd as `nn_v2_eo` above, kept with the ghost filter as `nn_v2_eg`).
+        `decoder._try_erase(llr, osd_dmax)`: after the BP windows fail, OSD-0 on 57 windows of width 20/22/24
+        (`ERASE_OSD_WINDOWS`); smallest-distance CRC pass wins if distance < `erase_osd_dmax` (3.0). ≤ 24 symbols
+        erased keeps ≥ 102 bits, so ≥ 11 parity bits + CRC-14 still check the result. 0.8 ms per window (Python).
+        Bench flag `--erase-osd-dmax` (0 = off). End-to-end: F4CTJ decodes, nothing else in the 2 slots changes.
+        C ported: `try_erase` in `c/src/decode.c` (`ERASE_OSD_DMAX`), method enum `FT8NN_OSD_ERASE = 5`, CLI name `osd_er`.
+        Some jt9-only "strong" decodes look like jt9 false decodes (`HYZDB82E2JV <...> RR73`, `GE2EDD 5Y4KKW GP53`).
    2. Deeper OSD or more AP types for expected-error 13–40 FAILs; training with
    slow (seconds) signal fades.
    3. Re-measure C decode time per slot on an idle machine, busiest stations (00_40m, validation 01_40m), single core
