@@ -30,7 +30,7 @@ def real(a):
     files = sorted((st / "slots").glob("*.wav"))[: a.n]
     slots = {f.stem for f in files}
     ref = defaultdict(list)
-    for l in (ROOT / "data/real" / st.name / f"decodes_{a.tag}.txt").read_text().splitlines():
+    for l in (ROOT / a.out / st.name / f"decodes_{a.tag}.txt").read_text().splitlines():
         p = l.split("\t")
         if p[0] in slots:
             ref[p[0]].append(p)
@@ -88,7 +88,8 @@ def main():
     ap.add_argument("path")
     ap.add_argument("--n", type=int, default=20)
     ap.add_argument("--workers", type=int, default=6)
-    ap.add_argument("--tag", default="nn_v2_f31", help="Python result tag to compare against")
+    ap.add_argument("--tag", default="nn_v2_eh", help="Python result tag to compare against")
+    ap.add_argument("--out", default="data/real", help="root of the Python decodes (real mode), e.g. data/val/run2")
     a = ap.parse_args()
     ok = real(a) if a.mode == "real" else awgn(a)
     print("PASS" if ok else "DIFF")

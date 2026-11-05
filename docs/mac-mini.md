@@ -62,6 +62,15 @@ Mac mini (2024), M4 (4P+6E) or M4 Pro (8–10P+4E). Folder layout is the same on
    ```
    (Use the current default tag from STATUS.md in place of `nn_v2_eg`.)
 
+## Working on the mini directly
+
+Everything also runs in the mini's own checkout (no SSH layer). Two extra setup steps there: `.python-version`
+pins Python 3.12 (uv otherwise picks 3.15, which has no onnxruntime wheel), and `brew install onnxruntime` for
+the C library. WSJT-X is absent, so the 16 tests that call `ft8code` fail; the rest pass. Speed: about 2 s per
+slot per core; `WORKERS=10` uses all 10 cores (4P+6E). Quick A/B about 1 h, full check about 1.5 h. Decodes were
+verified identical to the main machine (run 2 receiver 07, 382/382 lines). macOS background work (Siri, Spotlight
+indexing after a big copy) can slow a run several-fold: check `uptime` before trusting a timing.
+
 ## Day to day
 
 ```sh

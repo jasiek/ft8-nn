@@ -52,7 +52,7 @@ static int cmp_cand(const void *a, const void *b) { /* descending by (score, f, 
 }
 
 int find_candidates(const double *x, int n, double fmin, double fmax, int max_cand, double min_score, int base_median,
-                    candidate *out) {
+                    double early_dt, double early_min, candidate *out) {
     const double dtmin = -1.5, dtmax = 2.5, typ_lo = -0.6, typ_hi = 1.2;
     const int lag_excl = 10;
     int T = (n - NSPS) / HOP + 1;
@@ -76,7 +76,13 @@ int find_candidates(const double *x, int n, double fmin, double fmax, int max_ca
     fft_plan_free(fp);
 
     int lag0 = (int)rnd(NOMINAL_START * FPS);
+    /* main lags from dtmin, plus n_early "early" lags [early_dt, dtmin) that only feed a separate track
+     * (as frontend.find_candidates: kept out of the baseline and the main tracks) */
     int lmin = (int)floor(dtmin * FPS), lmax = (int)ceil(dtmax * FPS), nl = lmax - lmin + 1;
+    int n_early = early_dt < dtmin ? lmin - (int)floor(early_dt * FPS) : 0;
+    if (n_early < 0) n_early = 0;
+    lmin -= n_early;
+    nl += n_early;
     double *num = calloc((size_t)nl * nf, sizeof(double)), *den = calloc((size_t)nl * nf, sizeof(double));
     static const int offs[3] = {0, 36, 72};
     for (int o = 0; o < 3; o++)
@@ -98,9 +104,12 @@ int find_candidates(const double *x, int n, double fmin, double fmax, int max_ca
             }
         }
     free(S);
-    double *score = num; /* in place */
-    for (size_t i = 0; i < (size_t)nl * nf; i++) score[i] = num[i] / fmax_d(den[i], 1e-12);
+    double *score_all = num; /* in place */
+    for (size_t i = 0; i < (size_t)nl * nf; i++) score_all[i] = num[i] / fmax_d(den[i], 1e-12);
     free(den);
+    double *early = score_all, *score = score_all + (size_t)n_early * nf; /* split: early rows | main rows */
+    lmin += n_early;
+    nl -= n_early;
     double base;
     if (base_median) {
         /* 1.77 * median over all (lag, freq) cells: stays a noise statistic on crowded bands */
@@ -128,6 +137,7 @@ int find_candidates(const double *x, int n, double fmin, double fmax, int max_ca
     }
     double inv = fmax_d(base, 1e-9);
     for (size_t i = 0; i < (size_t)nl * nf; i++) score[i] /= inv;
+    for (size_t i = 0; i < (size_t)n_early * nf; i++) early[i] /= inv;
 
     /* three lag tracks per frequency: best, second best (>lag_excl away), best within typical DT */
     int *jt[3];
@@ -161,7 +171,6 @@ int find_candidates(const double *x, int n, double fmin, double fmax, int max_ca
         jt[2][f] = j3 < 0 ? 0 : j3;
         st[2][f] = s3;
     }
-    free(score);
     cand_ent *ents = malloc(sizeof(cand_ent) * 3 * nf);
     int ne = 0;
     uint8_t *seen = calloc((size_t)nf * nl, 1);
@@ -177,19 +186,48 @@ int find_candidates(const double *x, int n, double fmin, double fmax, int max_ca
         }
     }
     free(seen);
-    for (int k = 0; k < 3; k++) {
-        free(jt[k]);
-        free(st[k]);
-    }
     qsort(ents, ne, sizeof(cand_ent), cmp_cand);
     int nc = ne < max_cand ? ne : max_cand;
     for (int i = 0; i < nc; i++) {
         out[i].f0 = (b0 + ents[i].f) * 3.125;
         out[i].dt = (double)(lmin + ents[i].j) / FPS;
         out[i].score = ents[i].s;
+        out[i].early = 0;
+    }
+    if (n_early) {
+        /* early track, appended after the main budget; a peak must beat every main lag at its frequency
+         * (a strong on-time signal also scores high at early lags, but higher at its true lag) */
+        double *s4 = malloc(sizeof(double) * nf);
+        int *j4 = malloc(sizeof(int) * nf);
+        for (int f = 0; f < nf; f++) {
+            int jb = 0;
+            for (int li = 1; li < n_early; li++)
+                if (early[(size_t)li * nf + f] > early[(size_t)jb * nf + f]) jb = li;
+            j4[f] = jb;
+            s4[f] = early[(size_t)jb * nf + f];
+        }
+        int ne4 = 0;
+        for (int f = 0; f < nf; f++) {
+            double l = f > 0 ? s4[f - 1] : -INFINITY, r = f + 1 < nf ? s4[f + 1] : -INFINITY;
+            if (s4[f] >= l && s4[f] >= r && s4[f] >= early_min && s4[f] > st[0][f]) ents[ne4++] = (cand_ent){s4[f], f, j4[f]};
+        }
+        qsort(ents, ne4, sizeof(cand_ent), cmp_cand);
+        for (int i = 0; i < ne4; i++, nc++) {
+            out[nc].f0 = (b0 + ents[i].f) * 3.125;
+            out[nc].dt = (double)(lmin - n_early + ents[i].j) / FPS;
+            out[nc].score = ents[i].s;
+            out[nc].early = 1;
+        }
+        free(s4);
+        free(j4);
+    }
+    for (int k = 0; k < 3; k++) {
+        free(jt[k]);
+        free(st[k]);
     }
     free(ents);
-    return nc;
+    free(score_all);
+    return nc; /* at most max_cand + nf */
 }
 
 /* ------------------------------------------------------------------ baseband */

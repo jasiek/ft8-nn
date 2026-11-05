@@ -58,9 +58,11 @@ int osd_decode(const double *llr, int order, uint8_t *cw, double *dist, int *nha
 void frontend_init(void); /* once, before threads */
 typedef struct {
     double f0, dt, score;
+    int early; /* from the early-DT track (2 of 3 Costas arrays in the slot): plain decoders only */
 } candidate;
+/* out must hold max_cand + (fmax - fmin) / 3.125 entries: up to max_cand main candidates, then the early-DT track */
 int find_candidates(const double *x, int n, double fmin, double fmax, int max_cand, double min_score, int base_median,
-                    candidate *out);
+                    double early_dt, double early_min, candidate *out);
 
 typedef struct {
     fft_plan *full, *bb;

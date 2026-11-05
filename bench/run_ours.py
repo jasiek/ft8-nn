@@ -39,7 +39,7 @@ def _decode_file(path):
     from ft8nn import decoder
 
     _, x = wavfile.read(path)
-    ds = decoder.decode_slot(x / 100.0, llr_fn=_LLR, n_hyp=_ARGS.n_hyp, osd_order=_ARGS.osd_order, osd_max_hard=_ARGS.osd_max_hard, ap=() if _ARGS.no_ap else (decoder.AP_CQ,), erase_gate=_ARGS.erase_gate, cand_kw=dict(per_symbol=_ARGS.per_symbol, fmax=_ARGS.fmax, base=_ARGS.base))
+    ds = decoder.decode_slot(x / 100.0, llr_fn=_LLR, n_hyp=_ARGS.n_hyp, osd_order=_ARGS.osd_order, osd_max_hard=_ARGS.osd_max_hard, ap=() if _ARGS.no_ap else (decoder.AP_CQ,), erase_gate=_ARGS.erase_gate, erase_osd_dmax=_ARGS.erase_osd_dmax, cand_kw=dict(per_symbol=_ARGS.per_symbol, fmax=_ARGS.fmax, base=_ARGS.base))
     return Path(path).name, [
         (POOL.get(d.key, "??" + d.key), round(d.f0, 1), round(d.dt, 2), d.method, d.info.get("metric"), d.info.get("nhard"))
         for d in ds
@@ -58,6 +58,7 @@ def main():
     ap.add_argument("--base", default="median", choices=["max40", "median"], help="candidate score baseline")
     ap.add_argument("--no-ap", action="store_true", help="disable a-priori (CQ) decoding")
     ap.add_argument("--erase-gate", type=float, default=15.0, help="burst-erasure retry below this expected error count (0 = off)")
+    ap.add_argument("--erase-osd-dmax", type=float, default=3.0, help="wide-window OSD erasure stage distance limit (0 = off)")
     ap.add_argument("--osd-order", type=int, default=2)
     ap.add_argument("--osd-max-hard", type=int, default=40)
     ap.add_argument("--workers", type=int, default=8)

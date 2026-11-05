@@ -58,8 +58,8 @@ out:
 }
 
 static const char *method_name(int m) {
-    static const char *names[] = {"bp", "osd", "bp_ap0", "osd_ap0", "bp_er"};
-    return m >= 0 && m < 5 ? names[m] : "?";
+    static const char *names[] = {"bp", "osd", "bp_ap0", "osd_ap0", "bp_er", "osd_er"};
+    return m >= 0 && m < 6 ? names[m] : "?";
 }
 
 int main(int argc, char **argv) {

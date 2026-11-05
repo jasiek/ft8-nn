@@ -26,10 +26,11 @@ _LLR = None
 _NHYP = 2
 _CKW = {}
 _EG = 15.0
+_EOD = 3.0
 
 
-def _init(model, also_classical, n_hyp, ckw=None, erase_gate=15.0):
-    global _LLR, _NHYP, _CKW, _EG
+def _init(model, also_classical, n_hyp, ckw=None, erase_gate=15.0, erase_osd_dmax=3.0):
+    global _LLR, _NHYP, _CKW, _EG, _EOD
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     import torch
 
@@ -40,6 +41,7 @@ def _init(model, also_classical, n_hyp, ckw=None, erase_gate=15.0):
     _NHYP = n_hyp
     _CKW = ckw or {}
     _EG = erase_gate
+    _EOD = erase_osd_dmax
 
 
 def _decode(path):
@@ -52,7 +54,7 @@ def _decode(path):
         x = x.mean(1)
     if len(x) < 180000:
         x = np.pad(x, (0, 180000 - len(x)))
-    ds = decoder.decode_slot(x[:180000] / (np.std(x) + 1e-9), llr_fn=_LLR, n_hyp=_NHYP, erase_gate=_EG, cand_kw=_CKW)
+    ds = decoder.decode_slot(x[:180000] / (np.std(x) + 1e-9), llr_fn=_LLR, n_hyp=_NHYP, erase_gate=_EG, erase_osd_dmax=_EOD, cand_kw=_CKW)
     return Path(path).stem, [(d.bits77, d.f0, d.dt, d.method, d.info.get("metric"), d.snr) for d in ds]
 
 
@@ -123,6 +125,7 @@ def main():
     ap.add_argument("--fmax", type=float, default=3100.0)
     ap.add_argument("--base", default="median", choices=["max40", "median"], help="candidate score baseline")
     ap.add_argument("--erase-gate", type=float, default=15.0, help="burst-erasure retry below this expected error count (0 = off)")
+    ap.add_argument("--erase-osd-dmax", type=float, default=3.0, help="wide-window OSD erasure stage distance limit (0 = off)")
     ap.add_argument("--out", default="data/real", help="output root: <out>/<station>/decodes_<tag>.txt")
     ap.add_argument("--compare-only", action="store_true")
     ap.add_argument("--show", type=int, default=8, help="examples to print per category")
@@ -138,7 +141,7 @@ def main():
     outroot = Path(a.out)
 
     if not a.compare_only:
-        with ProcessPoolExecutor(a.workers, initializer=_init, initargs=(a.model, a.also_classical, a.n_hyp, dict(per_symbol=a.per_symbol, fmax=a.fmax, base=a.base), a.erase_gate)) as ex:
+        with ProcessPoolExecutor(a.workers, initializer=_init, initargs=(a.model, a.also_classical, a.n_hyp, dict(per_symbol=a.per_symbol, fmax=a.fmax, base=a.base), a.erase_gate, a.erase_osd_dmax)) as ex:
             for st in stations:
                 files = sorted(str(f) for f in (st / "slots").glob("*.wav"))
                 res = dict(ex.map(_decode, files, chunksize=2))

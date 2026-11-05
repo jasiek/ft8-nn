@@ -1,28 +1,19 @@
 # Status and plan (resume here)
 
-Last updated 2026-11-05 (fmax 3100 committed; early-DT track + osd_er in flight, see below; Mac mini tooling).
+Last updated 2026-11-05 (early-DT track + osd_er + ghost filter committed as `nn_v2_eh`; improve loop on the Mac mini).
 
-## In flight (2026-11-05, uncommitted)
+## Improve loop (started 2026-11-05 on the Mac mini, user-approved)
 
-- Working tree holds the early-DT candidate track, the wide-window OSD erasure stage (`osd_er`) and its ghost
-  filter, in Python and C (plan step 7.1). Quick A/B (tag `nn_v2_eg`) **passed**: run 2 26,032 → 26,091 decodes,
-  slot-confirmed 19,281 → 19,320, unconf 1 → 1, noise 0 false.
-- **Full validation of `nn_v2_eg` failed on run 1** (stopped after run 1): 29,497 → 29,587 decodes, slot-confirmed
-  22,792 → 22,852, but **unconf 3 → 6**. The 3 new ones are all garbage-shaped:
-  - `CQ BS9XWU LI12`: early-DT candidate (DT −2.22) decoded by CQ a-priori OSD (`osd_ap`).
-  - `CY3MTJ/P NN2ZPX/P R BD72`: early-DT candidate + `osd_er`; strong `NE2M VA3BOO -01` sits 12.7 Hz (2 tones)
-    away at DT 0.0 → a ghost shifted by 2.24 s **and 2 tone bins**.
-  - `4K1XSU/P 1I7BML/P R HC46`: `osd_er`, strong `N2AJO W5VX RR73` 6.2 Hz (1 tone) away, DT 0.32 s apart → ghost
-    shifted by one tone bin; the 3 Hz / 0.5 s ghost filter misses it.
-  Tiers across both runs: early-DT decodes via plain BP / OSD / `bp_ap`: 79 + 46, all slot or active (0 false);
-  the 2 false early ones came from `osd_ap` and `osd_er`. `osd_er`: run 1 30 (2 unconf, 2 n/a = `SP9HPI <SX200H>`
-  decoded on 2 receivers, real), run 2 27 (0 unconf).
-- **Fix plan:** (1) early-DT candidates accept only BP / OSD / `bp_ap` (no `osd_ap`, no `osd_er`): they have only
-  2 of 3 Costas arrays, so less sync evidence; (2) replace the 3 Hz / 0.5 s ghost test with a tone-pattern test:
-  drop an `osd_er` decode whose tone sequence matches a neighbour's (stronger decode within ±50 Hz) shifted by
-  whole symbols in time and whole tones in frequency. Then rerun `tools/ab_run2.sh`, and run 1 (where the failures are).
-- Experiment scripts: `tools/ab_run2.sh TAG` (quick A/B), `tools/validate_full.sh TAG` (pre-commit checks).
-- Second machine: a Mac mini (2024) for experiments, set up per `docs/mac-mini.md`; `tools/mini.sh push|run|pull`.
+Each iteration: one idea in Python + C → `tools/ab_run2.sh TAG` → if it passes, `tools/validate_full.sh TAG` → commit
++ update this file (commits without asking are approved for this loop only). Stop at the first of:
+(1) `nn_v2_eh` committed **and** run 2 slot-confirmed ≥ 19,500 with unconf ≤ 1 and noise 0 false;
+(2) 3 consecutive ideas fail the A/B; (3) about 8 h of loop time. Log every tried idea and its numbers here.
+Running directly on the mini (M4 4P+6E, `WORKERS=8`): ~2 s/slot/core, quick A/B ~15 min, full check ~40 min.
+Mini needs `.python-version` 3.12 and `brew install onnxruntime`; decodes verified identical to the main machine.
+
+## In flight
+
+- Next idea (plan 7.2): **OSD on summed BP posteriors** (`osd_bp`, tag `nn_v2_ob`); see plan step 7.2.
 
 ## Where we are
 
@@ -32,7 +23,8 @@ Recipe: v1 (6000 steps, `--cfg v1`), then fine-tune with
 
 Decoder defaults: `decoder.decode_slot`. These are 3 passes with subtraction, 2 fine-sync hypotheses,
 NN metric with classical nsym 1/2/3 fallback (`--also-classical`), OSD order 2 gated on expected errors < 40,
-CQ a-priori decoding (expected errors < 44), burst-erasure retry (expected errors < 15), candidate search 150–3100 Hz.
+CQ a-priori decoding (expected errors < 44), burst-erasure retry (expected errors < 15) with a wide-window OSD stage
+(`osd_er`) and ghost filter, candidate search 150–3100 Hz plus an early-DT track down to −2.5 s.
 
 ### Results vs WSJT-X jt9 (`-d 3`)
 
@@ -46,9 +38,9 @@ CQ a-priori decoding (expected errors < 44), burst-erasure retry (expected error
 | noise only, 100 slots | – | 0 false | **0 false** |
 
 Real KiwiSDR recordings (10 stations, 1197 slots, `../ft8-training-data/recordings`, read-only; another agent owns it):
-**v2 + median baseline + burst erasure + fmax 3100 (tag `nn_v2_f31`, current default) decodes 16452, jt9 decodes 15729 (+4.6%).**
-1186 decodes are ours only (94% name a callsign jt9 heard at that station); 463 are jt9 only.
-History: `nn_v2` 16055 (jt9-only 663) → baseline fix `nn_v2_bm` 16336 (jt9-only 512) → erasure `nn_v2_er` 16443 (jt9-only 466) → fmax 3100 `nn_v2_f31` 16452 (jt9-only 463).
+**Current default `nn_v2_eh` decodes 16460, jt9 decodes 15729 (+4.6%).**
+1194 decodes are ours only (1121 name a callsign jt9 heard at that station); 463 are jt9 only.
+History: `nn_v2` 16055 (jt9-only 663) → baseline fix `nn_v2_bm` 16336 (jt9-only 512) → erasure `nn_v2_er` 16443 (jt9-only 466) → fmax 3100 `nn_v2_f31` 16452 (jt9-only 463) → early-DT + osd_er `nn_v2_eh` 16460 (463).
 08_80m: 3314 vs jt9 3258.
 
 ### Validation set with ground truth (`../ft8-validation-set`, added by the user 2026-11-04)
@@ -62,10 +54,10 @@ Treat the folder as read-only; our decodes go to `data/val/run{1,2}/<station>/de
 
 ```sh
 V=/Users/jps/tmp/ft8-validation-set
-uv run python bench/run_real.py $V/recordings --model runs/v2/model.pt --also-classical --tag nn_v2_f31 --workers 6 --out data/val/run1
-uv run python bench/run_real.py $V/run2/recordings --model runs/v2/model.pt --also-classical --tag nn_v2_f31 --workers 6 --out data/val/run2
-python3 $V/tools/verify.py --decodes data/val/run1 --tag nn_v2_f31 --list
-python3 $V/tools/verify.py --recordings $V/run2/recordings --spots $V/run2/pskr_spots.jsonl --decodes data/val/run2 --tag nn_v2_f31 --list
+uv run python bench/run_real.py $V/recordings --model runs/v2/model.pt --also-classical --tag nn_v2_eh --workers 6 --out data/val/run1
+uv run python bench/run_real.py $V/run2/recordings --model runs/v2/model.pt --also-classical --tag nn_v2_eh --workers 6 --out data/val/run2
+python3 $V/tools/verify.py --decodes data/val/run1 --tag nn_v2_eh --list
+python3 $V/tools/verify.py --recordings $V/run2/recordings --spots $V/run2/pskr_spots.jsonl --decodes data/val/run2 --tag nn_v2_eh --list
 ```
 
 Scores (vs jt9 baseline, checkable = sender call is spotted-checkable):
@@ -74,10 +66,12 @@ Scores (vs jt9 baseline, checkable = sender call is spotted-checkable):
 |---|---|---|---|---|---|---|
 | 1 (training sites) | jt9 | 27,730 | 21,492 | 13 | – | – |
 | 1 | nn_v2_er | 29,372 (+5.9%) | 22,669 (+5.5%) | 3 | 1543 | 3185 |
-| 1 | **nn_v2_f31** | **29,497 (+6.4%)** | **22,792 (+6.0%)** | **3** | | |
+| 1 | nn_v2_f31 | 29,497 (+6.4%) | 22,792 (+6.0%) | 3 | | |
+| 1 | **nn_v2_eh** | **29,584 (+6.7%)** | **22,852 (+6.3%)** | **3** | | |
 | 2 (unseen sites) | jt9 | 24,291 | 17,993 | 16 | – | – |
 | 2 | nn_v2_er | 25,994 (+7.0%) | 19,244 (+7.0%) | 1 | 886 | 2590 |
-| 2 | **nn_v2_f31** | **26,032 (+7.2%)** | **19,281 (+7.2%)** | **1** | 850 | |
+| 2 | nn_v2_f31 | 26,032 (+7.2%) | 19,281 (+7.2%) | 1 | 850 | |
+| 2 | **nn_v2_eh** | **26,091 (+7.4%)** | **19,320 (+7.4%)** | **1** | | |
 
 The gain is larger on unseen receivers than on training sites, and it holds up against outside spots:
 false decodes are below jt9's. Odd: jt9-only includes many strong signals (run 1: 289 at ≥ 0 dB, run 2: 114),
@@ -88,10 +82,10 @@ e.g. run 2 00_40m `E70A KU2X FN13` at +4…+9 dB missed in 3 slots. Many were ab
 
 ```sh
 uv run pytest -q                                                    # 26 tests
-uv run python bench/run_ours.py data/bench/awgn --model runs/v2/model.pt --also-classical --tag nn_v2_f31 --workers 6
+uv run python bench/run_ours.py data/bench/awgn --model runs/v2/model.pt --also-classical --tag nn_v2_eh --workers 6
 uv run python bench/report.py data/bench/awgn --dt-max 0.5
-uv run python bench/run_real.py /Users/jps/tmp/ft8-training-data/recordings --model runs/v2/model.pt --also-classical --tag nn_v2_f31 --workers 6
-uv run python bench/run_real.py /Users/jps/tmp/ft8-training-data/recordings --compare-only --tag nn_v2_f31
+uv run python bench/run_real.py /Users/jps/tmp/ft8-training-data/recordings --model runs/v2/model.pt --also-classical --tag nn_v2_eh --workers 6
+uv run python bench/run_real.py /Users/jps/tmp/ft8-training-data/recordings --compare-only --tag nn_v2_eh
 ```
 
 Real decode run is about 20 min with 6 workers (about 4 s/slot/core). The synthetic sets take about 5 min each.
@@ -139,7 +133,7 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
      `ft8nn_reset_hashes`, `ft8nn_close`. One context per thread; the context's hash table learns callsigns.
      `ft8nn_decode` normalises audio to unit std internally (as `bench/run_real.py` does).
    - LDPC tables: `c/src/ldpc_tables.h`, generated by `tools/gen_c_tables.py`.
-   - Golden test `tools/golden_c.py` (uses `runs/v2/ft8nn.onnx`; compares against tag `nn_v2_f31` by default; last
+   - Golden test `tools/golden_c.py` (uses `runs/v2/ft8nn.onnx`; compares against tag `nn_v2_eh` by default; last
      verified after fmax 3100: 684/684 + 582/582 real, 419/419 AWGN):
      real 00_40m + 08_80m, first 20 slots each: 1231/1231 decodes identical in every output field;
      AWGN 60 files: 418/418 identical payloads.
@@ -227,9 +221,32 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
         erased keeps ≥ 102 bits, so ≥ 11 parity bits + CRC-14 still check the result. 0.8 ms per window (Python).
         Bench flag `--erase-osd-dmax` (0 = off). End-to-end: F4CTJ decodes, nothing else in the 2 slots changes.
         C ported: `try_erase` in `c/src/decode.c` (`ERASE_OSD_DMAX`), method enum `FT8NN_OSD_ERASE = 5`, CLI name `osd_er`.
+      - **`nn_v2_eh` — DONE (2026-11-05, Mac mini).** Early-DT track + `osd_er` + two fixes after `nn_v2_eg` produced 3
+        garbage decodes on run 1: (1) early-DT candidates get only BP, OSD and `bp_ap` (no OSD under a-priori bits, no
+        erasure stages; `Candidate.early`, C `candidate.early`); (2) `decoder._is_ghost` (C `is_ghost`) replaces the
+        3 Hz / 0.5 s ghost rule: drop an `osd_er` decode whose data tones equal a neighbour's (within 50 Hz) tones
+        shifted by whole symbols and whole tones on ≥ 40% of ≥ 20 comparable symbols (offline: flags all 6 known ghosts,
+        none of 82 real `osd_er` decodes). Results vs `nn_v2_f31`: run 2 26,032 → 26,091 decodes, slot-confirmed
+        19,281 → 19,320, unconf 1 → 1; run 1 29,497 → 29,584, slot 22,792 → 22,852, unconf 3 → 3; training recordings
+        16,452 → 16,460 (jt9-only 463); AWGN 50% −22.37; noise 0 false / 998. Golden C vs Python: 00_40m 685/685,
+        08_80m 583/583, run 2 02_80m 720/720 all fields; AWGN 419/419.
+        **C bug found on the way:** `decode_pass` freed the candidate list before the decode loop reads `cands[ci].early`
+        (use after free). On the M1 the stale memory happened to hold the right values; on the mini under load the AWGN
+        golden test lost 2–6 `osd_ap0` decodes (non-deterministically). Fixed; `validate_full.sh` now runs the golden
+        tests with `MallocScribble=1 MallocPreScribble=1`, which makes such reads fail reliably.
         Some jt9-only "strong" decodes look like jt9 false decodes (`HYZDB82E2JV <...> RR73`, `GE2EDD 5Y4KKW GP53`).
-   2. Deeper OSD or more AP types for expected-error 13–40 FAILs; training with
-   slow (seconds) signal fades.
+   2. **Deeper OSD for expected-error 13–40 FAILs — in progress: OSD on summed BP posteriors (`osd_bp`, tag `nn_v2_ob`).**
+      WSJT-X's decode174_91 keeps the running sum of BP posteriors after the first iterations (zsave) and runs OSD on
+      those too; we ran OSD on the NN LLRs only. Prototype (scratch script, 2026-11-05): on run 2, for every hypothesis
+      the `nn_v2_f31` decoder left undecoded (expected errors < 40, BP and OSD failed), OSD-2 on the sums after
+      iterations 1, 2, 3: 285 new decodes, 57 of them exactly jt9-only messages, none contradicting jt9.
+      Scored against spots: 281 checkable = 178 slot, 101 active, 1 unconf (`IT4AGC F40UUB KI04`, snapshot 3, 38 hard
+      errors). With the usual hard-error limit (≤ 40 vs the NN LLRs) and snapshots 1–2 only: 243 = 154 slot, 88 active,
+      0 unconf. 0 hypotheses reach the stage on noise-only slots (all have expected errors ≥ 40).
+      Implementation: `ldpc.bp_posterior_sums`, `decoder._try_osd_bp` (after plain OSD fails, NN metric only, not for
+      early-DT candidates), bench flag `--osd-snaps` (0 = off); C `bp_posterior_sums`, `try_osd_bp`, `OSD_SNAPS`,
+      method `FT8NN_OSD_BP = 6` / `osd_bp`.
+      Later: more AP types; training with slow (seconds) signal fades.
    3. Re-measure C decode time per slot on an idle machine, busiest stations (00_40m, validation 01_40m), single core
       and `--threads 2/4`. README "System requirements" quotes 18 s for one busy slot measured under load and
       recommends ≥ 2 cores; replace with clean numbers.

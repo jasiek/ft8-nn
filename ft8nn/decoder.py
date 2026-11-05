@@ -62,7 +62,7 @@ def classical_metrics(hyps):
     return out
 
 
-def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=3, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, erase_gate=15.0, cand_kw=None):
+def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=3, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, erase_gate=15.0, erase_osd_dmax=3.0, cand_kw=None):
     """Decode one 15 s slot (real audio @12 kHz, any scale), with multi-pass subtraction.
 
     llr_fn(hyps) -> per-hypothesis list of LLR vectors to try in order (first success wins).
@@ -74,12 +74,14 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
     for hypotheses whose expected error count is below ap_gate. Default: CQ.
     erase_gate: hypotheses whose NN metric is this confident (expected bit errors below the gate) but
     still fail get a burst-erasure retry (_try_erase); 0 disables.
+    erase_osd_dmax: wide-window (20-24 symbol) OSD-0 erasure stage of _try_erase, accepted only below this
+    reliability-weighted distance on the kept bits; 0 disables.
     cand_kw: extra keyword arguments for frontend.find_candidates (e.g. per_symbol, fmax).
     """
     x = np.array(x, dtype=np.float64, copy=True)
     found = {}
     for p in range(passes):
-        new = _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics, ap, ap_gate, erase_gate, cand_kw or {})
+        new = _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, cand_kw or {})
         for d in new:
             d.info["pass"] = p
             found[d.key] = d
@@ -89,7 +91,7 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
     return list(found.values())
 
 
-def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd_gate, osd_metrics, ap, ap_gate, erase_gate, cand_kw):
+def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, cand_kw):
     cands = fe.find_candidates(x, max_cand=max_cand, **cand_kw)
     bb = fe.Baseband(x)
     hyps, owner = [], []
@@ -124,10 +126,12 @@ def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd
                 cw, crc, dist, nh = ldpc.osd_decode(L[r], osd_order)
                 if crc and nh <= osd_max_hard:
                     a91, info = cw[:91], {"method": "osd", "nhard": nh, "dist": dist}
+            # early-DT candidates have weaker sync evidence: no OSD under a-priori bits, no erasure stages
+            early = cands[ci].early
             if a91 is None and k == 0 and ap and exp_err[r] < ap_gate:
-                a91, info = _try_ap(L[r], ap, osd_order, osd_max_hard)
-            if a91 is None and k == 0 and exp_err[r] < erase_gate:
-                a91, info = _try_erase(L[r])
+                a91, info = _try_ap(L[r], ap, -1 if early else osd_order, osd_max_hard)
+            if a91 is None and k == 0 and exp_err[r] < erase_gate and not early:
+                a91, info = _try_erase(L[r], erase_osd_dmax)
             if a91 is None:
                 continue
             if not a91[:77].any():  # all-zero payload: classic false decode
@@ -138,18 +142,55 @@ def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd
                 found.setdefault(d.key, d)
             done_cand.add(ci)
             break
+    # Wide-window OSD erasure can turn a ghost of a strong signal into a CRC-valid random message: at a wrong lag
+    # and/or tone bin the NN reads the real signal's tones confidently in the wrong places. Drop an osd_er decode
+    # whose data tones mostly equal a neighbour's tones shifted by whole symbols and whole tones (_is_ghost).
+    # Checked after the whole pass (before subtraction), so candidate order doesn't matter.
+    others = [d for d in found.values() if d.method != "osd_er"] + list(known.values())
+    for key in [k for k, d in found.items() if d.method == "osd_er"]:
+        if any(_is_ghost(found[key], e) for e in others):
+            del found[key]
     return list(found.values())
+
+
+# Ghost test: on validation runs 1+2 the 6 garbage osd_er decodes matched a neighbour's shifted tones on 53-62% of
+# 43-56 comparable data symbols; real osd_er decodes at most 23% (random: 1/8).
+GHOST_MAX_DF, GHOST_MIN_SYMS, GHOST_MATCH = 50.0, 20, 0.4
+
+
+def _is_ghost(d, e):
+    """True if d's data tones equal e's tones shifted by k symbols and m tones on >= GHOST_MATCH of the
+    >= GHOST_MIN_SYMS data symbols where e's shifted tone falls inside d's 8-tone band."""
+    df = d.f0 - e.f0
+    if abs(df) >= GHOST_MAX_DF:
+        return False
+    td, te = ft8.encode77(d.bits77)[1], ft8.encode77(e.bits77)[1]
+    x, y = df / ft8.TONE_SPACING, (d.dt - e.dt) * ft8.FS / ft8.NSPS
+    for m in range(int(np.floor(x)), int(np.ceil(x)) + 1):
+        for k in range(int(np.floor(y)) - 1, int(np.ceil(y)) + 2):
+            j = ft8.DATA_POS + k
+            ok = (j >= 0) & (j < ft8.NN)
+            t = te[j[ok]] - m
+            band = (t >= 0) & (t < 8)
+            n = int(band.sum())
+            if n >= GHOST_MIN_SYMS and (td[ft8.DATA_POS[ok]][band] == t[band]).sum() >= GHOST_MATCH * n:
+                return True
+    return False
 
 
 # Burst-erasure windows over the 58 data symbols: (first, end) data-symbol index pairs.
 ERASE_WINDOWS = sorted({(a, min(58, a + w)) for w in (6, 10, 14, 18) for a in range(0, 58 - w + 2, 2)})
+# Wider bursts (message changed early or late in the frame): too many erasures for BP, so OSD-0. At most 24
+# symbols (72 bits) erased leaves >= 102 kept bits: 91 form the OSD basis, the other >= 11 plus CRC-14 check it.
+ERASE_OSD_WINDOWS = sorted({(a, min(58, a + w)) for w in (20, 22, 24) for a in range(0, 58 - w + 2, 2)})
 
 
-def _try_erase(llr):
+def _try_erase(llr, osd_dmax=3.0):
     """Confident LLRs that still fail usually carry a burst of confidently wrong symbols: the sender
     changed the message mid-transmission (WSJT-X switches tones at once), so part of the frame belongs
     to the old message. Zero the LLRs of each window of data symbols in turn and run BP; first CRC
-    pass wins."""
+    pass wins. Then, if osd_dmax > 0, OSD-0 on each wide window: the CRC-passing result with the smallest
+    distance (sum |llr| over kept bits that disagree) wins if that distance is below osd_dmax."""
     batch = np.repeat(llr[None], len(ERASE_WINDOWS), 0)
     for k, (a, b) in enumerate(ERASE_WINDOWS):
         batch[k, 3 * a : 3 * b] = 0.0
@@ -157,6 +198,17 @@ def _try_erase(llr):
     for k in np.nonzero(ok)[0]:
         if ft8.crc_ok(bits[k, :91]):
             return bits[k, :91], {"method": "bp_er", "nhard": int(nh[k]), "window": ERASE_WINDOWS[k]}
+    if osd_dmax > 0:
+        best = None
+        for a, b in ERASE_OSD_WINDOWS:
+            e = llr.copy()
+            e[3 * a : 3 * b] = 0.0
+            cw, crc, dist, n = ldpc.osd_decode(e, 0)
+            if crc and dist < osd_dmax and (best is None or dist < best[1]):
+                best = (cw, dist, n, (a, b))
+        if best is not None:
+            cw, dist, n, win = best
+            return cw[:91], {"method": "osd_er", "nhard": n, "dist": dist, "window": win}
     return None, None
 
 

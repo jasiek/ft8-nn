@@ -31,6 +31,7 @@ class Candidate:
     f0: float  # Hz, tone-0 frequency
     dt: float  # s, start relative to nominal 0.5 s
     score: float
+    early: bool = False  # from the early-DT track (only 2 of 3 Costas arrays in the slot): plain decoders only
 
 
 def spectrogram(x):
@@ -43,7 +44,7 @@ def spectrogram(x):
 BASE_MEDIAN_CAL = 1.77  # pct40(max over lags) / median(all cells) on noise-only and synthetic slots
 
 
-def find_candidates(x, fmin=150.0, fmax=3100.0, dtmin=-1.5, dtmax=2.5, max_cand=600, min_score=1.3, lag_excl=10, typ_dt=(-0.6, 1.2), per_symbol=False, base="median"):
+def find_candidates(x, fmin=150.0, fmax=3100.0, dtmin=-1.5, dtmax=2.5, max_cand=600, min_score=1.3, lag_excl=10, typ_dt=(-0.6, 1.2), per_symbol=False, base="median", early_dt=-2.5, early_min=3.0):
     """Costas-sync candidates, WSJT-X style: per frequency bin the best and second-best lag
     (second at least lag_excl frames away), peak-picked along frequency only. 2-D local maxima
     let the sidelobes of strong signals exhaust the candidate budget on busy bands."""
@@ -54,7 +55,13 @@ def find_candidates(x, fmin=150.0, fmax=3100.0, dtmin=-1.5, dtmax=2.5, max_cand=
     # tone powers P[t, f, tone] with tone spacing = 2 bins
     P = np.stack([S[:, b0 + 2 * k : b0 + 2 * k + nf] for k in range(8)], axis=-1)  # (T, nf, 8)
     lag0 = int(round(ft8.NOMINAL_START * FPS))
-    lags = np.arange(int(np.floor(dtmin * FPS)), int(np.ceil(dtmax * FPS)) + 1)
+    # main search over lags from dtmin; with early_dt < dtmin also an "early" band [early_dt, dtmin) that only
+    # feeds a separate track (stations with clocks ~2 s early; jt9 searches to -2.5 s). It is kept out of the
+    # baseline and the main tracks, whose edge lags would otherwise outrank true lags (A/B 2026-11-05: plain
+    # dtmin=-2.5 lost 44 decodes on validation run 2).
+    l_lo = int(np.floor(dtmin * FPS))
+    n_early = max(0, l_lo - int(np.floor(early_dt * FPS))) if early_dt is not None else 0
+    lags = np.arange(l_lo - n_early, int(np.ceil(dtmax * FPS)) + 1)
     num = np.zeros((len(lags), nf))
     den = np.zeros((len(lags), nf))
     for off in (0, 36, 72):
@@ -78,6 +85,7 @@ def find_candidates(x, fmin=150.0, fmax=3100.0, dtmin=-1.5, dtmax=2.5, max_cand=
                 num += np.where(valid[:, None], sig, 0)
                 den += np.where(valid[:, None], others, 0)
     score = num / np.maximum(den, 1e-12)
+    early, score, lags_e, lags = score[:n_early], score[n_early:], lags[:n_early], lags[n_early:]
     # normalise by a robust per-slot baseline so the threshold is noise-level independent.
     # base="max40": 40th percentile of the per-frequency max -- on a crowded band most frequencies hold a
     # signal, so this baseline rises (4.3 vs 2.3 on 00_40m) and real signals fall below threshold.
@@ -87,6 +95,7 @@ def find_candidates(x, fmin=150.0, fmax=3100.0, dtmin=-1.5, dtmax=2.5, max_cand=
     else:
         b = np.percentile(score.max(0), 40)
     score = score / max(b, 1e-9)
+    early = early / max(b, 1e-9)
     fidx = np.arange(nf)
     j1 = score.argmax(0)
     s1 = score[j1, fidx]
@@ -112,7 +121,17 @@ def find_candidates(x, fmin=150.0, fmax=3100.0, dtmin=-1.5, dtmax=2.5, max_cand=
                 seen.add((f, int(j[f])))
                 out.append((float(s[f]), f, int(j[f])))
     out.sort(reverse=True)
-    return [Candidate(f0=(b0 + f) * 3.125, dt=lags[j] / FPS, score=s) for s, f, j in out[:max_cand]]
+    cands = [Candidate(f0=(b0 + f) * 3.125, dt=lags[j] / FPS, score=s) for s, f, j in out[:max_cand]]
+    if n_early:
+        # early track, appended after the main budget so it never displaces a main candidate
+        j4 = early.argmax(0)
+        s4 = early[j4, fidx]
+        # must beat every main-range lag at that frequency: a strong on-time signal also scores high at
+        # early lags (its data tones hit the Costas pattern by chance), but higher still at its true lag
+        pk = (s4 >= np.r_[-np.inf, s4[:-1]]) & (s4 >= np.r_[s4[1:], -np.inf]) & (s4 >= early_min) & (s4 > s1)
+        ext = sorted(((float(s4[f]), f, int(j4[f])) for f in np.nonzero(pk)[0]), reverse=True)
+        cands += [Candidate(f0=(b0 + f) * 3.125, dt=lags_e[j] / FPS, score=s, early=True) for s, f, j in ext]
+    return cands
 
 
 class Baseband:

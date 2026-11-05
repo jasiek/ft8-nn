@@ -23,6 +23,8 @@ static double tnow(void) {
 #include "internal.h"
 
 #define MAX_CAND 600
+#define EARLY_DT (-2.5) /* early-DT candidate track down to this DT (clocks ~2 s early); jt9 searches to -2.5 */
+#define EARLY_MIN 3.0  /* its score threshold (2 of 3 Costas arrays in the slot -> noisier score) */
 #define N_HYP 2
 #define PASSES 3
 #define OSD_ORDER 2
@@ -30,6 +32,12 @@ static double tnow(void) {
 #define OSD_GATE 40.0
 #define AP_GATE 44.0
 #define ERASE_GATE 15.0 /* burst-erasure retry for confident NN metrics that still fail */
+/* osd_er ghost test (decoder._is_ghost): neighbour within GHOST_MAX_DF Hz whose tones, shifted by whole symbols and
+ * tones, equal the decode's data tones on >= GHOST_MATCH of >= GHOST_MIN_SYMS comparable symbols */
+#define GHOST_MAX_DF 50.0
+#define GHOST_MIN_SYMS 20
+#define GHOST_MATCH 0.4
+#define ERASE_OSD_DMAX 3.0 /* wide-window OSD-0 erasure stage: max distance on the kept bits (decoder.erase_osd_dmax) */
 #define NMET 4 /* NN + classical nsym 1, 2, 3 */
 #define NN_BATCH 128
 #define BASE_MEDIAN 1 /* candidate score baseline: 1 = 1.77 * median of all cells (A/B 2026-11-04: real +281), 0 = old pct40 of per-freq max */
@@ -130,6 +138,32 @@ typedef struct {
 
 static int same_payload(const uint8_t *a, const uint8_t *b) { return !memcmp(a, b, 77); }
 
+/* d's data tones equal e's tones shifted by k symbols and m tones on >= GHOST_MATCH of the >= GHOST_MIN_SYMS data
+ * symbols where e's shifted tone lies in d's 8-tone band: d was read off e's signal at a wrong lag/bin */
+static int is_ghost(const dec *d, const dec *e) {
+    double df = d->f0 - e->f0;
+    if (fabs(df) >= GHOST_MAX_DF) return 0;
+    uint8_t cw[174];
+    int td[NN], te[NN];
+    encode77(d->bits77, cw, td);
+    encode77(e->bits77, cw, te);
+    double x = df / 6.25, y = (d->dt - e->dt) * 12000.0 / 1920.0;
+    for (int m = (int)floor(x); m <= (int)ceil(x); m++)
+        for (int k = (int)floor(y) - 1; k <= (int)ceil(y) + 1; k++) {
+            int n = 0, hit = 0;
+            for (int i = 0; i < ND; i++) {
+                int p = i < 29 ? 7 + i : 43 + (i - 29), j = p + k;
+                if (j < 0 || j >= NN) continue;
+                int t = te[j] - m;
+                if (t < 0 || t >= 8) continue;
+                n++;
+                hit += td[p] == t;
+            }
+            if (n >= GHOST_MIN_SYMS && hit >= GHOST_MATCH * n) return 1;
+        }
+    return 0;
+}
+
 static double estimate_snr(const sync_hyp *h, const uint8_t *bits77) {
     uint8_t cw[174];
     int tones[NN];
@@ -160,8 +194,8 @@ static void ap_init(void) {
     ap_val[31] = 1;
 }
 
-/* returns method (FT8NN_BP_AP / FT8NN_OSD_AP) or -1 */
-static int try_ap(const double *llr, uint8_t *a91) {
+/* returns method (FT8NN_BP_AP / FT8NN_OSD_AP) or -1; osd_order < 0 = BP only */
+static int try_ap(const double *llr, uint8_t *a91, int osd_order) {
     double mag = 0, l2[174];
     for (int i = 0; i < 174; i++) mag = fmax(mag, fabs(llr[i]));
     mag *= 1.01;
@@ -171,7 +205,7 @@ static int try_ap(const double *llr, uint8_t *a91) {
     int nh, method = -1;
     double dist;
     if (bp_decode(l2, 30, bits, &nh) && crc_ok(bits)) method = FT8NN_BP_AP;
-    else if (osd_decode(l2, OSD_ORDER, bits, &dist, &nh) && nh <= OSD_MAX_HARD) method = FT8NN_OSD_AP;
+    else if (osd_order >= 0 && osd_decode(l2, osd_order, bits, &dist, &nh) && nh <= OSD_MAX_HARD) method = FT8NN_OSD_AP;
     if (method < 0) return -1;
     for (int q = 0; q < 32; q++)
         if (bits[ap_idx[q]] != ap_val[q]) return -1;
@@ -179,25 +213,34 @@ static int try_ap(const double *llr, uint8_t *a91) {
     return method;
 }
 
-/* Burst-erasure windows (first, end) over the 58 data symbols, sorted, as decoder.ERASE_WINDOWS */
-static int erase_win[128][2], n_erase;
-static void erase_init(void) {
-    static const int widths[4] = {6, 10, 14, 18};
-    for (int wi = 0; wi < 4; wi++)
+/* Burst-erasure windows (first, end) over the 58 data symbols, sorted and deduplicated, as
+ * decoder.ERASE_WINDOWS (BP stage) and decoder.ERASE_OSD_WINDOWS (OSD-0 stage) */
+static int erase_win[128][2], n_erase, erase_osd_win[128][2], n_erase_osd;
+static int build_windows(const int *widths, int nw, int win[][2]) {
+    int n = 0;
+    for (int wi = 0; wi < nw; wi++)
         for (int a = 0; a < ND - widths[wi] + 2; a += 2) {
             int b = a + widths[wi] < ND ? a + widths[wi] : ND, q = 0, dup = 0;
-            for (int j = 0; j < n_erase; j++) dup |= erase_win[j][0] == a && erase_win[j][1] == b;
+            for (int j = 0; j < n; j++) dup |= win[j][0] == a && win[j][1] == b;
             if (dup) continue;
-            while (q < n_erase && (erase_win[q][0] < a || (erase_win[q][0] == a && erase_win[q][1] < b))) q++;
-            memmove(erase_win[q + 1], erase_win[q], sizeof(erase_win[0]) * (n_erase - q));
-            erase_win[q][0] = a;
-            erase_win[q][1] = b;
-            n_erase++;
+            while (q < n && (win[q][0] < a || (win[q][0] == a && win[q][1] < b))) q++;
+            memmove(win[q + 1], win[q], sizeof(win[0]) * (n - q));
+            win[q][0] = a;
+            win[q][1] = b;
+            n++;
         }
+    return n;
+}
+static void erase_init(void) {
+    static const int w_bp[4] = {6, 10, 14, 18}, w_osd[3] = {20, 22, 24};
+    n_erase = build_windows(w_bp, 4, erase_win);
+    n_erase_osd = build_windows(w_osd, 3, erase_osd_win);
 }
 
 /* Sender changed the message mid-transmission: a burst of confidently wrong symbols. Zero each
- * window of data-symbol LLRs in turn, BP; first CRC pass wins. Returns FT8NN_BP_ERASE or -1. */
+ * window of data-symbol LLRs in turn, BP; first CRC pass wins. Then OSD-0 on each wide window
+ * (too many erasures for BP); the smallest-distance CRC pass wins if below ERASE_OSD_DMAX.
+ * Returns FT8NN_BP_ERASE, FT8NN_OSD_ERASE or -1. */
 static int try_erase(const double *llr, uint8_t *a91) {
     double l2[174];
     uint8_t bits[174];
@@ -210,7 +253,16 @@ static int try_erase(const double *llr, uint8_t *a91) {
             return FT8NN_BP_ERASE;
         }
     }
-    return -1;
+    double best = -1.0, dist;
+    for (int w = 0; w < n_erase_osd; w++) {
+        memcpy(l2, llr, sizeof l2);
+        for (int i = 3 * erase_osd_win[w][0]; i < 3 * erase_osd_win[w][1]; i++) l2[i] = 0.0;
+        if (osd_decode(l2, 0, bits, &dist, &nh) && dist < ERASE_OSD_DMAX && (best < 0 || dist < best)) {
+            best = dist;
+            memcpy(a91, bits, 91);
+        }
+    }
+    return best >= 0 ? FT8NN_OSD_ERASE : -1;
 }
 
 static int any_bits(const uint8_t *b, int n) {
@@ -224,8 +276,8 @@ static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall,
     if (prof < 0) prof = getenv("FT8NN_PROFILE") != NULL;
     double t0 = tnow(), t1, t2, t3, t4, t5;
     long n_bp = 0, n_osd = 0;
-    candidate *cands = malloc(sizeof(candidate) * MAX_CAND);
-    int nc = find_candidates(x, n, 150.0, FMAX, MAX_CAND, 1.3, BASE_MEDIAN, cands);
+    candidate *cands = malloc(sizeof(candidate) * (MAX_CAND + (int)(FMAX / 3.125) + 1));
+    int nc = find_candidates(x, n, 150.0, FMAX, MAX_CAND, 1.3, BASE_MEDIAN, EARLY_DT, EARLY_MIN, cands);
     t1 = tnow();
     baseband bb;
     baseband_init(&bb, x, n);
@@ -238,7 +290,6 @@ static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall,
         nh += k;
     }
     baseband_free(&bb);
-    free(cands);
     t2 = tnow();
     t3 = t4 = t5 = t2;
     int added = 0;
@@ -291,8 +342,10 @@ static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall,
                     memcpy(a91, bits, 91);
                 }
             }
-            if (method < 0 && k == 0 && exp_err < AP_GATE) method = try_ap(l, a91);
-            if (method < 0 && k == 0 && exp_err < ERASE_GATE) method = try_erase(l, a91);
+            /* early-DT candidates have weaker sync evidence: no OSD under a-priori bits, no erasure stages */
+            int early = cands[ci].early;
+            if (method < 0 && k == 0 && exp_err < AP_GATE) method = try_ap(l, a91, early ? -1 : OSD_ORDER);
+            if (method < 0 && k == 0 && exp_err < ERASE_GATE && !early) method = try_erase(l, a91);
             if (method < 0) continue;
             if (!any_bits(a91, 77)) break; /* all-zero payload: classic false decode */
             int known = 0;
@@ -312,6 +365,23 @@ static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall,
             break;
         }
     }
+    /* drop osd_er ghosts of another decode (earlier pass, or this pass and not osd_er), as decoder._decode_pass */
+    {
+        uint8_t drop[added > 0 ? added : 1];
+        memset(drop, 0, sizeof drop);
+        for (int i = 0; i < added; i++) {
+            const dec *d = &all[nall + i];
+            if (d->method != FT8NN_OSD_ERASE) continue;
+            for (int q = 0; q < nall + added && !drop[i]; q++) {
+                if (q >= nall && all[q].method == FT8NN_OSD_ERASE) continue;
+                if (is_ghost(d, &all[q])) drop[i] = 1;
+            }
+        }
+        int w = 0;
+        for (int i = 0; i < added; i++)
+            if (!drop[i]) all[nall + w++] = all[nall + i];
+        added = w;
+    }
     free(done_cand);
     free(L);
     t5 = tnow();
@@ -319,6 +389,7 @@ done:
     if (prof)
         fprintf(stderr, "pass %d: cand %d hyp %d | cand %.2fs sync %.2fs nn %.2fs classical %.2fs bp/osd %.2fs (bp %ld osd %ld) -> %d\n",
                 pass, nc, nh, t1 - t0, t2 - t1, t3 - t2, t4 - t3, t5 - t4, n_bp, n_osd, added);
+    free(cands); /* candidate flags (early) are read in the decode loop */
     free(hyps);
     free(owner);
     return added;

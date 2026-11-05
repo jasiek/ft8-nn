@@ -26,6 +26,9 @@ uv run python bench/run_real.py "$T" --compare-only --tag "$TAG" > "$L/train_cmp
 step "AWGN";              uv run python bench/run_ours.py data/bench/awgn $M "$@" > "$L/awgn.log" 2>&1
 uv run python bench/report.py data/bench/awgn --dt-max 0.5 > "$L/awgn_report.txt" 2>&1
 step "C build + golden";  make -C c > "$L/make.log" 2>&1
+# macOS malloc fills new and freed blocks with garbage: a read of uninitialised or freed memory then changes the
+# output reliably instead of now and then (found a use-after-free of the candidate list this way, 2026-11-05)
+export MallocScribble=1 MallocPreScribble=1
 uv run python tools/golden_c.py real "$T/00_40m_kiwisdr-dynpc-net-8073" --n 20 --tag "$TAG" > "$L/golden_00_40m.txt" 2>&1
 uv run python tools/golden_c.py real "$T/08_80m_178-115-248-93-8073" --n 20 --tag "$TAG" > "$L/golden_08_80m.txt" 2>&1
 uv run python tools/golden_c.py real "$V/run2/recordings/02_80m_82-65-236-171-8073" --n 20 --tag "$TAG" \
