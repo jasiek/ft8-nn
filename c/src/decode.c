@@ -26,7 +26,7 @@ static double tnow(void) {
 #define EARLY_DT (-2.5) /* early-DT candidate track down to this DT (clocks ~2 s early); jt9 searches to -2.5 */
 #define EARLY_MIN 3.0  /* its score threshold (2 of 3 Costas arrays in the slot -> noisier score) */
 #define N_HYP 2
-#define PASSES 3
+#define PASSES 4 /* decode-subtract passes (decoder.decode_slot passes) */
 #define OSD_ORDER 2
 #define OSD_MAX_HARD 40
 #define OSD_GATE 40.0
