@@ -5,6 +5,39 @@ Goal: an FT8 decoder more sensitive than WSJT-X, packaged so other software can 
 Approach: keep FT8's LDPC(174,91) + CRC-14 (near-optimal, gives false-decode protection) and replace
 the hand-made soft metrics with a small neural net that turns baseband symbol spectra into bit LLRs.
 
+## System requirements
+
+Only one machine has been tested: Apple M1 Pro (10 cores, 16 GB), macOS 26, arm64. The numbers below were
+measured there. Other platforms and smaller machines have not been tried.
+
+### Decoding with the C library (`c/`, `libft8nn`)
+
+| | Requirement |
+|---|---|
+| OS | macOS arm64 (tested). The Makefile is macOS-specific: it finds ONNX Runtime via `brew` and builds a `.dylib`. Linux would need Makefile changes. |
+| Build tools | C11 compiler (tested: Apple clang 21) and `make` |
+| Libraries | ONNX Runtime ≥ 1.31 (`brew install onnxruntime`, about 21 MB). No other dependencies. |
+| Model | `ft8nn.onnx`, 3.5 MB (exported from a trained checkpoint by `tools/export_onnx.py`) |
+| Memory | about 370 MB peak resident per decoding context, on a busy 40 m slot |
+| CPU | One core averages 6.4 s per 15 s slot (training recordings, idle machine). Crowded bands take longer: one busy 40 m slot took 18 s on one core while other jobs were running. To keep up in real time, every slot must finish within 15 s, so plan on at least 2 cores (`--threads N` sets ONNX Runtime's thread count). |
+
+### Decoding with the Python reference (`ft8nn/`)
+
+| | Requirement |
+|---|---|
+| Python | ≥ 3.12, managed with [uv](https://docs.astral.sh/uv/) |
+| Packages | numpy, scipy, torch (the environment is about 0.9 GB on disk) |
+| Model | `model.pt`, 3.4 MB |
+| Memory | about 690 MB peak resident for one decoding process |
+| CPU | about 4 s per slot per core on average (torch uses Accelerate on Apple Silicon) |
+
+### Training and benchmarks
+
+- Training: the v2 recipe takes about 4 h on M-series with MPS (Apple GPU). It has not been tried on CPU only
+  or with less than 16 GB RAM.
+- jt9 baselines need WSJT-X's `jt9` at `/usr/local/bin/jt9`. The real-recording benchmarks need the recording
+  folders described in `STATUS.md`.
+
 ## Layout
 
 | Path | What |

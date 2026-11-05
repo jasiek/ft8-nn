@@ -155,12 +155,20 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
 6. **Score `nn_v2_er` on the validation set — DONE (2026-11-04).** Results in the table above: +7.0% decodes and
    +7.0% slot-confirmed on unseen receivers, 1 unconfirmed vs jt9's 16. From now on every decoder change is A/B'd here as well (run 2 is the deciding set),
    because `ours-only corroborated` on the training recordings only checks the callsign, not that the station sent it.
-7. **Next (not started), ranked:**
-   1. Diagnose strong jt9-only misses on the validation set (run 1: 289 at ≥ 0 dB; run 2: 114), with
-      `tools/diag_strong_miss.py` adapted to take a recordings root and output root. Strong misses are the cheapest to fix.
+7. **Next, ranked:**
+   1. **Strong jt9-only misses on the validation set — IN PROGRESS.** Run 1: 289 at ≥ 0 dB, of which **119 are
+      above 2990 Hz**; run 2: 114, of which 33. jt9 decodes up to f0 = 3052 Hz (169 decodes at 3000–3024 Hz across
+      all sets); our candidate search stops at `fmax` = 3000. Spot check with `fmax=3100`: both test slots gain exactly
+      the missing jt9 decode (run 2 00_40m 222900 `E70A KU2X FN13` 3014 Hz; run 1 01_40m 221800 3001 Hz).
+      A/B running: tag `nn_v2_f31` (`--fmax 3100`) on validation run 2 + noise, then run 1 + training recordings.
+      If kept: change the C default (`find_candidates(..., 3000.0, ...)` in `c/src/decode.c`) and Python default, golden.
+      Then diagnose the remaining strong misses with `tools/diag_strong_miss.py ... --root <recordings> --out data/val/run2`
+      (script now takes `--root`, `--out`, `--max-snr`).
    2. Deeper OSD or more AP types for expected-error 13–40 FAILs; training with
    slow (seconds) signal fades.
-   3. A/B `--fmax 3100` (3 NOCAND misses at 3001–3005 Hz).
+   3. Re-measure C decode time per slot on an idle machine, busiest stations (00_40m, validation 01_40m), single core
+      and `--threads 2/4`. README "System requirements" quotes 18 s for one busy slot measured under load and
+      recommends ≥ 2 cores; replace with clean numbers.
 8. Optional later work:
    - More AP types: the a2 MyCall type needs a callsign context, and that is only useful inside an app.
    - Retrain on a bigger model.
