@@ -64,6 +64,28 @@ def bp_decode(llr, iters=30):
     return out, done, nhard
 
 
+def bp_posterior_sums(llr, n=2):
+    """Running sums of the BP posteriors (llr sign) after iterations 1..n, as WSJT-X's decode174_91 saves them
+    (zsave) for OSD: BP's first iterations pull the bits of a weak codeword towards consistency even when BP itself
+    never converges. No early stop. llr (174,) -> (n,174)."""
+    Lp = -np.asarray(llr, np.float64)[None]
+    R = np.zeros((1, 83, 7))
+    zsum = np.zeros(174)
+    out = np.empty((n, 174))
+    for it in range(n):
+        tot = Lp + R.reshape(1, -1)[:, _EDGE_OF_BIT].sum(-1)
+        Q = tot[:, _NM_IDX] - R
+        T = np.tanh(np.clip(Q, -40, 40) / 2)
+        T[:, _PAD] = 1.0
+        T = np.where(np.abs(T) < 1e-12, 1e-12, T)
+        ext = np.prod(T, axis=-1, keepdims=True) / T
+        R = 2 * np.arctanh(np.clip(ext, -0.9999999, 0.9999999))
+        R[:, _PAD] = 0.0
+        zsum -= (Lp + R.reshape(1, -1)[:, _EDGE_OF_BIT].sum(-1))[0]
+        out[it] = zsum
+    return out
+
+
 def _gf2_reduce(Gp):
     """Row-reduce Gp (91,174) over GF(2) choosing pivots left-to-right. Returns (Gr, pivot_cols)."""
     G = Gp.copy().astype(bool)

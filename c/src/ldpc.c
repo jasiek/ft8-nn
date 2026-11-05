@@ -90,6 +90,54 @@ int bp_decode(const double *llr, int iters, uint8_t *out, int *nhard) {
     return done;
 }
 
+/* Running sums of the BP posteriors (LLR sign) after iterations 1..n into zs[n][174] (decoder ldpc.bp_posterior_sums,
+ * WSJT-X zsave). Same arithmetic as bp_decode, no early stop. */
+void bp_posterior_sums(const double *llr, int n, double *zs) {
+    double Lp[174], R[83 * 7], tot[174], T[7], zsum[174];
+    for (int i = 0; i < 174; i++) {
+        Lp[i] = -llr[i];
+        zsum[i] = 0.0;
+    }
+    memset(R, 0, sizeof R);
+    for (int it = 0; it < n; it++) {
+        for (int i = 0; i < 174; i++) {
+            const int *e = edge_of_bit[i];
+            tot[i] = Lp[i] + (R[e[0]] + R[e[1]] + R[e[2]]);
+        }
+        for (int m = 0; m < 83; m++) {
+            double *Rm = R + 7 * m;
+            for (int j = 0; j < 7; j++) {
+                int nb = LDPC_NM[m][j];
+                if (nb < 0) {
+                    T[j] = 1.0;
+                    continue;
+                }
+                double q = tot[nb] - Rm[j];
+                q = q < -40 ? -40 : (q > 40 ? 40 : q);
+                double e = expm1(q);
+                double t = e / (e + 2); /* tanh(q/2) */
+                T[j] = fabs(t) < 1e-12 ? 1e-12 : t;
+            }
+            double prod = T[0];
+            for (int j = 1; j < 7; j++) prod *= T[j];
+            for (int j = 0; j < 7; j++) {
+                if (LDPC_NM[m][j] < 0) {
+                    Rm[j] = 0.0;
+                    continue;
+                }
+                double ext = prod / T[j];
+                ext = ext < -0.9999999 ? -0.9999999 : (ext > 0.9999999 ? 0.9999999 : ext);
+                Rm[j] = log((1 + ext) / (1 - ext)); /* 2 atanh(ext) */
+            }
+        }
+        for (int i = 0; i < 174; i++) {
+            const int *e = edge_of_bit[i];
+            zsum[i] -= Lp[i] + (R[e[0]] + R[e[1]] + R[e[2]]);
+            zs[it * 174 + i] = zsum[i];
+        }
+    }
+}
+
 typedef struct {
     double rel;
     int idx;

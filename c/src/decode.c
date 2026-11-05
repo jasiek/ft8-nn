@@ -1,7 +1,7 @@
 /* Slot decoder (port of ft8nn/decoder.py decode_slot with nn_metric.make_llr_fn(also_classical=True)).
  *
  * Per pass: candidates -> fine_sync2 (2 hypotheses each) -> soft metrics [NN, classical nsym 1/2/3]
- * -> BP -> OSD-2 (NN metric only, gated) -> CQ a-priori (NN metric only, gated) -> CRC.
+ * -> BP -> OSD-2 (NN metric only, gated; then on summed BP posteriors) -> CQ a-priori (NN metric only, gated) -> CRC.
  * Decodes are subtracted from the audio between passes.
  */
 #include <math.h>
@@ -30,6 +30,7 @@ static double tnow(void) {
 #define OSD_ORDER 2
 #define OSD_MAX_HARD 40
 #define OSD_GATE 40.0
+#define OSD_SNAPS 2 /* OSD on BP posterior sums after iterations 1..OSD_SNAPS when OSD fails (decoder.osd_snaps) */
 #define AP_GATE 44.0
 #define ERASE_GATE 15.0 /* burst-erasure retry for confident NN metrics that still fail */
 /* osd_er ghost test (decoder._is_ghost): neighbour within GHOST_MAX_DF Hz whose tones, shifted by whole symbols and
@@ -194,6 +195,27 @@ static void ap_init(void) {
     ap_val[31] = 1;
 }
 
+static int ghost_prone(int m) { return m == FT8NN_OSD_ERASE || m == FT8NN_OSD_BP; }
+
+/* OSD on the BP posterior sums (decoder._try_osd_bp); hard errors counted against the channel LLRs.
+ * returns FT8NN_OSD_BP or -1 */
+static int try_osd_bp(const double *llr, uint8_t *a91) {
+    double zs[OSD_SNAPS * 174], dist;
+    uint8_t cw[174];
+    int nh;
+    bp_posterior_sums(llr, OSD_SNAPS, zs);
+    for (int s = 0; s < OSD_SNAPS; s++) {
+        int crc = osd_decode(zs + s * 174, OSD_ORDER, cw, &dist, &nh);
+        nh = 0;
+        for (int i = 0; i < 174; i++) nh += cw[i] != (llr[i] > 0);
+        if (crc && nh <= OSD_MAX_HARD) {
+            memcpy(a91, cw, 91);
+            return FT8NN_OSD_BP;
+        }
+    }
+    return -1;
+}
+
 /* returns method (FT8NN_BP_AP / FT8NN_OSD_AP) or -1; osd_order < 0 = BP only */
 static int try_ap(const double *llr, uint8_t *a91, int osd_order) {
     double mag = 0, l2[174];
@@ -333,6 +355,8 @@ static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall,
             int nhard, method = -1;
             double dist;
             n_bp++;
+            /* early-DT candidates have weaker sync evidence: no OSD on BP sums or under a-priori bits, no erasure stages */
+            int early = cands[ci].early;
             if (bp_decode(l, 30, bits, &nhard) && crc_ok(bits)) {
                 method = FT8NN_BP;
                 memcpy(a91, bits, 91);
@@ -340,10 +364,10 @@ static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall,
                 if (osd_decode(l, OSD_ORDER, bits, &dist, &nhard) && nhard <= OSD_MAX_HARD) {
                     method = FT8NN_OSD;
                     memcpy(a91, bits, 91);
+                } else if (OSD_SNAPS > 0 && !early) {
+                    method = try_osd_bp(l, a91);
                 }
             }
-            /* early-DT candidates have weaker sync evidence: no OSD under a-priori bits, no erasure stages */
-            int early = cands[ci].early;
             if (method < 0 && k == 0 && exp_err < AP_GATE) method = try_ap(l, a91, early ? -1 : OSD_ORDER);
             if (method < 0 && k == 0 && exp_err < ERASE_GATE && !early) method = try_erase(l, a91);
             if (method < 0) continue;
@@ -365,15 +389,16 @@ static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall,
             break;
         }
     }
-    /* drop osd_er ghosts of another decode (earlier pass, or this pass and not osd_er), as decoder._decode_pass */
+    /* drop osd_er / osd_bp ghosts of another decode (earlier pass, or this pass and not ghost-prone), as
+     * decoder._decode_pass (GHOST_PRONE) */
     {
         uint8_t drop[added > 0 ? added : 1];
         memset(drop, 0, sizeof drop);
         for (int i = 0; i < added; i++) {
             const dec *d = &all[nall + i];
-            if (d->method != FT8NN_OSD_ERASE) continue;
+            if (!ghost_prone(d->method)) continue;
             for (int q = 0; q < nall + added && !drop[i]; q++) {
-                if (q >= nall && all[q].method == FT8NN_OSD_ERASE) continue;
+                if (q >= nall && ghost_prone(all[q].method)) continue;
                 if (is_ghost(d, &all[q])) drop[i] = 1;
             }
         }

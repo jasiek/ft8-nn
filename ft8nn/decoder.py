@@ -62,7 +62,7 @@ def classical_metrics(hyps):
     return out
 
 
-def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=3, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, erase_gate=15.0, erase_osd_dmax=3.0, cand_kw=None):
+def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=3, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, cand_kw=None):
     """Decode one 15 s slot (real audio @12 kHz, any scale), with multi-pass subtraction.
 
     llr_fn(hyps) -> per-hypothesis list of LLR vectors to try in order (first success wins).
@@ -76,12 +76,14 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
     still fail get a burst-erasure retry (_try_erase); 0 disables.
     erase_osd_dmax: wide-window (20-24 symbol) OSD-0 erasure stage of _try_erase, accepted only below this
     reliability-weighted distance on the kept bits; 0 disables.
+    osd_snaps: when OSD on the NN LLRs fails, OSD again on the running sums of BP posteriors after iterations
+    1..osd_snaps (_try_osd_bp, WSJT-X's zsave); 0 disables.
     cand_kw: extra keyword arguments for frontend.find_candidates (e.g. per_symbol, fmax).
     """
     x = np.array(x, dtype=np.float64, copy=True)
     found = {}
     for p in range(passes):
-        new = _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, cand_kw or {})
+        new = _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, osd_snaps, cand_kw or {})
         for d in new:
             d.info["pass"] = p
             found[d.key] = d
@@ -91,7 +93,7 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
     return list(found.values())
 
 
-def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, cand_kw):
+def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, osd_snaps, cand_kw):
     cands = fe.find_candidates(x, max_cand=max_cand, **cand_kw)
     bb = fe.Baseband(x)
     hyps, owner = [], []
@@ -117,6 +119,8 @@ def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd
         if any(abs(h.f0 - d.f0) < 3 and abs(h.dt - d.dt) < 0.05 for d in found.values()):
             done_cand.add(ci)
             continue
+        # early-DT candidates have weaker sync evidence: no OSD on BP sums or under a-priori bits, no erasure stages
+        early = cands[ci].early
         for k in range(len(metrics[hi])):
             r = row[(hi, k)]
             a91 = None
@@ -126,8 +130,8 @@ def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd
                 cw, crc, dist, nh = ldpc.osd_decode(L[r], osd_order)
                 if crc and nh <= osd_max_hard:
                     a91, info = cw[:91], {"method": "osd", "nhard": nh, "dist": dist}
-            # early-DT candidates have weaker sync evidence: no OSD under a-priori bits, no erasure stages
-            early = cands[ci].early
+                elif osd_snaps and not early:
+                    a91, info = _try_osd_bp(L[r], osd_snaps, osd_order, osd_max_hard)
             if a91 is None and k == 0 and ap and exp_err[r] < ap_gate:
                 a91, info = _try_ap(L[r], ap, -1 if early else osd_order, osd_max_hard)
             if a91 is None and k == 0 and exp_err[r] < erase_gate and not early:
@@ -142,12 +146,12 @@ def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd
                 found.setdefault(d.key, d)
             done_cand.add(ci)
             break
-    # Wide-window OSD erasure can turn a ghost of a strong signal into a CRC-valid random message: at a wrong lag
-    # and/or tone bin the NN reads the real signal's tones confidently in the wrong places. Drop an osd_er decode
-    # whose data tones mostly equal a neighbour's tones shifted by whole symbols and whole tones (_is_ghost).
+    # Wide-window OSD erasure and OSD on BP sums can turn a ghost of a strong signal into a CRC-valid random message:
+    # at a wrong lag and/or tone bin the NN reads the real signal's tones confidently in the wrong places. Drop such a
+    # decode if its data tones mostly equal a neighbour's tones shifted by whole symbols and whole tones (_is_ghost).
     # Checked after the whole pass (before subtraction), so candidate order doesn't matter.
-    others = [d for d in found.values() if d.method != "osd_er"] + list(known.values())
-    for key in [k for k, d in found.items() if d.method == "osd_er"]:
+    others = [d for d in found.values() if d.method not in GHOST_PRONE] + list(known.values())
+    for key in [k for k, d in found.items() if d.method in GHOST_PRONE]:
         if any(_is_ghost(found[key], e) for e in others):
             del found[key]
     return list(found.values())
@@ -156,6 +160,9 @@ def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd
 # Ghost test: on validation runs 1+2 the 6 garbage osd_er decodes matched a neighbour's shifted tones on 53-62% of
 # 43-56 comparable data symbols; real osd_er decodes at most 23% (random: 1/8).
 GHOST_MAX_DF, GHOST_MIN_SYMS, GHOST_MATCH = 50.0, 20, 0.4
+# Methods checked for ghosts. osd_bp: on run 2 (nn_v2_ob) the test flagged 1 of 512 osd_bp decodes, the only
+# unconfirmed one (`0J4SMG/R TS6KAQ/R R AO20`, 12 symbols after a -1.5 dB signal 1.6 Hz away).
+GHOST_PRONE = ("osd_er", "osd_bp")
 
 
 def _is_ghost(d, e):
@@ -209,6 +216,20 @@ def _try_erase(llr, osd_dmax=3.0):
         if best is not None:
             cw, dist, n, win = best
             return cw[:91], {"method": "osd_er", "nhard": n, "dist": dist, "window": win}
+    return None, None
+
+
+def _try_osd_bp(llr, n, osd_order, osd_max_hard):
+    """OSD on the running sums of BP posteriors after iterations 1..n (ldpc.bp_posterior_sums). The hard-error
+    count is taken against the channel LLRs, as for plain OSD. Prototype on validation run 2 (decodes the default
+    decoder missed): snapshots 1-2 add 243 checkable decodes, 154 slot-confirmed, 0 unconfirmed; snapshot 3 adds
+    one unconfirmed garbage decode, so n = 2 (WSJT-X's maxosd at its deepest setting is also 2)."""
+    hard = (llr > 0).astype(np.uint8)
+    for s, z in enumerate(ldpc.bp_posterior_sums(llr, n)):
+        cw, crc, dist, _ = ldpc.osd_decode(z, osd_order)
+        nh = int((cw != hard).sum())
+        if crc and nh <= osd_max_hard:
+            return cw[:91], {"method": "osd_bp", "nhard": nh, "dist": dist, "snap": s + 1}
     return None, None
 
 

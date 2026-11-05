@@ -53,6 +53,8 @@ void ldpc_init(void);
 int bp_decode(const double *llr, int iters, uint8_t *bits, int *nhard);
 /* returns crc_ok; writes cw, dist, nhard */
 int osd_decode(const double *llr, int order, uint8_t *cw, double *dist, int *nhard);
+/* running sums of BP posteriors after iterations 1..n -> zs[n*174] */
+void bp_posterior_sums(const double *llr, int n, double *zs);
 
 /* ---- frontend.c */
 void frontend_init(void); /* once, before threads */
