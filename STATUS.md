@@ -1,6 +1,6 @@
 # Status and plan (resume here)
 
-Last updated 2026-11-04 (ONNX export, C library, candidate-baseline fix, burst-erasure retry done).
+Last updated 2026-11-04 (ONNX export, C library, candidate-baseline fix, burst-erasure retry done; validation set scored).
 
 ## Where we are
 
@@ -28,6 +28,36 @@ Real KiwiSDR recordings (10 stations, 1197 slots, `../ft8-training-data/recordin
 1180 decodes are ours only (94% name a callsign jt9 heard at that station); 466 are jt9 only.
 History: `nn_v2` 16055 (jt9-only 663) → baseline fix `nn_v2_bm` 16336 (jt9-only 512) → erasure `nn_v2_er` 16443 (jt9-only 466).
 08_80m: 3314 vs jt9 3258.
+
+### Validation set with ground truth (`../ft8-validation-set`, added by the user 2026-11-04)
+
+KiwiSDR recordings plus every PSK Reporter FT8 spot logged at the same time; its `README.md` explains it all.
+Run 1 (`recordings/`) = 9 training-set Kiwis on other bands/times; **run 2 (`run2/recordings`) = 9 Kiwis never
+used for training** (the honest generalisation test). 120 slots per station, jt9 baseline in each `decodes.txt`.
+Its `tools/verify.py` puts each decode's sender into a tier: `slot` (spotted by others in that slot) > `active`
+> `repeat` > `unconf`. **`unconf` ≈ false decodes** (jt9: 13 of 27,462 checkable in run 1, 16 of 23,958 in run 2).
+Treat the folder as read-only; our decodes go to `data/val/run{1,2}/<station>/decodes_<tag>.txt`:
+
+```sh
+V=/Users/jps/tmp/ft8-validation-set
+uv run python bench/run_real.py $V/recordings --model runs/v2/model.pt --also-classical --tag nn_v2_er --workers 6 --out data/val/run1
+uv run python bench/run_real.py $V/run2/recordings --model runs/v2/model.pt --also-classical --tag nn_v2_er --workers 6 --out data/val/run2
+python3 $V/tools/verify.py --decodes data/val/run1 --tag nn_v2_er --list
+python3 $V/tools/verify.py --recordings $V/run2/recordings --spots $V/run2/pskr_spots.jsonl --decodes data/val/run2 --tag nn_v2_er --list
+```
+
+Scores (`nn_v2_er` vs jt9 baseline, checkable = sender call is spotted-checkable):
+
+| run | decoder | decodes | slot-confirmed | unconf (≈ false) | jt9-only | ours-only (99% callsign-corroborated) |
+|---|---|---|---|---|---|---|
+| 1 (training sites) | jt9 | 27,730 | 21,492 | 13 | – | – |
+| 1 | **nn_v2_er** | **29,372 (+5.9%)** | **22,669 (+5.5%)** | **3** | 1543 | 3185 |
+| 2 (unseen sites) | jt9 | 24,291 | 17,993 | 16 | – | – |
+| 2 | **nn_v2_er** | **25,994 (+7.0%)** | **19,244 (+7.0%)** | **1** | 886 | 2590 |
+
+The gain is larger on unseen receivers than on training sites, and it holds up against outside spots:
+false decodes are below jt9's. Odd: jt9-only includes many strong signals (run 1: 289 at ≥ 0 dB, run 2: 114),
+e.g. run 2 00_40m `E70A KU2X FN13` at +4…+9 dB missed in 3 slots. Not yet diagnosed (see plan step 7).
 
 ### Reproduce the numbers
 
@@ -122,9 +152,16 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
    callsign, 0 uncorroborated.
    Golden C vs Python (tag `nn_v2_er`, first 20 slots): 00_40m 683/683, 08_80m 582/582 identical in every field;
    AWGN 60 files 419/419 identical payloads.
-6. **Next (not started), ranked:** deeper OSD or more AP types for expected-error 13–40 FAILs; training with
-   slow (seconds) signal fades; A/B `--fmax 3100` (3 NOCAND misses at 3001–3005 Hz).
-7. Optional later work:
+6. **Score `nn_v2_er` on the validation set — DONE (2026-11-04).** Results in the table above: +7.0% decodes and
+   +7.0% slot-confirmed on unseen receivers, 1 unconfirmed vs jt9's 16. From now on every decoder change is A/B'd here as well (run 2 is the deciding set),
+   because `ours-only corroborated` on the training recordings only checks the callsign, not that the station sent it.
+7. **Next (not started), ranked:**
+   1. Diagnose strong jt9-only misses on the validation set (run 1: 289 at ≥ 0 dB; run 2: 114), with
+      `tools/diag_strong_miss.py` adapted to take a recordings root and output root. Strong misses are the cheapest to fix.
+   2. Deeper OSD or more AP types for expected-error 13–40 FAILs; training with
+   slow (seconds) signal fades.
+   3. A/B `--fmax 3100` (3 NOCAND misses at 3001–3005 Hz).
+8. Optional later work:
    - More AP types: the a2 MyCall type needs a callsign context, and that is only useful inside an app.
    - Retrain on a bigger model.
    - Train with an AGC/passband-tilt impairment.

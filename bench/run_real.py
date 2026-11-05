@@ -123,6 +123,7 @@ def main():
     ap.add_argument("--fmax", type=float, default=3000.0)
     ap.add_argument("--base", default="median", choices=["max40", "median"], help="candidate score baseline")
     ap.add_argument("--erase-gate", type=float, default=15.0, help="burst-erasure retry below this expected error count (0 = off)")
+    ap.add_argument("--out", default="data/real", help="output root: <out>/<station>/decodes_<tag>.txt")
     ap.add_argument("--compare-only", action="store_true")
     ap.add_argument("--show", type=int, default=8, help="examples to print per category")
     a = ap.parse_args()
@@ -134,7 +135,7 @@ def main():
     if a.stations:
         pre = tuple(a.stations.split(","))
         stations = [s for s in stations if s.name.startswith(pre)]
-    outroot = Path("data/real")
+    outroot = Path(a.out)
 
     if not a.compare_only:
         with ProcessPoolExecutor(a.workers, initializer=_init, initargs=(a.model, a.also_classical, a.n_hyp, dict(per_symbol=a.per_symbol, fmax=a.fmax, base=a.base), a.erase_gate)) as ex:
