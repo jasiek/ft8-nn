@@ -13,7 +13,8 @@ extern "C" {
 
 typedef struct ft8nn_ctx ft8nn_ctx;
 
-enum { FT8NN_BP = 0, FT8NN_OSD = 1, FT8NN_BP_AP = 2, FT8NN_OSD_AP = 3, FT8NN_BP_ERASE = 4, FT8NN_OSD_ERASE = 5, FT8NN_OSD_BP = 6 };
+enum { FT8NN_BP = 0, FT8NN_OSD = 1, FT8NN_BP_AP = 2, FT8NN_OSD_AP = 3, FT8NN_BP_ERASE = 4, FT8NN_OSD_ERASE = 5, FT8NN_OSD_BP = 6,
+       FT8NN_BP_CTX = 7, FT8NN_OSD_CTX = 8 };
 
 typedef struct {
     char text[48];      /* decoded message, WSJT-X formatting; hashed calls as <CALL> or <...> */
@@ -24,7 +25,9 @@ typedef struct {
     int method;         /* FT8NN_BP, FT8NN_OSD, FT8NN_BP_AP (CQ a-priori), FT8NN_OSD_AP,
                            FT8NN_BP_ERASE (BP with a burst of symbols erased: message changed mid-frame),
                            FT8NN_OSD_ERASE (OSD-0 with a wider burst of 20-24 symbols erased),
-                           FT8NN_OSD_BP (OSD on the summed BP posteriors of the first iterations) */
+                           FT8NN_OSD_BP (OSD on the summed BP posteriors of the first iterations),
+                           FT8NN_BP_CTX / FT8NN_OSD_CTX (context a-priori: calls of a message decoded 30 or
+                           60 s earlier near this frequency; ft8nn_decode_at only) */
     int metric;         /* soft metric that decoded it: 0 = NN, 1..3 = classical nsym 1..3 */
     int pass;           /* subtraction pass, 0-based */
 } ft8nn_decode_t;
@@ -37,6 +40,12 @@ ft8nn_ctx *ft8nn_open(const char *onnx_path, int n_threads);
  * Uses at most the first 180000 samples. Writes up to max_out decodes, returns the number of
  * decodes found (which may exceed max_out), or -1 on error. */
 int ft8nn_decode(ft8nn_ctx *ctx, const float *audio12k, int n, ft8nn_decode_t *out, int max_out);
+
+/* As ft8nn_decode, plus context a-priori decoding: slot_time is the slot start in seconds (any fixed epoch, e.g.
+ * Unix time; slots 15 s apart). The context remembers its own decodes of the last 4 slots and uses those from
+ * slot_time - 30 and - 60 s (the same stations' previous transmissions) to try likely next messages.
+ * Call it for every slot in time order. */
+int ft8nn_decode_at(ft8nn_ctx *ctx, const float *audio12k, int n, int64_t slot_time, ft8nn_decode_t *out, int max_out);
 
 /* Forget all learned callsign hashes. */
 void ft8nn_reset_hashes(ft8nn_ctx *ctx);

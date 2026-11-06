@@ -16,6 +16,7 @@ import argparse
 import os
 import re
 from collections import Counter, defaultdict
+from datetime import datetime, timedelta
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -29,10 +30,11 @@ _EG = 15.0
 _EOD = 3.0
 _OSN = 2
 _NP = 4
+_CTX = True
 
 
-def _init(model, also_classical, n_hyp, ckw=None, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, passes=4):
-    global _LLR, _NHYP, _CKW, _EG, _EOD, _OSN, _NP
+def _init(model, also_classical, n_hyp, ckw=None, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, passes=4, context=True):
+    global _LLR, _NHYP, _CKW, _EG, _EOD, _OSN, _NP, _CTX
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     import torch
 
@@ -46,9 +48,31 @@ def _init(model, also_classical, n_hyp, ckw=None, erase_gate=15.0, erase_osd_dma
     _EOD = erase_osd_dmax
     _OSN = osd_snaps
     _NP = passes
+    _CTX = context
 
 
-def _decode(path):
+def _slot_time(stem):
+    try:
+        return datetime.strptime(stem, "%y%m%d_%H%M%S")
+    except ValueError:
+        return None
+
+
+def _decode_chain(paths):
+    """Decode slots in time order; each gets the decodes of the slots 30 and 60 s earlier as context
+    (a receiver running continuously). Chains are one period (even/odd slots) of one station."""
+    done, out = {}, []
+    for path in paths:
+        t = _slot_time(Path(path).stem)
+        ctx = [c for b in (30, 60) for c in done.get(t - timedelta(seconds=b), [])] if t and _CTX else []
+        stem, res = _decode(path, ctx)
+        if t:
+            done[t] = [(r[1], r[2], r[0]) for r in res]
+        out.append((stem, res))
+    return out
+
+
+def _decode(path, context=()):
     from ft8nn import decoder
 
     sr, x = wavfile.read(path)
@@ -58,7 +82,7 @@ def _decode(path):
         x = x.mean(1)
     if len(x) < 180000:
         x = np.pad(x, (0, 180000 - len(x)))
-    ds = decoder.decode_slot(x[:180000] / (np.std(x) + 1e-9), llr_fn=_LLR, n_hyp=_NHYP, erase_gate=_EG, erase_osd_dmax=_EOD, osd_snaps=_OSN, passes=_NP, cand_kw=_CKW)
+    ds = decoder.decode_slot(x[:180000] / (np.std(x) + 1e-9), llr_fn=_LLR, n_hyp=_NHYP, erase_gate=_EG, erase_osd_dmax=_EOD, osd_snaps=_OSN, passes=_NP, context=context, cand_kw=_CKW)
     return Path(path).stem, [(d.bits77, d.f0, d.dt, d.method, d.info.get("metric"), d.snr) for d in ds]
 
 
@@ -132,6 +156,7 @@ def main():
     ap.add_argument("--erase-osd-dmax", type=float, default=3.0, help="wide-window OSD erasure stage distance limit (0 = off)")
     ap.add_argument("--osd-snaps", type=int, default=2, help="OSD on BP posterior sums after iterations 1..N (0 = off)")
     ap.add_argument("--passes", type=int, default=4, help="decode-subtract passes per slot")
+    ap.add_argument("--no-context", action="store_true", help="no context a-priori (slots decoded independently)")
     ap.add_argument("--out", default="data/real", help="output root: <out>/<station>/decodes_<tag>.txt")
     ap.add_argument("--compare-only", action="store_true")
     ap.add_argument("--show", type=int, default=8, help="examples to print per category")
@@ -147,10 +172,24 @@ def main():
     outroot = Path(a.out)
 
     if not a.compare_only:
-        with ProcessPoolExecutor(a.workers, initializer=_init, initargs=(a.model, a.also_classical, a.n_hyp, dict(per_symbol=a.per_symbol, fmax=a.fmax, base=a.base), a.erase_gate, a.erase_osd_dmax, a.osd_snaps, a.passes)) as ex:
-            for st in stations:
+        with ProcessPoolExecutor(a.workers, initializer=_init, initargs=(a.model, a.also_classical, a.n_hyp, dict(per_symbol=a.per_symbol, fmax=a.fmax, base=a.base), a.erase_gate, a.erase_osd_dmax, a.osd_snaps, a.passes, not a.no_context)) as ex:
+            jobs = []  # (station index, chain): one chain per station and period, or one per file without context
+            for si, st in enumerate(stations):
                 files = sorted(str(f) for f in (st / "slots").glob("*.wav"))
-                res = dict(ex.map(_decode, files, chunksize=2))
+                if a.no_context:
+                    jobs += [(si, [f]) for f in files]
+                else:
+                    per = defaultdict(list)
+                    for f in files:
+                        t = _slot_time(Path(f).stem)
+                        per[t.second // 15 % 2 if t else f].append(f)
+                    jobs += [(si, c) for c in per.values()]
+            results = defaultdict(dict)
+            for (si, _), out in zip(jobs, ex.map(_decode_chain, [c for _, c in jobs])):
+                results[si].update(out)
+            for si, st in enumerate(stations):
+                files = sorted((st / "slots").glob("*.wav"))
+                res = results[si]
                 ht = message.HashTable()  # learn hashes in time order, like a running WSJT-X session
                 lines = []
                 for slot in sorted(res):

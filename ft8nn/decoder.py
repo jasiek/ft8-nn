@@ -39,6 +39,33 @@ def _ap_cq():
 
 AP_CQ = _ap_cq()
 
+# Context a-priori: a station keeps its audio frequency and usually continues the same exchange, so a standard
+# message decoded 30 or 60 s earlier (same period) near f predicts the next one there. Patterns, strongest first:
+# pair = both call fields + i3 (61 bits: the QSO continues), sender = second call + i3 (32 bits: new partner, after CQ).
+# Validation run 2 prototype: +1117 new decodes; with every receiver given another receiver's context instead
+# (all decodes would be false) 0 of 211,315 hypotheses decoded.
+CTX_PAIR = np.r_[0:58, 74:77]
+CTX_SENDER = np.r_[29:58, 74:77]
+CTX_DF = 10.0  # Hz
+# A sender's clock is stable: run 2, same sender within CTX_DF 30/60 s later, |dDT| p90 0.05 s, p99 0.49 s. Without this
+# limit a late copy (DT 2.36) of a strong neighbour decoded as `9R2NKT NI8T R IC50` and then fed itself as context.
+CTX_DDT = 0.5  # s
+
+
+def context_patterns(context, f0, dt):
+    """[(kind, idx, val)] for the context messages [(f0, dt, bits77)] within CTX_DF and CTX_DDT of (f0, dt); standard
+    messages (i3 1/2) only."""
+    out, seen = [], set()
+    for fc, dc, b in context:
+        if abs(fc - f0) > CTX_DF or abs(dc - dt) > CTX_DDT or b[74:77].tolist() not in ([0, 0, 1], [0, 1, 0]):
+            continue
+        for kind, idx in (("pair", CTX_PAIR), ("sender", CTX_SENDER)):
+            key = (kind, b[idx].tobytes())
+            if key not in seen:
+                seen.add(key)
+                out.append((kind, idx, b[idx]))
+    return out
+
 
 NOISE_BIN = fe.NBB / (int(round(8.5 * ft8.TONE_SPACING / fe.DF_FULL)) + int(round(1.5 * ft8.TONE_SPACING / fe.DF_FULL)))
 SNR_OFFSET = 0.23  # calibration vs true SNR on synthetic AWGN (tools/calib_snr.py)
@@ -62,7 +89,7 @@ def classical_metrics(hyps):
     return out
 
 
-def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=4, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, cand_kw=None):
+def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=4, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, context=(), ctx_gate=48.0, cand_kw=None):
     """Decode one 15 s slot (real audio @12 kHz, any scale), with multi-pass subtraction.
 
     llr_fn(hyps) -> per-hypothesis list of LLR vectors to try in order (first success wins).
@@ -78,22 +105,25 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
     reliability-weighted distance on the kept bits; 0 disables.
     osd_snaps: when OSD on the NN LLRs fails, OSD again on the running sums of BP posteriors after iterations
     1..osd_snaps (_try_osd_bp, WSJT-X's zsave); 0 disables.
+    context: [(f0, dt, bits77)] decoded 30 and 60 s earlier on this receiver; context a-priori (_try_ctx) for
+    hypotheses within CTX_DF and CTX_DDT of one of them whose expected error count is below ctx_gate. Empty: off.
     cand_kw: extra keyword arguments for frontend.find_candidates (e.g. per_symbol, fmax).
     """
     x = np.array(x, dtype=np.float64, copy=True)
     found = {}
     for p in range(passes):
-        new = _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, osd_snaps, cand_kw or {})
+        new = _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, cand_kw or {})
         for d in new:
             d.info["pass"] = p
             found[d.key] = d
             subtract(x, ft8.encode77(d.bits77)[1], d.f0, d.dt)
         if not new:
             break
+    _drop_ctx_dupes(found)
     return list(found.values())
 
 
-def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, osd_snaps, cand_kw):
+def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, cand_kw):
     cands = fe.find_candidates(x, max_cand=max_cand, **cand_kw)
     bb = fe.Baseband(x)
     hyps, owner = [], []
@@ -132,6 +162,10 @@ def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd
                     a91, info = cw[:91], {"method": "osd", "nhard": nh, "dist": dist}
                 elif osd_snaps and not early:
                     a91, info = _try_osd_bp(L[r], osd_snaps, osd_order, osd_max_hard)
+            if a91 is None and k == 0 and context and not early and exp_err[r] < ctx_gate:
+                pats = context_patterns(context, h.f0, h.dt)
+                if pats:
+                    a91, info = _try_ctx(L[r], pats)
             if a91 is None and k == 0 and ap and exp_err[r] < ap_gate:
                 a91, info = _try_ap(L[r], ap, -1 if early else osd_order, osd_max_hard)
             if a91 is None and k == 0 and exp_err[r] < erase_gate and not early:
@@ -154,6 +188,7 @@ def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd
     for key in [k for k, d in found.items() if d.method in GHOST_PRONE]:
         if any(_is_ghost(found[key], e) for e in others):
             del found[key]
+    _drop_ctx_dupes(found, known.values())
     return list(found.values())
 
 
@@ -163,6 +198,24 @@ GHOST_MAX_DF, GHOST_MIN_SYMS, GHOST_MATCH = 50.0, 20, 0.4
 # Methods checked for ghosts. osd_bp: on run 2 (nn_v2_ob) the test flagged 1 of 512 osd_bp decodes, the only
 # unconfirmed one (`0J4SMG/R TS6KAQ/R R AO20`, 12 symbols after a -1.5 dB signal 1.6 Hz away).
 GHOST_PRONE = ("osd_er", "osd_bp")
+CTX_METHODS = ("bp_cx", "osd_cx")
+
+
+def _sender_key(d):
+    """Second call field (+ ipb) of a standard message, else None."""
+    return d.bits77[29:58].tobytes() if d.bits77[74:77].tolist() in ([0, 0, 1], [0, 1, 0]) else None
+
+
+def _drop_ctx_dupes(found, known=()):
+    """A station sends one message per slot. A context decode whose sender another decode of this slot already has
+    is a second hypothesis on that signal (other DT) read with the pinned calls: drop it (in place)."""
+    have = {_sender_key(d) for d in list(found.values()) + list(known) if d.method not in CTX_METHODS}
+    for key in [k for k, d in found.items() if d.method in CTX_METHODS]:
+        sk = _sender_key(found[key])
+        if sk in have:
+            del found[key]
+        else:
+            have.add(sk)
 
 
 def _is_ghost(d, e):
@@ -230,6 +283,27 @@ def _try_osd_bp(llr, n, osd_order, osd_max_hard):
         nh = int((cw != hard).sum())
         if crc and nh <= osd_max_hard:
             return cw[:91], {"method": "osd_bp", "nhard": nh, "dist": dist, "snap": s + 1}
+    return None, None
+
+
+def _try_ctx(llr, patterns):
+    """Context a-priori: pin each pattern's bits (as _try_ap), BP then OSD-2; first CRC pass that keeps the pinned
+    bits wins. No hard-error limit: the wrong-context test (0 false of 211,315) was run without one."""
+    mag = 1.01 * float(np.abs(llr).max())
+    hard = (llr > 0).astype(np.uint8)
+    for kind, idx, val in patterns:
+        l2 = llr.copy()
+        l2[idx] = np.where(val == 1, mag, -mag)
+        bits, ok, _ = ldpc.bp_decode(l2[None])
+        if ok[0] and ft8.crc_ok(bits[0, :91]):
+            cw, info = bits[0], {"method": "bp_cx"}
+        else:
+            cw, crc, dist, _ = ldpc.osd_decode(l2, 2)
+            if not crc:
+                continue
+            info = {"method": "osd_cx", "dist": dist}
+        if (cw[idx] == val).all():
+            return cw[:91], {**info, "ctx": kind, "nhard": int((cw != hard).sum())}
     return None, None
 
 

@@ -1,6 +1,6 @@
 # Status and plan (resume here)
 
-Last updated 2026-11-05 (4th subtraction pass committed as `nn_v2_p4`; improve loop finished on the Mac mini).
+Last updated 2026-11-06 (context a-priori decoding committed as `nn_v2_cy`, 0ec12a6; improve loop finished on the Mac mini).
 
 ## Improve loop (2026-11-05 on the Mac mini, user-approved) — FINISHED 18:40, stop condition (1) met
 
@@ -15,9 +15,10 @@ decodes verified identical to the main machine.
 
 ## In flight
 
-- Nothing. Loop log: `nn_v2_eh` pass, `nn_v2_ob` fail (1 ghost), `nn_v2_og` pass, `nn_v2_p4` pass → run 2
+- Nothing. Last commit: context a-priori decoding `nn_v2_cy` (plan 7.2c).
+- Loop log (finished): `nn_v2_eh` pass, `nn_v2_ob` fail (1 ghost), `nn_v2_og` pass, `nn_v2_p4` pass → run 2
   slot-confirmed 19,550 ≥ 19,500 with unconf 1, noise 0 false: loop stopped. Commits need the user's OK again.
-  Next candidates: plan 7.3 (clean C timing; a 4th pass costs time on busy slots), more AP types, retraining.
+  Next candidates: plan 7.3 (clean C timing; 4 passes + context AP cost time on busy slots), retraining.
 
 ## Where we are
 
@@ -28,7 +29,9 @@ Recipe: v1 (6000 steps, `--cfg v1`), then fine-tune with
 Decoder defaults: `decoder.decode_slot`. These are 4 passes with subtraction, 2 fine-sync hypotheses,
 NN metric with classical nsym 1/2/3 fallback (`--also-classical`), OSD order 2 gated on expected errors < 40,
 CQ a-priori decoding (expected errors < 44), burst-erasure retry (expected errors < 15) with a wide-window OSD stage
-(`osd_er`), OSD on summed BP posteriors after iterations 1–2 (`osd_bp`), ghost filter, candidate search 150–3100 Hz plus an early-DT track down to −2.5 s.
+(`osd_er`), OSD on summed BP posteriors after iterations 1–2 (`osd_bp`), ghost filter, candidate search 150–3100 Hz plus an early-DT track down to −2.5 s,
+context a-priori decoding from our own decodes 30/60 s earlier (`bp_cx`/`osd_cx`, expected errors < 48; needs
+`context=` in Python, `ft8nn_decode_at` in C; the bench passes it, see plan 7.2c).
 
 ### Results vs WSJT-X jt9 (`-d 3`)
 
@@ -42,10 +45,10 @@ CQ a-priori decoding (expected errors < 44), burst-erasure retry (expected error
 | noise only, 100 slots | – | 0 false | **0 false** |
 
 Real KiwiSDR recordings (10 stations, 1197 slots, `../ft8-training-data/recordings`, read-only; another agent owns it):
-**Current default `nn_v2_p4` decodes 16638, jt9 decodes 15729 (+5.8%).**
-1309 decodes are ours only (1233 name a callsign jt9 heard at that station); 400 are jt9 only.
-History: `nn_v2` 16055 (jt9-only 663) → baseline fix `nn_v2_bm` 16336 (jt9-only 512) → erasure `nn_v2_er` 16443 (jt9-only 466) → fmax 3100 `nn_v2_f31` 16452 (jt9-only 463) → early-DT + osd_er `nn_v2_eh` 16460 (463) → osd_bp `nn_v2_og` 16621 (405) → 4 passes `nn_v2_p4` 16638 (400).
-08_80m: 3353 vs jt9 3258. AWGN 50% with `nn_v2_og`/`nn_v2_p4`: −22.52 (90%: −21.28).
+**Current default `nn_v2_cy` decodes 17586, jt9 decodes 15729 (+11.8%).**
+2166 decodes are ours only (2087 name a callsign jt9 heard at that station); 309 are jt9 only.
+History: `nn_v2` 16055 (jt9-only 663) → baseline fix `nn_v2_bm` 16336 (jt9-only 512) → erasure `nn_v2_er` 16443 (jt9-only 466) → fmax 3100 `nn_v2_f31` 16452 (jt9-only 463) → early-DT + osd_er `nn_v2_eh` 16460 (463) → osd_bp `nn_v2_og` 16621 (405) → 4 passes `nn_v2_p4` 16638 (400) → context AP `nn_v2_cy` 17586 (309).
+08_80m: 3477 vs jt9 3258. AWGN 50% with `nn_v2_og`/`nn_v2_p4`/`nn_v2_cy`: −22.52 (90%: −21.28).
 
 ### Validation set with ground truth (`../ft8-validation-set`, added by the user 2026-11-04)
 
@@ -58,10 +61,10 @@ Treat the folder as read-only; our decodes go to `data/val/run{1,2}/<station>/de
 
 ```sh
 V=/Users/jps/tmp/ft8-validation-set
-uv run python bench/run_real.py $V/recordings --model runs/v2/model.pt --also-classical --tag nn_v2_p4 --workers 6 --out data/val/run1
-uv run python bench/run_real.py $V/run2/recordings --model runs/v2/model.pt --also-classical --tag nn_v2_p4 --workers 6 --out data/val/run2
-python3 $V/tools/verify.py --decodes data/val/run1 --tag nn_v2_p4 --list
-python3 $V/tools/verify.py --recordings $V/run2/recordings --spots $V/run2/pskr_spots.jsonl --decodes data/val/run2 --tag nn_v2_p4 --list
+uv run python bench/run_real.py $V/recordings --model runs/v2/model.pt --also-classical --tag nn_v2_cy --workers 6 --out data/val/run1
+uv run python bench/run_real.py $V/run2/recordings --model runs/v2/model.pt --also-classical --tag nn_v2_cy --workers 6 --out data/val/run2
+python3 $V/tools/verify.py --decodes data/val/run1 --tag nn_v2_cy --list
+python3 $V/tools/verify.py --recordings $V/run2/recordings --spots $V/run2/pskr_spots.jsonl --decodes data/val/run2 --tag nn_v2_cy --list
 ```
 
 Scores (vs jt9 baseline, checkable = sender call is spotted-checkable):
@@ -73,16 +76,20 @@ Scores (vs jt9 baseline, checkable = sender call is spotted-checkable):
 | 1 | nn_v2_f31 | 29,497 (+6.4%) | 22,792 (+6.0%) | 3 | | |
 | 1 | nn_v2_eh | 29,584 (+6.7%) | 22,852 (+6.3%) | 3 | | |
 | 1 | nn_v2_og | 29,929 (+7.9%) | 23,090 (+7.4%) | 3 | | |
-| 1 | **nn_v2_p4** | **30,116 (+8.6%)** | **23,230 (+8.1%)** | **3** | | |
+| 1 | nn_v2_p4 | 30,116 (+8.6%) | 23,230 (+8.1%) | 3 | | |
+| 1 | **nn_v2_cy** | **31,957 (+15.2%)** | **24,449 (+13.8%)** | **3** | | |
 | 2 (unseen sites) | jt9 | 24,291 | 17,993 | 16 | – | – |
 | 2 | nn_v2_er | 25,994 (+7.0%) | 19,244 (+7.0%) | 1 | 886 | 2590 |
 | 2 | nn_v2_f31 | 26,032 (+7.2%) | 19,281 (+7.2%) | 1 | 850 | |
 | 2 | nn_v2_eh | 26,091 (+7.4%) | 19,320 (+7.4%) | 1 | | |
 | 2 | nn_v2_og | 26,340 (+8.4%) | 19,480 (+8.3%) | 1 | | |
-| 2 | **nn_v2_p4** | **26,439 (+8.8%)** | **19,550 (+8.7%)** | **1** | | |
+| 2 | nn_v2_p4 | 26,439 (+8.8%) | 19,550 (+8.7%) | 1 | | |
+| 2 | **nn_v2_cy** | **27,930 (+15.0%)** | **20,505 (+14.0%)** | **1** | | |
 
 The gain is larger on unseen receivers than on training sites, and it holds up against outside spots:
-false decodes are below jt9's. Odd: jt9-only includes many strong signals (run 1: 289 at ≥ 0 dB, run 2: 114),
+false decodes are below jt9's. **Caveat for `nn_v2_cy`:** a context decode's sender is by construction a station
+we decoded 30/60 s earlier, so the spot tiers can't catch a false context decode well; its false-alarm evidence is
+the shuffle test and the free-bits plausibility check in plan 7.2c. Odd: jt9-only includes many strong signals (run 1: 289 at ≥ 0 dB, run 2: 114),
 e.g. run 2 00_40m `E70A KU2X FN13` at +4…+9 dB missed in 3 slots. Many were above our old 3000 Hz search limit
 (fixed by `nn_v2_f31`: run 2 strong jt9-only 114 → 82); the rest are plan step 7.1.
 
@@ -90,11 +97,13 @@ e.g. run 2 00_40m `E70A KU2X FN13` at +4…+9 dB missed in 3 slots. Many were ab
 
 ```sh
 uv run pytest -q                                                    # 26 tests
-uv run python bench/run_ours.py data/bench/awgn --model runs/v2/model.pt --also-classical --tag nn_v2_p4 --workers 6
+uv run python bench/run_ours.py data/bench/awgn --model runs/v2/model.pt --also-classical --tag nn_v2_cy --workers 6
 uv run python bench/report.py data/bench/awgn --dt-max 0.5
-uv run python bench/run_real.py /Users/jps/tmp/ft8-training-data/recordings --model runs/v2/model.pt --also-classical --tag nn_v2_p4 --workers 6
-uv run python bench/run_real.py /Users/jps/tmp/ft8-training-data/recordings --compare-only --tag nn_v2_p4
+uv run python bench/run_real.py /Users/jps/tmp/ft8-training-data/recordings --model runs/v2/model.pt --also-classical --tag nn_v2_cy --workers 6
+uv run python bench/run_real.py /Users/jps/tmp/ft8-training-data/recordings --compare-only --tag nn_v2_cy
 ```
+`run_real.py` decodes each (station, slot parity) chain in time order so context AP sees the decoder's own earlier
+slots; `--no-context` turns that off (per-slot decodes, the `nn_v2_p4` behaviour). `run_ours.py` has no context.
 
 Real decode run is about 20 min with 6 workers (about 4 s/slot/core). The synthetic sets take about 5 min each.
 Don't run training and benchmarks at the same time, because memory pressure stalls both.
@@ -138,11 +147,14 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
    - Code in `c/` (`make -C c` → `c/build/libft8nn.{a,dylib}`, `c/build/ft8nn_cli`). Own C for everything,
      including a mixed-radix 2/3/5 FFT; the only dependency is ONNX Runtime (`brew install onnxruntime`).
      API in `c/include/ft8nn.h`: `ft8nn_open(onnx, n_threads)`, `ft8nn_decode(ctx, audio, n, out, max)`,
-     `ft8nn_reset_hashes`, `ft8nn_close`. One context per thread; the context's hash table learns callsigns.
+     `ft8nn_decode_at(ctx, audio, n, slot_time, out, max)` (same, plus context AP from the context's own decodes
+     at slot_time − 30/60 s; call it every slot in time order), `ft8nn_reset_hashes`, `ft8nn_close`.
+     `ft8nn_cli` uses `ft8nn_decode_at` when the file name is a `yymmdd_HHMMSS` slot time. One context per thread; the context's hash table learns callsigns.
      `ft8nn_decode` normalises audio to unit std internally (as `bench/run_real.py` does).
    - LDPC tables: `c/src/ldpc_tables.h`, generated by `tools/gen_c_tables.py`.
-   - Golden test `tools/golden_c.py` (uses `runs/v2/ft8nn.onnx`; compares against tag `nn_v2_p4` by default; last
-     verified with `nn_v2_p4`: 698/698 + 588/588 real, run 2 02_80m 725/725, 430/430 AWGN):
+   - Golden test `tools/golden_c.py` (uses `runs/v2/ft8nn.onnx`; compares against tag `nn_v2_cy` by default; last
+     verified with `nn_v2_cy`: 756/756 + 600/600 real, run 2 02_80m 733/733, 430/430 AWGN; the real-data golden
+     decodes the slots in order through `ft8nn_decode_at`, so context AP is covered):
      real 00_40m + 08_80m, first 20 slots each: 1231/1231 decodes identical in every output field;
      AWGN 60 files: 418/418 identical payloads.
      `uv run python tools/golden_c.py real <station_dir> --n 20`, `... awgn data/bench/awgn --n 60`.
@@ -276,10 +288,36 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       23,230, unconf 3 → 3; training 16,621 → 16,638 (jt9-only 405 → 400); AWGN 50% −22.52 (unchanged); noise 0 false.
       Smaller than the prototype's +106 slot because `osd_bp` already took part of that residual. Golden C vs Python:
       00_40m 698/698, 08_80m 588/588, run 2 02_80m 725/725 all fields; AWGN 430/430.
+   2c. **Context a-priori decoding (`bp_cx`/`osd_cx`) — DONE as `nn_v2_cy`.** In a QSO the
+      next message from a station usually repeats known fields: the same two calls (`K1ABC W9XYZ` + a new report)
+      or at least the same sender. We take every standard message (i3 = 1/2) we decoded 30 s and 60 s earlier within
+      10 Hz (`CTX_DF`) and 0.5 s DT (`CTX_DDT`) of the hypothesis and pin either the pair (bits 0–57 + i3, 61 bits)
+      or the sender (bits 29–57 + i3, 32 bits) at 1.01·max|LLR|, then BP, else OSD-2; the result must keep the pinned
+      bits and pass CRC. Gate: expected errors < 48 (`CTX_GATE`), NN metric only, not early-DT, tried after
+      OSD/osd_bp and before CQ AP. One message per sender per slot (`_drop_ctx_dupes`): a context decode is dropped
+      when a normal decode or an earlier context decode in the slot has the same sender.
+      Prototype on run 2: +1,117 new decodes (bound). **Shuffle test:** the same with context taken from the wrong
+      station/time: 0 decodes from 211,315 tries, so a pattern alone doesn't force a CRC-valid codeword.
+      Two false decodes found and fixed on the way: `OK1VKP KN4TYK QJ11` (a second hypothesis 0.65 s off a signal
+      decoded normally in the same slot → one message per sender) and `9R2NKT NI8T R IC50` ×2 (DT 2.36 vs 0.13:
+      a late copy of a strong neighbour that then fed itself as context → `CTX_DDT`; same-sender |ΔDT| 30/60 s later
+      is p90 0.05 s, p99 0.49 s on run 2).
+      **Plausibility check** (scratch `cx_check.py`): the unpinned bits of a false decode are random and then almost
+      always (98.9%) unpack as a grid, while real ones carry reports/RRR/RR73/73 or the sender's known grid.
+      Run 2: 2,371 cx decodes (1,481 bp_cx, 890 osd_cx) = 1,537 known grid, 828 report/RRR/RR73/73, 6 new grid that
+      fits the call's country. Run 1: 2,789 = 1,797 known grid, 988 report-type, 4 new fitting grid (UA6YW LN04,
+      IW3HXR JN55, each in 2 slots).
+      **`nn_v2_cy` vs `nn_v2_p4`:** run 2 26,439 → 27,930 decodes, slot-confirmed 19,550 → 20,505, unconf 1 → 1
+      (`CQ 0V1YXG GG88`, the same); run 1 30,116 → 31,957, slot 23,230 → 24,449, unconf 3 → 3 (none context:
+      `K11BNB` dropped out, `ZT5SRQ/R UW3THX IM59` osd_er came in through a changed residual); training recordings
+      16,638 → 17,586, jt9-only 400 → 309; AWGN 50% −22.52 (unchanged; no context there); noise 0 false / 998
+      (no context there either, so not a test of this stage). Golden C vs Python: 00_40m 756/756, 08_80m 600/600,
+      run 2 02_80m 733/733 all fields (incl. cx decodes); AWGN 430/430.
    3. Re-measure C decode time per slot on an idle machine, busiest stations (00_40m, validation 01_40m), single core
       and `--threads 2/4`. README "System requirements" quotes 18 s for one busy slot measured under load and
       recommends ≥ 2 cores; replace with clean numbers.
 8. Optional later work:
-   - More AP types: the a2 MyCall type needs a callsign context, and that is only useful inside an app.
+   - More AP types: the a2 MyCall type needs the operator's own callsign, and that is only useful inside an app
+     (an `ft8nn_set_mycall` would slot into the same pinned-bit machinery as context AP).
    - Retrain on a bigger model.
    - Train with an AGC/passband-tilt impairment.

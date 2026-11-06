@@ -3,13 +3,15 @@
  *   ft8nn_cli [--threads N] model.onnx slot1.wav [slot2.wav ...]
  *
  * One context for all files, so callsign hashes carry over in the order given (pass slots in
- * time order). Output, one line per decode, same format as bench/run_real.py decodes_<tag>.txt:
+ * time order). Files named yymmdd_HHMMSS.wav are decoded with ft8nn_decode_at (context a-priori from the
+ * slots 30 and 60 s earlier); other names with ft8nn_decode. Output, one line per decode, same format as bench/run_real.py decodes_<tag>.txt:
  *   <slot>\t<f0 %.1f>\t<dt %.2f>\t<method><metric>\t<text>\t<77 bits as 20 hex digits>\t<snr %.1f>
  */
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "../include/ft8nn.h"
 
@@ -58,8 +60,21 @@ out:
 }
 
 static const char *method_name(int m) {
-    static const char *names[] = {"bp", "osd", "bp_ap0", "osd_ap0", "bp_er", "osd_er", "osd_bp"};
-    return m >= 0 && m < 7 ? names[m] : "?";
+    static const char *names[] = {"bp", "osd", "bp_ap0", "osd_ap0", "bp_er", "osd_er", "osd_bp", "bp_cx", "osd_cx"};
+    return m >= 0 && m < 9 ? names[m] : "?";
+}
+
+/* slot start from a yymmdd_HHMMSS name on a 15 s boundary, s since 1970 (UTC); INT64_MIN otherwise (e.g. the
+ * numbered synthetic test files) */
+static int64_t slot_time(const char *slot) {
+    struct tm tm = {0};
+    char rest;
+    if (sscanf(slot, "%2d%2d%2d_%2d%2d%2d%c", &tm.tm_year, &tm.tm_mon, &tm.tm_mday, &tm.tm_hour, &tm.tm_min, &tm.tm_sec,
+               &rest) != 6 || strlen(slot) != 13 || tm.tm_mon < 1 || tm.tm_mon > 12 || tm.tm_mday < 1 || tm.tm_sec % 15)
+        return INT64_MIN;
+    tm.tm_year += 100;
+    tm.tm_mon -= 1;
+    return (int64_t)timegm(&tm);
 }
 
 int main(int argc, char **argv) {
@@ -83,18 +98,19 @@ int main(int argc, char **argv) {
             free(x);
             continue;
         }
-        int nd = ft8nn_decode(ctx, x, n, out, 256);
-        free(x);
-        if (nd < 0) {
-            fprintf(stderr, "%s: decode failed\n", argv[i]);
-            continue;
-        }
         const char *base = strrchr(argv[i], '/');
         base = base ? base + 1 : argv[i];
         char slot[256];
         snprintf(slot, sizeof slot, "%s", base);
         char *dot = strrchr(slot, '.');
         if (dot) *dot = 0;
+        int64_t t = slot_time(slot);
+        int nd = t == INT64_MIN ? ft8nn_decode(ctx, x, n, out, 256) : ft8nn_decode_at(ctx, x, n, t, out, 256);
+        free(x);
+        if (nd < 0) {
+            fprintf(stderr, "%s: decode failed\n", argv[i]);
+            continue;
+        }
         for (int k = 0; k < nd && k < 256; k++) {
             const ft8nn_decode_t *d = &out[k];
             /* 77-bit payload as a 20-digit hex number (Python: f"{int(bits, 2):020x}") */

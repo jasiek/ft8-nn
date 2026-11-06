@@ -1,7 +1,8 @@
 /* Slot decoder (port of ft8nn/decoder.py decode_slot with nn_metric.make_llr_fn(also_classical=True)).
  *
  * Per pass: candidates -> fine_sync2 (2 hypotheses each) -> soft metrics [NN, classical nsym 1/2/3]
- * -> BP -> OSD-2 (NN metric only, gated; then on summed BP posteriors) -> CQ a-priori (NN metric only, gated) -> CRC.
+ * -> BP -> OSD-2 (NN metric only, gated; then on summed BP posteriors) -> context a-priori (decodes 30/60 s earlier,
+ * ft8nn_decode_at only) -> CQ a-priori (NN metric only, gated) -> CRC.
  * Decodes are subtracted from the audio between passes.
  */
 #include <math.h>
@@ -32,6 +33,12 @@ static double tnow(void) {
 #define OSD_GATE 40.0
 #define OSD_SNAPS 2 /* OSD on BP posterior sums after iterations 1..OSD_SNAPS when OSD fails (decoder.osd_snaps) */
 #define AP_GATE 44.0
+/* context a-priori (decoder._try_ctx): decodes 30 and 60 s earlier within CTX_DF Hz and CTX_DDT s of a hypothesis */
+#define CTX_GATE 48.0
+#define CTX_DF 10.0
+#define CTX_DDT 0.5
+#define CTX_HIST 4 /* slots of history kept per context */
+#define DEC_CAP 512 /* decodes per slot */
 #define ERASE_GATE 15.0 /* burst-erasure retry for confident NN metrics that still fail */
 /* osd_er ghost test (decoder._is_ghost): neighbour within GHOST_MAX_DF Hz whose tones, shifted by whole symbols and
  * tones, equal the decode's data tones on >= GHOST_MATCH of >= GHOST_MIN_SYMS comparable symbols */
@@ -46,12 +53,23 @@ static double tnow(void) {
 #define NOISE_BIN (3200.0 / 1000.0)
 #define SNR_OFFSET 0.23
 
+typedef struct {
+    uint8_t bits77[77];
+    double f0, dt, snr;
+    int method, metric, pass;
+} dec;
+
 struct ft8nn_ctx {
     const OrtApi *api;
     OrtEnv *env;
     OrtSession *sess;
     OrtMemoryInfo *mem;
     hash_table *ht;
+    struct {
+        int64_t t; /* slot start, s; INT64_MIN = empty */
+        int n;
+        dec *d;
+    } hist[CTX_HIST]; /* this context's own decodes of recent slots (ft8nn_decode_at) */
 };
 
 static pthread_once_t init_once = PTHREAD_ONCE_INIT;
@@ -88,6 +106,10 @@ ft8nn_ctx *ft8nn_open(const char *onnx_path, int n_threads) {
     }
     api->ReleaseSessionOptions(so);
     c->ht = ht_new();
+    for (int i = 0; i < CTX_HIST; i++) {
+        c->hist[i].t = INT64_MIN;
+        c->hist[i].d = malloc(sizeof(dec) * DEC_CAP);
+    }
     return c;
 }
 
@@ -98,6 +120,7 @@ void ft8nn_close(ft8nn_ctx *c) {
     if (c->sess) api->ReleaseSession(c->sess);
     if (c->env) api->ReleaseEnv(c->env);
     ht_free(c->ht);
+    for (int i = 0; i < CTX_HIST; i++) free(c->hist[i].d);
     free(c);
 }
 
@@ -130,12 +153,6 @@ static int run_nn(ft8nn_ctx *c, const sync_hyp *hyps, int nh, double *llr) {
     free(feat);
     return rc;
 }
-
-typedef struct {
-    uint8_t bits77[77];
-    double f0, dt, snr;
-    int method, metric, pass;
-} dec;
 
 static int same_payload(const uint8_t *a, const uint8_t *b) { return !memcmp(a, b, 77); }
 
@@ -193,6 +210,70 @@ static void ap_init(void) {
     ap_val[29] = 0;
     ap_val[30] = 0;
     ap_val[31] = 1;
+}
+
+/* standard message (i3 = 1 or 2): call fields at bits 0..28 and 29..57 */
+static int std_msg(const uint8_t *b) { return !b[74] && (b[75] ^ b[76]); }
+
+/* Context a-priori (decoder.context_patterns + _try_ctx): for each context message within CTX_DF / CTX_DDT, pattern
+ * pair (bits 0..57 + i3) then sender (29..57 + i3), deduplicated in order; pin, BP, else OSD-2; first CRC pass that
+ * keeps the pinned bits wins. Returns FT8NN_BP_CTX, FT8NN_OSD_CTX or -1. */
+static int try_ctx(const double *llr, const dec *cx, int ncx, double f0, double dt, uint8_t *a91) {
+    enum { MAXP = 64 };
+    const uint8_t *pb[MAXP];
+    int pk[MAXP], np = 0;
+    for (int i = 0; i < ncx && np < MAXP; i++) {
+        if (fabs(cx[i].f0 - f0) > CTX_DF || fabs(cx[i].dt - dt) > CTX_DDT || !std_msg(cx[i].bits77)) continue;
+        for (int kind = 0; kind < 2 && np < MAXP; kind++) {
+            int lo = kind ? 29 : 0, dup = 0;
+            for (int q = 0; q < np && !dup; q++)
+                dup = pk[q] == kind && !memcmp(pb[q] + lo, cx[i].bits77 + lo, 58 - lo) && !memcmp(pb[q] + 74, cx[i].bits77 + 74, 3);
+            if (!dup) {
+                pb[np] = cx[i].bits77;
+                pk[np++] = kind;
+            }
+        }
+    }
+    if (!np) return -1;
+    double mag = 0, l2[174], dist;
+    for (int i = 0; i < 174; i++) mag = fmax(mag, fabs(llr[i]));
+    mag *= 1.01;
+    uint8_t bits[174];
+    int nh;
+    for (int q = 0; q < np; q++) {
+        int lo = pk[q] ? 29 : 0, method;
+        memcpy(l2, llr, sizeof l2);
+        for (int i = lo; i < 58; i++) l2[i] = pb[q][i] ? mag : -mag;
+        for (int i = 74; i < 77; i++) l2[i] = pb[q][i] ? mag : -mag;
+        if (bp_decode(l2, 30, bits, &nh) && crc_ok(bits)) method = FT8NN_BP_CTX;
+        else if (osd_decode(l2, OSD_ORDER, bits, &dist, &nh)) method = FT8NN_OSD_CTX;
+        else continue;
+        if (memcmp(bits + lo, pb[q] + lo, 58 - lo) || memcmp(bits + 74, pb[q] + 74, 3)) continue;
+        memcpy(a91, bits, 91);
+        return method;
+    }
+    return -1;
+}
+
+static int is_ctx(int m) { return m == FT8NN_BP_CTX || m == FT8NN_OSD_CTX; }
+static int same_sender(const dec *a, const dec *b) {
+    return std_msg(a->bits77) && std_msg(b->bits77) && !memcmp(a->bits77 + 29, b->bits77 + 29, 29);
+}
+
+/* A station sends one message per slot (decoder._drop_ctx_dupes): drop a context decode in all[from..n) whose sender
+ * a non-context decode in all[0..n) or an earlier kept context decode in all[from..) has. Returns the new n. */
+static int drop_ctx_dupes(dec *all, int from, int n) {
+    uint8_t drop[n > 0 ? n : 1];
+    memset(drop, 0, sizeof drop);
+    for (int i = from; i < n; i++) {
+        if (!is_ctx(all[i].method)) continue;
+        for (int j = 0; j < n && !drop[i]; j++)
+            if (j != i && (!is_ctx(all[j].method) || (j >= from && j < i && !drop[j])) && same_sender(&all[i], &all[j])) drop[i] = 1;
+    }
+    int w = from;
+    for (int i = from; i < n; i++)
+        if (!drop[i]) all[w++] = all[i];
+    return w;
 }
 
 static int ghost_prone(int m) { return m == FT8NN_OSD_ERASE || m == FT8NN_OSD_BP; }
@@ -294,7 +375,7 @@ static int any_bits(const uint8_t *b, int n) {
 }
 
 /* One pass. Appends new decodes (payload not in all[0..nall)) to all; returns count added, -1 on error. */
-static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall, int cap, int pass) {
+static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall, int cap, int pass, const dec *cx, int ncx) {
     if (prof < 0) prof = getenv("FT8NN_PROFILE") != NULL;
     double t0 = tnow(), t1, t2, t3, t4, t5;
     long n_bp = 0, n_osd = 0;
@@ -368,6 +449,8 @@ static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall,
                     method = try_osd_bp(l, a91);
                 }
             }
+            if (method < 0 && k == 0 && ncx > 0 && !early && exp_err < CTX_GATE)
+                method = try_ctx(l, cx, ncx, hyps[h].f0, hyps[h].dt, a91);
             if (method < 0 && k == 0 && exp_err < AP_GATE) method = try_ap(l, a91, early ? -1 : OSD_ORDER);
             if (method < 0 && k == 0 && exp_err < ERASE_GATE && !early) method = try_erase(l, a91);
             if (method < 0) continue;
@@ -407,6 +490,7 @@ static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall,
             if (!drop[i]) all[nall + w++] = all[nall + i];
         added = w;
     }
+    added = drop_ctx_dupes(all, nall, nall + added) - nall;
     free(done_cand);
     free(L);
     t5 = tnow();
@@ -422,7 +506,7 @@ done:
 
 static pthread_once_t ap_once = PTHREAD_ONCE_INIT, erase_once = PTHREAD_ONCE_INIT;
 
-int ft8nn_decode(ft8nn_ctx *c, const float *audio, int n, ft8nn_decode_t *out, int max_out) {
+static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_decode_t *out, int max_out) {
     pthread_once(&ap_once, ap_init);
     pthread_once(&erase_once, erase_init);
     if (n > SLOT_N) n = SLOT_N;
@@ -434,14 +518,23 @@ int ft8nn_decode(ft8nn_ctx *c, const float *audio, int n, ft8nn_decode_t *out, i
     for (int i = 0; i < n; i++) v += (audio[i] - m) * (audio[i] - m);
     double sc = 1.0 / (sqrt(v / n) + 1e-9);
     for (int i = 0; i < n; i++) x[i] = audio[i] * sc;
-    enum { CAP = 512 };
-    dec *all = malloc(sizeof(dec) * CAP);
-    int nall = 0;
+    dec *all = malloc(sizeof(dec) * DEC_CAP), *cx = NULL;
+    int nall = 0, ncx = 0;
+    if (t != INT64_MIN) { /* context: this context's decodes 30 then 60 s earlier */
+        cx = malloc(sizeof(dec) * 2 * DEC_CAP);
+        for (int b = 30; b <= 60; b += 30)
+            for (int i = 0; i < CTX_HIST; i++)
+                if (c->hist[i].t == t - b) {
+                    memcpy(cx + ncx, c->hist[i].d, sizeof(dec) * c->hist[i].n);
+                    ncx += c->hist[i].n;
+                }
+    }
     for (int p = 0; p < PASSES; p++) {
-        int k = decode_pass(c, x, n, all, nall, CAP, p);
+        int k = decode_pass(c, x, n, all, nall, DEC_CAP, p, cx, ncx);
         if (k < 0) {
             free(x);
             free(all);
+            free(cx);
             return -1;
         }
         for (int q = nall; q < nall + k; q++) {
@@ -452,6 +545,16 @@ int ft8nn_decode(ft8nn_ctx *c, const float *audio, int n, ft8nn_decode_t *out, i
         }
         nall += k;
         if (!k) break;
+    }
+    nall = drop_ctx_dupes(all, 0, nall);
+    free(cx);
+    if (t != INT64_MIN) { /* remember: replace this slot's entry or the oldest */
+        int w = 0;
+        for (int i = 0; i < CTX_HIST; i++)
+            if (c->hist[i].t == t || (c->hist[w].t != t && c->hist[i].t < c->hist[w].t)) w = i;
+        c->hist[w].t = t;
+        c->hist[w].n = nall;
+        memcpy(c->hist[w].d, all, sizeof(dec) * nall);
     }
     for (int q = 0; q < nall; q++) {
         char text[48];
@@ -471,4 +574,12 @@ int ft8nn_decode(ft8nn_ctx *c, const float *audio, int n, ft8nn_decode_t *out, i
     free(x);
     free(all);
     return nall;
+}
+
+int ft8nn_decode(ft8nn_ctx *c, const float *audio, int n, ft8nn_decode_t *out, int max_out) {
+    return decode(c, audio, n, INT64_MIN, out, max_out);
+}
+
+int ft8nn_decode_at(ft8nn_ctx *c, const float *audio, int n, int64_t slot_time, ft8nn_decode_t *out, int max_out) {
+    return decode(c, audio, n, slot_time, out, max_out);
 }
