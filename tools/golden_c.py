@@ -88,7 +88,7 @@ def main():
     ap.add_argument("path")
     ap.add_argument("--n", type=int, default=20)
     ap.add_argument("--workers", type=int, default=6)
-    ap.add_argument("--tag", default="nn_v2_cy", help="Python result tag to compare against")
+    ap.add_argument("--tag", default="nn_v2_rs", help="Python result tag to compare against")
     ap.add_argument("--out", default="data/real", help="root of the Python decodes (real mode), e.g. data/val/run2")
     a = ap.parse_args()
     ok = real(a) if a.mode == "real" else awgn(a)

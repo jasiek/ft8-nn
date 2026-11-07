@@ -89,7 +89,7 @@ def classical_metrics(hyps):
     return out
 
 
-def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=4, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, context=(), ctx_gate=48.0, cand_kw=None):
+def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=4, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, context=(), ctx_gate=48.0, cand_kw=None, reuse_df=62.5):
     """Decode one 15 s slot (real audio @12 kHz, any scale), with multi-pass subtraction.
 
     llr_fn(hyps) -> per-hypothesis list of LLR vectors to try in order (first success wins).
@@ -108,14 +108,25 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
     context: [(f0, dt, bits77)] decoded 30 and 60 s earlier on this receiver; context a-priori (_try_ctx) for
     hypotheses within CTX_DF and CTX_DDT of one of them whose expected error count is below ctx_gate. Empty: off.
     cand_kw: extra keyword arguments for frontend.find_candidates (e.g. per_symbol, fmax).
+    reuse_df: in passes after the first, skip a candidate (same frequency bin, lag and track) already tried in an
+    earlier pass if no decode subtracted since then lies within reuse_df Hz of it: subtraction only changes the
+    audio near the subtracted signal, so its hypotheses would get (nearly) the same LLRs and fail again. 62.5 Hz
+    covers the candidate's baseband window (-1.5..8.5 tones), fine-sync range and the subtracted signal's width.
+    A/B nn_v2_rs: run 2 -1 decode of 27,930, 1/3 less time; 30 Hz lost 2 of 330 on 8 busy slots. 0: off.
     """
     x = np.array(x, dtype=np.float64, copy=True)
     found = {}
+    tried, subs = {}, []  # candidate key -> pass last tried; (f0, pass) of every subtracted decode
     for p in range(passes):
-        new = _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, cand_kw or {})
+        skip = None
+        if reuse_df and p:
+            skip = lambda c: (q := tried.get(_cand_key(c))) is not None and not any(
+                ps >= q and abs(fs - c.f0) < reuse_df for fs, ps in subs)
+        new = _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, cand_kw or {}, skip, tried, p)
         for d in new:
             d.info["pass"] = p
             found[d.key] = d
+            subs.append((d.f0, p))
             subtract(x, ft8.encode77(d.bits77)[1], d.f0, d.dt)
         if not new:
             break
@@ -123,11 +134,19 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
     return list(found.values())
 
 
-def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, cand_kw):
+def _cand_key(c):
+    return round(c.f0 / 3.125), round(c.dt * fe.FPS), c.early
+
+
+def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, cand_kw, skip=None, tried=None, p=0):
     cands = fe.find_candidates(x, max_cand=max_cand, **cand_kw)
     bb = fe.Baseband(x)
     hyps, owner = [], []
     for ci, c in enumerate(cands):
+        if skip is not None and skip(c):
+            continue
+        if tried is not None:
+            tried[_cand_key(c)] = p
         for h in fe.fine_sync2(bb, c, n_hyp=n_hyp):
             hyps.append(h)
             owner.append(ci)

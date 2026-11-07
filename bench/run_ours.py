@@ -39,7 +39,7 @@ def _decode_file(path):
     from ft8nn import decoder
 
     _, x = wavfile.read(path)
-    ds = decoder.decode_slot(x / 100.0, llr_fn=_LLR, n_hyp=_ARGS.n_hyp, osd_order=_ARGS.osd_order, osd_max_hard=_ARGS.osd_max_hard, ap=() if _ARGS.no_ap else (decoder.AP_CQ,), erase_gate=_ARGS.erase_gate, erase_osd_dmax=_ARGS.erase_osd_dmax, osd_snaps=_ARGS.osd_snaps, passes=_ARGS.passes, cand_kw=dict(per_symbol=_ARGS.per_symbol, fmax=_ARGS.fmax, base=_ARGS.base))
+    ds = decoder.decode_slot(x / 100.0, llr_fn=_LLR, n_hyp=_ARGS.n_hyp, osd_order=_ARGS.osd_order, osd_max_hard=_ARGS.osd_max_hard, ap=() if _ARGS.no_ap else (decoder.AP_CQ,), erase_gate=_ARGS.erase_gate, erase_osd_dmax=_ARGS.erase_osd_dmax, osd_snaps=_ARGS.osd_snaps, passes=_ARGS.passes, reuse_df=_ARGS.reuse_df, cand_kw=dict(per_symbol=_ARGS.per_symbol, fmax=_ARGS.fmax, base=_ARGS.base))
     return Path(path).name, [
         (POOL.get(d.key, "??" + d.key), round(d.f0, 1), round(d.dt, 2), d.method, d.info.get("metric"), d.info.get("nhard"))
         for d in ds
@@ -61,6 +61,7 @@ def main():
     ap.add_argument("--erase-osd-dmax", type=float, default=3.0, help="wide-window OSD erasure stage distance limit (0 = off)")
     ap.add_argument("--osd-snaps", type=int, default=2, help="OSD on BP posterior sums after iterations 1..N (0 = off)")
     ap.add_argument("--passes", type=int, default=4, help="decode-subtract passes per slot")
+    ap.add_argument("--reuse-df", type=float, default=62.5, help="skip candidates tried before with no subtraction within this many Hz (0 = off)")
     ap.add_argument("--osd-order", type=int, default=2)
     ap.add_argument("--osd-max-hard", type=int, default=40)
     ap.add_argument("--workers", type=int, default=8)

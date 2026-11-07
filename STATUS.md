@@ -1,6 +1,6 @@
 # Status and plan (resume here)
 
-Last updated 2026-11-06 (plan 7.3: clean C timing on the Mac mini, README updated; `nn_v2_cy` is the default).
+Last updated 2026-11-07 (candidate reuse committed as `nn_v2_rs`, ~30% faster; `collect/` data-collection tools added).
 
 ## Improve loop (2026-11-05 on the Mac mini, user-approved) — FINISHED 18:40, stop condition (1) met
 
@@ -15,10 +15,12 @@ decodes verified identical to the main machine.
 
 ## In flight
 
-- Nothing. Last commit: plan 7.3 clean C timing.
+- Last commits: `collect/` data-collection tools (docs/data-collection.md), candidate reuse `nn_v2_rs` (plan 7.3b).
+- Model architecture study (conv-only, BiGRU; else int8 / narrower / distilled) runs in a separate worktree
+  (`.claude/worktrees/agent-*`, notes in its `docs/arch-study.md`), started 2026-11-07; no commits there without the user.
 - Loop log (finished): `nn_v2_eh` pass, `nn_v2_ob` fail (1 ghost), `nn_v2_og` pass, `nn_v2_p4` pass → run 2
   slot-confirmed 19,550 ≥ 19,500 with unconf 1, noise 0 false: loop stopped. Commits need the user's OK again.
-  Next candidates: NN reuse in passes 2–4 (plan 7.3 result: one core can't keep up on busy bands), retraining.
+  Next candidates: training with real noise + synthetic signals (exact labels, real AGC/QRM), retraining.
 
 ## Where we are
 
@@ -29,7 +31,8 @@ Recipe: v1 (6000 steps, `--cfg v1`), then fine-tune with
 Decoder defaults: `decoder.decode_slot`. These are 4 passes with subtraction, 2 fine-sync hypotheses,
 NN metric with classical nsym 1/2/3 fallback (`--also-classical`), OSD order 2 gated on expected errors < 40,
 CQ a-priori decoding (expected errors < 44), burst-erasure retry (expected errors < 15) with a wide-window OSD stage
-(`osd_er`), OSD on summed BP posteriors after iterations 1–2 (`osd_bp`), ghost filter, candidate search 150–3100 Hz plus an early-DT track down to −2.5 s,
+(`osd_er`), OSD on summed BP posteriors after iterations 1–2 (`osd_bp`), ghost filter, candidate search 150–3100 Hz plus an early-DT track down to −2.5 s, candidate reuse in passes 2–4
+(`reuse_df` 62.5 Hz, plan 7.3b),
 context a-priori decoding from our own decodes 30/60 s earlier (`bp_cx`/`osd_cx`, expected errors < 48; needs
 `context=` in Python, `ft8nn_decode_at` in C; the bench passes it, see plan 7.2c).
 
@@ -45,10 +48,10 @@ context a-priori decoding from our own decodes 30/60 s earlier (`bp_cx`/`osd_cx`
 | noise only, 100 slots | – | 0 false | **0 false** |
 
 Real KiwiSDR recordings (10 stations, 1197 slots, `../ft8-training-data/recordings`, read-only; another agent owns it):
-**Current default `nn_v2_cy` decodes 17586, jt9 decodes 15729 (+11.8%).**
+**Current default `nn_v2_rs` decodes 17586, jt9 decodes 15729 (+11.8%).**
 2166 decodes are ours only (2087 name a callsign jt9 heard at that station); 309 are jt9 only.
 History: `nn_v2` 16055 (jt9-only 663) → baseline fix `nn_v2_bm` 16336 (jt9-only 512) → erasure `nn_v2_er` 16443 (jt9-only 466) → fmax 3100 `nn_v2_f31` 16452 (jt9-only 463) → early-DT + osd_er `nn_v2_eh` 16460 (463) → osd_bp `nn_v2_og` 16621 (405) → 4 passes `nn_v2_p4` 16638 (400) → context AP `nn_v2_cy` 17586 (309).
-08_80m: 3477 vs jt9 3258. AWGN 50% with `nn_v2_og`/`nn_v2_p4`/`nn_v2_cy`: −22.52 (90%: −21.28).
+08_80m: 3477 vs jt9 3258. AWGN 50% with `nn_v2_og`/`nn_v2_p4`/`nn_v2_cy`/`nn_v2_rs`: −22.52 (90%: −21.28).
 
 ### Validation set with ground truth (`../ft8-validation-set`, added by the user 2026-11-04)
 
@@ -61,10 +64,10 @@ Treat the folder as read-only; our decodes go to `data/val/run{1,2}/<station>/de
 
 ```sh
 V=/Users/jps/tmp/ft8-validation-set
-uv run python bench/run_real.py $V/recordings --model runs/v2/model.pt --also-classical --tag nn_v2_cy --workers 6 --out data/val/run1
-uv run python bench/run_real.py $V/run2/recordings --model runs/v2/model.pt --also-classical --tag nn_v2_cy --workers 6 --out data/val/run2
-python3 $V/tools/verify.py --decodes data/val/run1 --tag nn_v2_cy --list
-python3 $V/tools/verify.py --recordings $V/run2/recordings --spots $V/run2/pskr_spots.jsonl --decodes data/val/run2 --tag nn_v2_cy --list
+uv run python bench/run_real.py $V/recordings --model runs/v2/model.pt --also-classical --tag nn_v2_rs --workers 6 --out data/val/run1
+uv run python bench/run_real.py $V/run2/recordings --model runs/v2/model.pt --also-classical --tag nn_v2_rs --workers 6 --out data/val/run2
+python3 collect/verify.py --decodes data/val/run1 --tag nn_v2_rs --list
+python3 collect/verify.py --recordings $V/run2/recordings --spots $V/run2/pskr_spots.jsonl --decodes data/val/run2 --tag nn_v2_rs --list
 ```
 
 Scores (vs jt9 baseline, checkable = sender call is spotted-checkable):
@@ -77,14 +80,16 @@ Scores (vs jt9 baseline, checkable = sender call is spotted-checkable):
 | 1 | nn_v2_eh | 29,584 (+6.7%) | 22,852 (+6.3%) | 3 | | |
 | 1 | nn_v2_og | 29,929 (+7.9%) | 23,090 (+7.4%) | 3 | | |
 | 1 | nn_v2_p4 | 30,116 (+8.6%) | 23,230 (+8.1%) | 3 | | |
-| 1 | **nn_v2_cy** | **31,957 (+15.2%)** | **24,449 (+13.8%)** | **3** | | |
+| 1 | nn_v2_cy | 31,957 (+15.2%) | 24,449 (+13.8%) | 3 | | |
+| 1 | **nn_v2_rs** | **31,952 (+15.2%)** | **24,444 (+13.7%)** | **3** | | |
 | 2 (unseen sites) | jt9 | 24,291 | 17,993 | 16 | – | – |
 | 2 | nn_v2_er | 25,994 (+7.0%) | 19,244 (+7.0%) | 1 | 886 | 2590 |
 | 2 | nn_v2_f31 | 26,032 (+7.2%) | 19,281 (+7.2%) | 1 | 850 | |
 | 2 | nn_v2_eh | 26,091 (+7.4%) | 19,320 (+7.4%) | 1 | | |
 | 2 | nn_v2_og | 26,340 (+8.4%) | 19,480 (+8.3%) | 1 | | |
 | 2 | nn_v2_p4 | 26,439 (+8.8%) | 19,550 (+8.7%) | 1 | | |
-| 2 | **nn_v2_cy** | **27,930 (+15.0%)** | **20,505 (+14.0%)** | **1** | | |
+| 2 | nn_v2_cy | 27,930 (+15.0%) | 20,505 (+14.0%) | 1 | | |
+| 2 | **nn_v2_rs** | **27,929 (+15.0%)** | **20,504 (+14.0%)** | **1** | | |
 
 The gain is larger on unseen receivers than on training sites, and it holds up against outside spots:
 false decodes are below jt9's. **Caveat for `nn_v2_cy`:** a context decode's sender is by construction a station
@@ -97,10 +102,10 @@ e.g. run 2 00_40m `E70A KU2X FN13` at +4…+9 dB missed in 3 slots. Many were ab
 
 ```sh
 uv run pytest -q                                                    # 26 tests
-uv run python bench/run_ours.py data/bench/awgn --model runs/v2/model.pt --also-classical --tag nn_v2_cy --workers 6
+uv run python bench/run_ours.py data/bench/awgn --model runs/v2/model.pt --also-classical --tag nn_v2_rs --workers 6
 uv run python bench/report.py data/bench/awgn --dt-max 0.5
-uv run python bench/run_real.py /Users/jps/tmp/ft8-training-data/recordings --model runs/v2/model.pt --also-classical --tag nn_v2_cy --workers 6
-uv run python bench/run_real.py /Users/jps/tmp/ft8-training-data/recordings --compare-only --tag nn_v2_cy
+uv run python bench/run_real.py /Users/jps/tmp/ft8-training-data/recordings --model runs/v2/model.pt --also-classical --tag nn_v2_rs --workers 6
+uv run python bench/run_real.py /Users/jps/tmp/ft8-training-data/recordings --compare-only --tag nn_v2_rs
 ```
 `run_real.py` decodes each (station, slot parity) chain in time order so context AP sees the decoder's own earlier
 slots; `--no-context` turns that off (per-slot decodes, the `nn_v2_p4` behaviour). `run_ours.py` has no context.
@@ -152,8 +157,8 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
      `ft8nn_cli` uses `ft8nn_decode_at` when the file name is a `yymmdd_HHMMSS` slot time. One context per thread; the context's hash table learns callsigns.
      `ft8nn_decode` normalises audio to unit std internally (as `bench/run_real.py` does).
    - LDPC tables: `c/src/ldpc_tables.h`, generated by `tools/gen_c_tables.py`.
-   - Golden test `tools/golden_c.py` (uses `runs/v2/ft8nn.onnx`; compares against tag `nn_v2_cy` by default; last
-     verified with `nn_v2_cy`: 756/756 + 600/600 real, run 2 02_80m 733/733, 430/430 AWGN; the real-data golden
+   - Golden test `tools/golden_c.py` (uses `runs/v2/ft8nn.onnx`; compares against tag `nn_v2_rs` by default; last
+     verified with `nn_v2_rs`: 756/756 + 600/600 real, run 2 02_80m 733/733, 430/430 AWGN; the real-data golden
      decodes the slots in order through `ft8nn_decode_at`, so context AP is covered):
      real 00_40m + 08_80m, first 20 slots each: 1231/1231 decodes identical in every output field;
      AWGN 60 files: 418/418 identical payloads.
@@ -334,6 +339,29 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       regions that no subtraction touched, so their features and NN LLRs are the same as in the pass before; cache
       them and run the NN only on hypotheses that overlap a subtracted signal or are new. Needs a check that the
       candidate search and fine sync give the same hypotheses there (candidate baseline is a local median).
+   3b. **Candidate reuse in passes 2–4 — DONE as `nn_v2_rs`.** Not bit-exact, because the
+      candidate baseline (median over the whole band), the noise PSD and subtraction leakage are slot-wide. So
+      instead of caching LLRs: a candidate (same 3.125 Hz bin, lag and track) tried in an earlier pass is skipped
+      when no decode subtracted since then lies within `reuse_df` = 62.5 Hz of it (its baseband window −1.5…8.5
+      tones + fine-sync range + the subtracted signal's width); it would get nearly the same LLRs and fail again.
+      Python `decode_slot(reuse_df=62.5)`, bench `--reuse-df` (0 = off), C `REUSE_DF` with a per-slot tried table.
+      8 busy run-2 slots: candidates processed 19,411 → 12,852 (pass 1 −7%, pass 2 −45%, pass 3 −90%: pass 0's
+      ~30 decodes touch nearly the whole band), same 330 decodes; 30 Hz lost 2 of 330.
+      **`nn_v2_rs` vs `nn_v2_cy`:** run 2 27,930 → 27,929 (lost `LU3JP KR4HBQ -12`, osd_bp at −22.8 dB; the same
+      message decodes in the next two slots), slot 20,505 → 20,504, unconf 1 → 1; run 1 31,957 → 31,952 (5 real
+      messages lost), slot 24,449 → 24,444, unconf 3 → 3 (same 3); training recordings 17,586 identical (jt9-only 309);
+      AWGN 50% −22.52 / 90% −21.28 unchanged; noise 0 false. Golden C vs Python: 756/756, 600/600, run 2 733/733,
+      AWGN 430/430. Python bench time: run 2 54 → 36 min, run 1 54 → 39 min.
+      **C timing (2026-11-07, same slots as 7.3, no sleep events):**
+
+      | set | 1 thread mean / max (> 15 s) | 2 threads mean / max |
+      |---|---|---|
+      | validation run 1 01_40m, first 40 slots | 10.91 / 12.46 (0 of 40), was 15.76 / 17.08 | 7.92 / 9.03, was 11.38 / 12.12 |
+      | training 00_40m, first 40 slots | 8.12 / 9.62 (0), was 12.26 / 15.58 | – |
+      | training, first 20 slots of each of 10 stations | 4.25 / 11.82 (0 of 200), was 6.00 / 16.98 | – |
+
+      −31% on the busiest receiver: one core now keeps up on every measured slot. Peak RSS 320–530 MB.
+      Timing scripts: `data/timing/` (gitignored).
 8. Optional later work:
    - More AP types: the a2 MyCall type needs the operator's own callsign, and that is only useful inside an app
      (an `ft8nn_set_mycall` would slot into the same pinned-bit machinery as context AP).

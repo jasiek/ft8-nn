@@ -50,6 +50,12 @@ static double tnow(void) {
 #define NN_BATCH 128
 #define BASE_MEDIAN 1 /* candidate score baseline: 1 = 1.77 * median of all cells (A/B 2026-11-04: real +281), 0 = old pct40 of per-freq max */
 #define FMAX 3100.0 /* candidate search top (f0, Hz); jt9 decodes up to ~3050 (A/B 2026-11-04: validation run 2 +38) */
+/* later passes skip a candidate (same bin, lag, track) tried in an earlier pass when no decode subtracted since lies
+ * within REUSE_DF Hz (decoder.decode_slot reuse_df); 0 = off */
+#define REUSE_DF 62.5
+#define TRIED_LAG0 80 /* lag offset in the tried table: lags -80..79 frames (early track starts at -2.5 s = -63) */
+#define TRIED_NL 160
+#define TRIED_NB ((int)(FMAX / 3.125) + 1)
 #define NOISE_BIN (3200.0 / 1000.0)
 #define SNR_OFFSET 0.23
 
@@ -375,7 +381,24 @@ static int any_bits(const uint8_t *b, int n) {
 }
 
 /* One pass. Appends new decodes (payload not in all[0..nall)) to all; returns count added, -1 on error. */
-static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall, int cap, int pass, const dec *cx, int ncx) {
+/* tried-table slot of a candidate, or -1 if outside the table */
+static int tried_idx(const candidate *cd) {
+    long b = lround(cd->f0 / 3.125), l = lround(cd->dt * 25.0) + TRIED_LAG0;
+    if (b < 0 || b >= TRIED_NB || l < 0 || l >= TRIED_NL) return -1;
+    return (int)((b * TRIED_NL + l) * 2 + (cd->early != 0));
+}
+
+/* decoder.decode_slot reuse_df: tried before (pass q) and nothing subtracted since within REUSE_DF Hz */
+static int reuse_skip(const candidate *cd, const signed char *tried, const dec *all, int nall) {
+    int i = tried_idx(cd);
+    if (i < 0 || tried[i] < 0) return 0;
+    for (int q = 0; q < nall; q++)
+        if (all[q].pass >= tried[i] && fabs(all[q].f0 - cd->f0) < REUSE_DF) return 0;
+    return 1;
+}
+
+static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall, int cap, int pass, const dec *cx, int ncx,
+                       signed char *tried) {
     if (prof < 0) prof = getenv("FT8NN_PROFILE") != NULL;
     double t0 = tnow(), t1, t2, t3, t4, t5;
     long n_bp = 0, n_osd = 0;
@@ -386,8 +409,14 @@ static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall,
     baseband_init(&bb, x, n);
     sync_hyp *hyps = malloc(sizeof(sync_hyp) * (size_t)(nc * N_HYP + 1));
     int *owner = malloc(sizeof(int) * (size_t)(nc * N_HYP + 1));
-    int nh = 0;
+    int nh = 0, nskip = 0;
     for (int ci = 0; ci < nc; ci++) {
+        if (REUSE_DF > 0 && pass > 0 && reuse_skip(&cands[ci], tried, all, nall)) {
+            nskip++;
+            continue;
+        }
+        int ti = tried_idx(&cands[ci]);
+        if (ti >= 0) tried[ti] = (signed char)pass;
         int k = fine_sync2(&bb, &cands[ci], N_HYP, hyps + nh);
         for (int q = 0; q < k; q++) owner[nh + q] = ci;
         nh += k;
@@ -496,8 +525,8 @@ static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall,
     t5 = tnow();
 done:
     if (prof)
-        fprintf(stderr, "pass %d: cand %d hyp %d | cand %.2fs sync %.2fs nn %.2fs classical %.2fs bp/osd %.2fs (bp %ld osd %ld) -> %d\n",
-                pass, nc, nh, t1 - t0, t2 - t1, t3 - t2, t4 - t3, t5 - t4, n_bp, n_osd, added);
+        fprintf(stderr, "pass %d: cand %d skip %d hyp %d | cand %.2fs sync %.2fs nn %.2fs classical %.2fs bp/osd %.2fs (bp %ld osd %ld) -> %d\n",
+                pass, nc, nskip, nh, t1 - t0, t2 - t1, t3 - t2, t4 - t3, t5 - t4, n_bp, n_osd, added);
     free(cands); /* candidate flags (early) are read in the decode loop */
     free(hyps);
     free(owner);
@@ -519,6 +548,8 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
     double sc = 1.0 / (sqrt(v / n) + 1e-9);
     for (int i = 0; i < n; i++) x[i] = audio[i] * sc;
     dec *all = malloc(sizeof(dec) * DEC_CAP), *cx = NULL;
+    signed char *tried = malloc((size_t)TRIED_NB * TRIED_NL * 2); /* candidate -> pass last tried, -1 = never */
+    memset(tried, -1, (size_t)TRIED_NB * TRIED_NL * 2);
     int nall = 0, ncx = 0;
     if (t != INT64_MIN) { /* context: this context's decodes 30 then 60 s earlier */
         cx = malloc(sizeof(dec) * 2 * DEC_CAP);
@@ -530,11 +561,12 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
                 }
     }
     for (int p = 0; p < PASSES; p++) {
-        int k = decode_pass(c, x, n, all, nall, DEC_CAP, p, cx, ncx);
+        int k = decode_pass(c, x, n, all, nall, DEC_CAP, p, cx, ncx, tried);
         if (k < 0) {
             free(x);
             free(all);
             free(cx);
+            free(tried);
             return -1;
         }
         for (int q = nall; q < nall + k; q++) {
@@ -548,6 +580,7 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
     }
     nall = drop_ctx_dupes(all, 0, nall);
     free(cx);
+    free(tried);
     if (t != INT64_MIN) { /* remember: replace this slot's entry or the oldest */
         int w = 0;
         for (int i = 0; i < CTX_HIST; i++)
