@@ -26,7 +26,7 @@ push)
   RMEM=".claude/projects/$(key "$RH/tmp/ft8-nn")/memory"
   ssh "$H" "mkdir -p '$RMEM'"
   rsync -a -u "$HOME/.claude/projects/$(key "$REPO")/memory/" "$H:$RMEM/"
-  ssh "$H" "$RPATH; cd tmp/ft8-nn && uv sync -q && make -s -C c"
+  ssh "$H" "$RPATH; cd tmp/ft8-nn && uv sync -q && tools/get_onnxruntime.sh >/dev/null && make -s -C c"
   echo "pushed to $H:~/tmp/ft8-nn"
   ;;
 run)

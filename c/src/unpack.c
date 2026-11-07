@@ -5,7 +5,6 @@
 
 #include "internal.h"
 
-typedef unsigned __int128 u128;
 
 #define NTOKENS 2063592u
 #define MAX22 4194304u
@@ -90,10 +89,23 @@ static void ht_lookup(const hash_table *h, int bits, uint32_t v, char *out, int 
     snprintf(out, outlen, "<...>");
 }
 
-static u128 bint(const uint8_t *b, int lo, int hi) {
-    u128 v = 0;
+/* bits b[lo..hi) as an unsigned integer, MSB first; hi - lo <= 64 */
+static uint64_t bint(const uint8_t *b, int lo, int hi) {
+    uint64_t v = 0;
     for (int i = lo; i < hi; i++) v = (v << 1) | b[i];
     return v;
+}
+
+/* v[0..n) (bits, MSB first) as a big unsigned integer: divide it by d in place (bit-serial long division) and
+ * return the remainder. Replaces 128-bit arithmetic, which not every C compiler has. */
+static int divmod_bits(uint8_t *v, int n, int d) {
+    int r = 0;
+    for (int i = 0; i < n; i++) {
+        r = 2 * r + v[i];
+        v[i] = r >= d;
+        if (v[i]) r -= d;
+    }
+    return r;
 }
 
 static void strip(char *s) {
@@ -170,15 +182,16 @@ static void report(int ir, uint32_t igrid4, char *out, int outlen) {
     snprintf(out, outlen, "%s%+03d", ir ? "R" : "", isnr);
 }
 
-/* hex of a 128-bit value, zero padded to at least width digits */
-static void hex128(u128 v, int width, int upper, char *out) {
+/* hex of the integer b[0..nb) (bits, MSB first), no leading zeros, then zero padded to at least width digits */
+static void hex_bits(const uint8_t *b, int nb, int width, int upper, char *out) {
     char t[40];
     int n = 0;
-    do {
-        int d = (int)(v & 15);
+    for (int e = nb; e > 0; e -= 4) { /* 4-bit groups from the least significant end */
+        int d = 0;
+        for (int i = e - 4 < 0 ? 0 : e - 4; i < e; i++) d = 2 * d + b[i];
         t[n++] = (char)(d < 10 ? '0' + d : (upper ? 'A' : 'a') + d - 10);
-        v >>= 4;
-    } while (v);
+    }
+    while (n > 1 && t[n - 1] == '0') n--;
     while (n < width) t[n++] = '0';
     for (int i = 0; i < n; i++) out[i] = t[n - 1 - i];
     out[n] = 0;
@@ -231,12 +244,10 @@ void unpack77(const uint8_t *b, hash_table *ht, char *out, int outlen) {
     if (i3 == 0) {
         int n3 = (int)bint(b, 71, 74);
         if (n3 == 0) {
-            u128 n = bint(b, 0, 71);
+            uint8_t v[71];
+            memcpy(v, b, sizeof v);
             char s[14];
-            for (int i = 12; i >= 0; i--) {
-                s[i] = C42[(int)(n % 42)];
-                n /= 42;
-            }
+            for (int i = 12; i >= 0; i--) s[i] = C42[divmod_bits(v, 71, 42)];
             s[13] = 0;
             strip(s);
             snprintf(out, outlen, "%s", s);
@@ -250,16 +261,16 @@ void unpack77(const uint8_t *b, hash_table *ht, char *out, int outlen) {
             return;
         }
         if (n3 == 5) {
-            hex128(bint(b, 0, 71), 18, 1, hx);
+            hex_bits(b, 71, 18, 1, hx);
             const char *p = hx;
             while (*p == '0') p++;
             snprintf(out, outlen, "%s", *p ? p : "0");
             return;
         }
-        hex128(bint(b, 0, 71), 18, 0, hx);
+        hex_bits(b, 71, 18, 0, hx);
         snprintf(out, outlen, "<0.%d:%s>", n3, hx);
         return;
     }
-    hex128(bint(b, 0, 74), 19, 0, hx);
+    hex_bits(b, 74, 19, 0, hx);
     snprintf(out, outlen, "<%d:%s>", i3, hx);
 }

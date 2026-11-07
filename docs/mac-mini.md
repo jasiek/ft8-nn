@@ -16,12 +16,13 @@ Mac mini (2024), M4 (4P+6E) or M4 Pro (8–10P+4E). Folder layout is the same on
 
 1. System Settings → General → Sharing → **Remote Login** on.
 2. `scutil --get LocalHostName; whoami; sysctl -n machdep.cpu.brand_string` (note the host name and user).
-3. Homebrew (also installs the compiler, git, make), then uv and ONNX Runtime:
+3. Homebrew (also installs the compiler, git, make), then uv. ONNX Runtime comes later: the official release,
+   fetched by `tools/get_onnxruntime.sh` in the repo once it is on the mini (Homebrew's build runs the model 2.3x slower).
    ```sh
    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
    echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
    eval "$(/opt/homebrew/bin/brew shellenv)"
-   brew install uv onnxruntime
+   brew install uv
    ```
 
 ### On the main machine
@@ -65,7 +66,7 @@ Mac mini (2024), M4 (4P+6E) or M4 Pro (8–10P+4E). Folder layout is the same on
 ## Working on the mini directly
 
 Everything also runs in the mini's own checkout (no SSH layer). Two extra setup steps there: `.python-version`
-pins Python 3.12 (uv otherwise picks 3.15, which has no onnxruntime wheel), and `brew install onnxruntime` for
+pins Python 3.12 (uv otherwise picks 3.15, which has no onnxruntime wheel), and `tools/get_onnxruntime.sh` for
 the C library. WSJT-X (Improved fork 3.0.2, `/usr/local/bin/jt9`, `/Applications/wsjtx.app/Contents/MacOS/ft8code`)
 is installed since 2026-11-05, so all 26 tests pass. Speed: about 2 s per
 slot per core; `WORKERS=10` uses all 10 cores (4P+6E). Quick A/B about 1 h, full check about 1.5 h. Decodes were

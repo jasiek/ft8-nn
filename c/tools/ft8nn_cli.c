@@ -16,6 +16,13 @@
 
 #include "../include/ft8nn.h"
 
+#ifdef _WIN32 /* native Windows (untested): MSVC names */
+#define timegm _mkgmtime
+static void mono_now(struct timespec *t) { timespec_get(t, TIME_UTC); }
+#else
+static void mono_now(struct timespec *t) { clock_gettime(CLOCK_MONOTONIC, t); }
+#endif
+
 /* Minimal RIFF/WAVE reader: mono PCM16 or float32. Returns samples (malloc'd), or NULL. */
 static float *read_wav(const char *path, int *n_out, int *rate) {
     FILE *f = fopen(path, "rb");
@@ -113,9 +120,9 @@ int main(int argc, char **argv) {
         if (dot) *dot = 0;
         int64_t t = slot_time(slot);
         struct timespec t0, t1;
-        clock_gettime(CLOCK_MONOTONIC, &t0);
+        mono_now(&t0);
         int nd = t == INT64_MIN ? ft8nn_decode(ctx, x, n, out, 256) : ft8nn_decode_at(ctx, x, n, t, out, 256);
-        clock_gettime(CLOCK_MONOTONIC, &t1);
+        mono_now(&t1);
         if (timing)
             fprintf(stderr, "time\t%s\t%.3f\t%d\n", slot, t1.tv_sec - t0.tv_sec + 1e-9 * (t1.tv_nsec - t0.tv_nsec), nd);
         free(x);
@@ -125,13 +132,13 @@ int main(int argc, char **argv) {
         }
         for (int k = 0; k < nd && k < 256; k++) {
             const ft8nn_decode_t *d = &out[k];
-            /* 77-bit payload as a 20-digit hex number (Python: f"{int(bits, 2):020x}") */
-            unsigned __int128 v = 0;
-            for (int b = 0; b < 77; b++) v = (v << 1) | ((d->bits77[b / 8] >> (7 - b % 8)) & 1);
+            /* 77-bit payload as a 20-digit hex number (Python: f"{int(bits, 2):020x}"): 4-bit groups from the
+             * least significant end, the top digit holding the first bit */
             char hx[21];
-            for (int q = 19; q >= 0; q--) {
-                hx[q] = "0123456789abcdef"[(int)(v & 15)];
-                v >>= 4;
+            for (int q = 19, e = 77; q >= 0; q--, e -= 4) {
+                int v = 0;
+                for (int b = e - 4 < 0 ? 0 : e - 4; b < e; b++) v = 2 * v + ((d->bits77[b / 8] >> (7 - b % 8)) & 1);
+                hx[q] = "0123456789abcdef"[v];
             }
             hx[20] = 0;
             printf("%s\t%.1f\t%.2f\t%s%d\t%s\t%s\t%.1f\n", slot, d->f0, d->dt, method_name(d->method), d->metric, d->text, hx,

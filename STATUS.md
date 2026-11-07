@@ -1,6 +1,7 @@
 # Status and plan (resume here)
 
-Last updated 2026-11-07 (candidate reuse committed as `nn_v2_rs`, ~30% faster; `collect/` data-collection tools added).
+Last updated 2026-11-07 (portable C build + official ONNX Runtime committed, plan 7.3c; candidate reuse `nn_v2_rs`
+and `collect/` committed).
 
 ## Improve loop (2026-11-05 on the Mac mini, user-approved) — FINISHED 18:40, stop condition (1) met
 
@@ -10,7 +11,7 @@ Each iteration: one idea in Python + C → `tools/ab_run2.sh TAG` → if it pass
 (2) 3 consecutive ideas fail the A/B; (3) about 8 h of loop time. Log every tried idea and its numbers here.
 Running directly on the mini (M4 4P+6E, `WORKERS=10`): quick A/B ~50 min, full check another ~1.5 h
 (background Spotlight/Siri load can slow it a lot).
-Mini needs `.python-version` 3.12 and `brew install onnxruntime`; WSJT-X 3.0.2 (Improved) installed, all 26 tests pass;
+Mini needs `.python-version` 3.12 and `tools/get_onnxruntime.sh` (official ONNX Runtime); WSJT-X 3.0.2 (Improved) installed, all 26 tests pass;
 decodes verified identical to the main machine.
 
 ## In flight
@@ -150,7 +151,8 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
    Speed: ORT CPU 0.75 ms/candidate vs torch 0.35 ms (batch 128). Fine for now; try ORT transformer fusion later if needed.
 2. **C library `libft8nn` — first version DONE, matches Python exactly.**
    - Code in `c/` (`make -C c` → `c/build/libft8nn.{a,dylib}`, `c/build/ft8nn_cli`). Own C for everything,
-     including a mixed-radix 2/3/5 FFT; the only dependency is ONNX Runtime (`brew install onnxruntime`).
+     including a mixed-radix 2/3/5 FFT; the only dependency is ONNX Runtime (official release via
+     `tools/get_onnxruntime.sh`, plan 7.3c; Homebrew's build is the fallback and 2.3x slower).
      API in `c/include/ft8nn.h`: `ft8nn_open(onnx, n_threads)`, `ft8nn_decode(ctx, audio, n, out, max)`,
      `ft8nn_decode_at(ctx, audio, n, slot_time, out, max)` (same, plus context AP from the context's own decodes
      at slot_time − 30/60 s; call it every slot in time order), `ft8nn_reset_hashes`, `ft8nn_close`.
@@ -362,6 +364,22 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
 
       −31% on the busiest receiver: one core now keeps up on every measured slot. Peak RSS 320–530 MB.
       Timing scripts: `data/timing/` (gitignored).
+   3c. **Portable build + official ONNX Runtime — DONE 2026-11-07.** Found by the architecture study
+      (worktree, its `docs/arch-study.md`): Homebrew's onnxruntime 1.31.1 runs our graph 2.3–3.7x slower than the
+      official release of the same version (libft8nn NN stage 2.18 → 0.94 ms per hypothesis, M4, 1 thread;
+      decodes byte-identical). This also explains plan 2's old "ORT 2.4 ms vs torch 0.82 ms" gap.
+      `tools/get_onnxruntime.sh` downloads the official C release for the host (macOS arm64/x86_64, Linux
+      x64/aarch64) into `third_party/onnxruntime` (osx-arm64 1.31.1 tgz sha256 2e1344a1…896d6f); `c/Makefile` uses it
+      by default (fallback Homebrew, then /usr/local; `ORT_PREFIX=` overrides), builds `.so` on Linux and `.dylib`
+      on macOS, finds headers in `include/` (official) or `include/onnxruntime/` (Homebrew), and makes
+      `-march=native` opt-in (`NATIVE=1`). Code: no variable-length arrays, no `__int128` (`unpack.c` free text by
+      bit-serial long division, hex from 4-bit groups: identical to the old code on 2M random payloads, all i3/n3,
+      with and without hash tables), `pthread_once`/`clock_gettime`/`timegm` behind small `_WIN32` shims, wide model
+      path for ORT on Windows. Clean with `-std=c11 -pedantic -Wvla`. Linux and Windows not built yet (no Docker or
+      Linux box here). Golden C vs Python with the official build: 756/756, 600/600, run 2 733/733, AWGN 430/430.
+      Paired timing under load (fork's benchmarks running), 6 busy 01_40m slots, 1 thread: Homebrew 11.47 / 11.47 s,
+      official 9.14 / 7.61 s per slot, same 280 decodes. **To do:** clean timing on an idle machine (README numbers
+      are still the Homebrew ones), a Linux build (CI or a Linux box).
 8. Optional later work:
    - More AP types: the a2 MyCall type needs the operator's own callsign, and that is only useful inside an app
      (an `ft8nn_set_mycall` would slot into the same pinned-bit machinery as context AP).

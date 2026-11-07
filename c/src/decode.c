@@ -6,19 +6,41 @@
  * Decodes are subtracted from the audio between passes.
  */
 #include <math.h>
-#include <onnxruntime/onnxruntime_c_api.h>
-#include <pthread.h>
+#include <onnxruntime_c_api.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-static int prof = -1;
+/* One-time init and a clock: POSIX here; the _WIN32 branch is for native Windows builds (MSVC has no pthreads) and is
+ * not tested, as only macOS has been built so far. */
+#ifdef _WIN32
+#include <windows.h>
+typedef INIT_ONCE once_t;
+#define ONCE_INIT INIT_ONCE_STATIC_INIT
+static BOOL CALLBACK once_cb(PINIT_ONCE o, PVOID fn, PVOID *ctx) {
+    ((void (*)(void))fn)();
+    return TRUE;
+}
+static void run_once(once_t *o, void (*fn)(void)) { InitOnceExecuteOnce(o, once_cb, (PVOID)fn, NULL); }
+static double tnow(void) {
+    struct timespec t;
+    timespec_get(&t, TIME_UTC);
+    return t.tv_sec + 1e-9 * t.tv_nsec;
+}
+#else
+#include <pthread.h>
+typedef pthread_once_t once_t;
+#define ONCE_INIT PTHREAD_ONCE_INIT
+static void run_once(once_t *o, void (*fn)(void)) { pthread_once(o, fn); }
 static double tnow(void) {
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
     return t.tv_sec + 1e-9 * t.tv_nsec;
 }
+#endif
+
+static int prof = -1;
 
 #include "../include/ft8nn.h"
 #include "internal.h"
@@ -78,7 +100,7 @@ struct ft8nn_ctx {
     } hist[CTX_HIST]; /* this context's own decodes of recent slots (ft8nn_decode_at) */
 };
 
-static pthread_once_t init_once = PTHREAD_ONCE_INIT;
+static once_t init_once = ONCE_INIT;
 static void global_init(void) {
     ft8_init();
     ldpc_init();
@@ -94,17 +116,26 @@ static int ort_check(const OrtApi *api, OrtStatus *st) {
 }
 
 ft8nn_ctx *ft8nn_open(const char *onnx_path, int n_threads) {
-    pthread_once(&init_once, global_init);
+    run_once(&init_once, global_init);
     ft8nn_ctx *c = calloc(1, sizeof *c);
     c->api = OrtGetApiBase()->GetApi(ORT_API_VERSION);
     const OrtApi *api = c->api;
     OrtSessionOptions *so = NULL;
+#ifdef _WIN32 /* ONNX Runtime takes wide-character paths on Windows */
+    wchar_t model[4096];
+    if (!MultiByteToWideChar(CP_UTF8, 0, onnx_path, -1, model, 4096)) {
+        free(c);
+        return NULL;
+    }
+#else
+    const char *model = onnx_path;
+#endif
     if (ort_check(api, api->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "ft8nn", &c->env)) ||
         ort_check(api, api->CreateSessionOptions(&so)) ||
         (n_threads > 0 && ort_check(api, api->SetIntraOpNumThreads(so, n_threads))) ||
         (n_threads > 0 && ort_check(api, api->SetInterOpNumThreads(so, 1))) ||
         ort_check(api, api->SetSessionGraphOptimizationLevel(so, ORT_ENABLE_ALL)) ||
-        ort_check(api, api->CreateSession(c->env, onnx_path, so, &c->sess)) ||
+        ort_check(api, api->CreateSession(c->env, model, so, &c->sess)) ||
         ort_check(api, api->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &c->mem))) {
         if (so) api->ReleaseSessionOptions(so);
         ft8nn_close(c);
@@ -269,8 +300,7 @@ static int same_sender(const dec *a, const dec *b) {
 /* A station sends one message per slot (decoder._drop_ctx_dupes): drop a context decode in all[from..n) whose sender
  * a non-context decode in all[0..n) or an earlier kept context decode in all[from..) has. Returns the new n. */
 static int drop_ctx_dupes(dec *all, int from, int n) {
-    uint8_t drop[n > 0 ? n : 1];
-    memset(drop, 0, sizeof drop);
+    uint8_t drop[DEC_CAP] = {0}; /* n <= DEC_CAP (fixed size: not every compiler has variable-length arrays) */
     for (int i = from; i < n; i++) {
         if (!is_ctx(all[i].method)) continue;
         for (int j = 0; j < n && !drop[i]; j++)
@@ -504,8 +534,7 @@ static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall,
     /* drop osd_er / osd_bp ghosts of another decode (earlier pass, or this pass and not ghost-prone), as
      * decoder._decode_pass (GHOST_PRONE) */
     {
-        uint8_t drop[added > 0 ? added : 1];
-        memset(drop, 0, sizeof drop);
+        uint8_t drop[DEC_CAP] = {0}; /* added <= DEC_CAP */
         for (int i = 0; i < added; i++) {
             const dec *d = &all[nall + i];
             if (!ghost_prone(d->method)) continue;
@@ -533,11 +562,11 @@ done:
     return added;
 }
 
-static pthread_once_t ap_once = PTHREAD_ONCE_INIT, erase_once = PTHREAD_ONCE_INIT;
+static once_t ap_once = ONCE_INIT, erase_once = ONCE_INIT;
 
 static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_decode_t *out, int max_out) {
-    pthread_once(&ap_once, ap_init);
-    pthread_once(&erase_once, erase_init);
+    run_once(&ap_once, ap_init);
+    run_once(&erase_once, erase_init);
     if (n > SLOT_N) n = SLOT_N;
     if (n < NSPS) return 0;
     double *x = malloc(sizeof(double) * n);

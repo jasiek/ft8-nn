@@ -15,12 +15,12 @@ the M1 Pro. Other platforms and smaller machines have not been tried.
 
 | | Requirement |
 |---|---|
-| OS | macOS arm64 (tested). The Makefile is macOS-specific: it finds ONNX Runtime via `brew` and builds a `.dylib`. Linux would need Makefile changes. |
-| Build tools | C11 compiler (tested: Apple clang 21) and `make` |
-| Libraries | ONNX Runtime ≥ 1.31 (`brew install onnxruntime`, about 21 MB). No other dependencies. |
+| OS | macOS arm64 (tested). The Makefile builds a `.so` on Linux (x64, aarch64), but Linux hasn't been tried yet. Native Windows needs its own build files; the code has `_WIN32` branches for threads, clocks and paths that have not been compiled yet. |
+| Build tools | C11 compiler (tested: Apple clang 21; the code is plain C11 without variable-length arrays or 128-bit integers) and `make` |
+| Libraries | ONNX Runtime 1.31.1, the official release: `tools/get_onnxruntime.sh` downloads the build for this machine (macOS arm64/x86_64, Linux x64/aarch64, about 35 MB) into `third_party/onnxruntime`, where `make -C c` finds it. Homebrew's `onnxruntime` is used as a fallback, but it runs this model 2.3× slower. `make -C c ORT_PREFIX=<dir>` uses any other copy. No other dependencies. |
 | Model | `ft8nn.onnx`, 3.5 MB (exported from a trained checkpoint by `tools/export_onnx.py`) |
 | Memory | about 500 MB peak resident per decoding context on the busiest receivers (320–530 MB across stations) |
-| CPU | To keep up in real time every 15 s slot must finish decoding within 15 s. On one core, slots average 4.3 s (first 20 slots of each of the 10 training stations, max 11.8 s). The busiest receiver tested (40 m, about 48 decodes per slot) takes 10.9 s per slot (max 12.5 s), so one core keeps up on every slot measured; `--threads 2` (ONNX Runtime threads) brings that to 7.9 s (max 9.0 s) for headroom. The NN (ONNX Runtime CPU) is the largest cost. Measured with `ft8nn_cli --time`, machine awake and otherwise idle. |
+| CPU | To keep up in real time every 15 s slot must finish decoding within 15 s. On one core, slots average 4.3 s (first 20 slots of each of the 10 training stations, max 11.8 s). The busiest receiver tested (40 m, about 48 decodes per slot) takes 10.9 s per slot (max 12.5 s), so one core keeps up on every slot measured; `--threads 2` (ONNX Runtime threads) brings that to 7.9 s (max 9.0 s) for headroom. The NN (ONNX Runtime CPU) is the largest cost. Measured with `ft8nn_cli --time`, machine awake and otherwise idle, with Homebrew's ONNX Runtime; the official build (now the default) was 1.25–1.5× faster per busy slot in a paired test, clean numbers to follow. |
 
 ### Decoding with the Python reference (`ft8nn/`)
 
@@ -64,6 +64,15 @@ uv run python bench/run_jt9.py data/bench/awgn             # WSJT-X baseline (ne
 uv run python train.py --steps 6000 --out runs/v1
 uv run python bench/run_ours.py data/bench/awgn --tag nn --model runs/v1/model.pt
 uv run python bench/report.py data/bench/awgn --dt-max 0.5
+```
+
+C library:
+
+```sh
+tools/get_onnxruntime.sh                                    # official ONNX Runtime into third_party/ (once)
+make -C c                                                   # c/build/libft8nn.{a,dylib|so}, c/build/ft8nn_cli
+uv run python tools/export_onnx.py runs/v2/model.pt runs/v2/ft8nn.onnx
+c/build/ft8nn_cli runs/v2/ft8nn.onnx slot.wav               # one line per decode; --threads N, --time
 ```
 
 Benchmark scoring: 10 signals per 15 s slot, real messages from `ft8nn/data/messages.json`;
