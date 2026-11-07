@@ -1,6 +1,6 @@
 # Status and plan (resume here)
 
-Last updated 2026-11-06 (context a-priori decoding committed as `nn_v2_cy`, 0ec12a6; improve loop finished on the Mac mini).
+Last updated 2026-11-06 (plan 7.3: clean C timing on the Mac mini, README updated; `nn_v2_cy` is the default).
 
 ## Improve loop (2026-11-05 on the Mac mini, user-approved) — FINISHED 18:40, stop condition (1) met
 
@@ -15,10 +15,10 @@ decodes verified identical to the main machine.
 
 ## In flight
 
-- Nothing. Last commit: context a-priori decoding `nn_v2_cy` (plan 7.2c).
+- Nothing. Last commit: plan 7.3 clean C timing.
 - Loop log (finished): `nn_v2_eh` pass, `nn_v2_ob` fail (1 ghost), `nn_v2_og` pass, `nn_v2_p4` pass → run 2
   slot-confirmed 19,550 ≥ 19,500 with unconf 1, noise 0 false: loop stopped. Commits need the user's OK again.
-  Next candidates: plan 7.3 (clean C timing; 4 passes + context AP cost time on busy slots), retraining.
+  Next candidates: NN reuse in passes 2–4 (plan 7.3 result: one core can't keep up on busy bands), retraining.
 
 ## Where we are
 
@@ -313,9 +313,27 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       16,638 → 17,586, jt9-only 400 → 309; AWGN 50% −22.52 (unchanged; no context there); noise 0 false / 998
       (no context there either, so not a test of this stage). Golden C vs Python: 00_40m 756/756, 08_80m 600/600,
       run 2 02_80m 733/733 all fields (incl. cx decodes); AWGN 430/430.
-   3. Re-measure C decode time per slot on an idle machine, busiest stations (00_40m, validation 01_40m), single core
-      and `--threads 2/4`. README "System requirements" quotes 18 s for one busy slot measured under load and
-      recommends ≥ 2 cores; replace with clean numbers.
+   3. **Clean C timing — DONE (2026-11-06, Mac mini M4, `nn_v2_cy`).** `ft8nn_cli --time` prints per-slot decode
+      wall time to stderr. Scratch script runs the CLI strictly one after another under `caffeinate -dims`.
+      **Pitfall:** the first attempt ran while the mini was asleep in "dark wake" (no full wake since the night):
+      heavy CPU there triggers `Dark Wake Thermal Emergency` sleep, giving 450–550 s "slots" and inflated CPU time
+      too. `caffeinate -i` alone doesn't prevent that; check `pmset -g log` for Sleep/DarkWake during any timing run.
+      Clean numbers (s per slot, wall; no sleep events in the log):
+
+      | set | dec/slot | 1 thread mean / max (> 15 s) | 2 threads mean / max | 4 threads mean / max |
+      |---|---|---|---|---|
+      | validation run 1 01_40m, first 40 slots | 47.6 | 15.76 / 17.08 (37 of 40) | 11.38 / 12.12 | 9.57 / 10.98 |
+      | training 00_40m, first 40 slots | 36.9 | 12.26 / 15.58 (5 of 40) | 8.86 / 11.26 | 7.30 / 9.37 |
+      | training, first 20 slots of each of 10 stations | 0.6–38 | 6.00 / 16.98 (10 of 200) | – | – |
+
+      Peak RSS 330–580 MB per context. Threads only speed up ONNX Runtime: 4 threads give 1.6×, not 4×.
+      Profile of 6 busy 01_40m slots (1 thread, 15.6 s): NN 10.9 s (70%), BP/OSD incl. context AP 2.6 s, fine sync
+      1.1 s, candidates 0.5 s, classical 0.3 s; **each of the 4 passes costs the same ~3.9 s** (≈ 1,200 hypotheses
+      each), while passes 3–4 add only 0–6 decodes. So one core no longer keeps up on the busiest bands; 2 cores do.
+      **Next speedup (exact, no result change if done right):** in passes 2–4 most candidates lie in time-frequency
+      regions that no subtraction touched, so their features and NN LLRs are the same as in the pass before; cache
+      them and run the NN only on hypotheses that overlap a subtracted signal or are new. Needs a check that the
+      candidate search and fine sync give the same hypotheses there (candidate baseline is a local median).
 8. Optional later work:
    - More AP types: the a2 MyCall type needs the operator's own callsign, and that is only useful inside an app
      (an `ft8nn_set_mycall` would slot into the same pinned-bit machinery as context AP).

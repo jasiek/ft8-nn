@@ -7,8 +7,9 @@ the hand-made soft metrics with a small neural net that turns baseband symbol sp
 
 ## System requirements
 
-Only one machine has been tested: Apple M1 Pro (10 cores, 16 GB), macOS 26, arm64. The numbers below were
-measured there. Other platforms and smaller machines have not been tried.
+Two machines have been tested: Apple M1 Pro (10 cores, 16 GB, macOS 26) and Mac mini M4 (4 performance +
+6 efficiency cores, 16 GB, macOS 27), both arm64. The C timings below were measured on the M4; the Python ones on
+the M1 Pro. Other platforms and smaller machines have not been tried.
 
 ### Decoding with the C library (`c/`, `libft8nn`)
 
@@ -18,8 +19,8 @@ measured there. Other platforms and smaller machines have not been tried.
 | Build tools | C11 compiler (tested: Apple clang 21) and `make` |
 | Libraries | ONNX Runtime ≥ 1.31 (`brew install onnxruntime`, about 21 MB). No other dependencies. |
 | Model | `ft8nn.onnx`, 3.5 MB (exported from a trained checkpoint by `tools/export_onnx.py`) |
-| Memory | about 370 MB peak resident per decoding context, on a busy 40 m slot |
-| CPU | One core averages 6.4 s per 15 s slot (training recordings, idle machine). Crowded bands take longer: one busy 40 m slot took 18 s on one core while other jobs were running. To keep up in real time, every slot must finish within 15 s, so plan on at least 2 cores (`--threads N` sets ONNX Runtime's thread count). |
+| Memory | about 550 MB peak resident per decoding context on the busiest receivers (330–580 MB across stations) |
+| CPU | To keep up in real time every 15 s slot must finish decoding within 15 s. On one core, slots average 6.0 s (first 20 slots of each of the 10 training stations), but busy bands don't keep up: a 40 m receiver with about 48 decodes per slot takes 15.8 s per slot (37 of 40 slots over 15 s). With `--threads 2` (ONNX Runtime threads) the same slots take 11.4 s (max 12.1 s), with `--threads 4` 9.6 s (max 11.0 s). Plan on at least 2 cores. About 70% of the time is the NN (ONNX Runtime CPU). Measured with `ft8nn_cli --time`, machine awake and otherwise idle. |
 
 ### Decoding with the Python reference (`ft8nn/`)
 
@@ -29,7 +30,7 @@ measured there. Other platforms and smaller machines have not been tried.
 | Packages | numpy, scipy, torch (the environment is about 0.9 GB on disk) |
 | Model | `model.pt`, 3.4 MB |
 | Memory | about 690 MB peak resident for one decoding process |
-| CPU | about 4 s per slot per core on average (torch uses Accelerate on Apple Silicon) |
+| CPU | about 4 s per slot per core on average (torch uses Accelerate on Apple Silicon), measured before the 4th decode pass and context a-priori decoding were added, so now higher |
 
 ### Training and benchmarks
 

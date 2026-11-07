@@ -1,11 +1,12 @@
 /* ft8nn_cli: decode 15 s WAV slots with libft8nn.
  *
- *   ft8nn_cli [--threads N] model.onnx slot1.wav [slot2.wav ...]
+ *   ft8nn_cli [--threads N] [--time] model.onnx slot1.wav [slot2.wav ...]
  *
  * One context for all files, so callsign hashes carry over in the order given (pass slots in
  * time order). Files named yymmdd_HHMMSS.wav are decoded with ft8nn_decode_at (context a-priori from the
  * slots 30 and 60 s earlier); other names with ft8nn_decode. Output, one line per decode, same format as bench/run_real.py decodes_<tag>.txt:
  *   <slot>\t<f0 %.1f>\t<dt %.2f>\t<method><metric>\t<text>\t<77 bits as 20 hex digits>\t<snr %.1f>
+ * --time also writes "time\t<slot>\t<decode wall s %.3f>\t<decodes>" per slot to stderr.
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -78,13 +79,19 @@ static int64_t slot_time(const char *slot) {
 }
 
 int main(int argc, char **argv) {
-    int threads = 1, a = 1;
-    if (a + 1 < argc && !strcmp(argv[a], "--threads")) {
-        threads = atoi(argv[a + 1]);
-        a += 2;
+    int threads = 1, timing = 0, a = 1;
+    for (;;) {
+        if (a + 1 < argc && !strcmp(argv[a], "--threads")) {
+            threads = atoi(argv[a + 1]);
+            a += 2;
+        } else if (a < argc && !strcmp(argv[a], "--time")) {
+            timing = 1;
+            a++;
+        } else
+            break;
     }
     if (argc - a < 2) {
-        fprintf(stderr, "usage: %s [--threads N] model.onnx slot.wav...\n", argv[0]);
+        fprintf(stderr, "usage: %s [--threads N] [--time] model.onnx slot.wav...\n", argv[0]);
         return 2;
     }
     ft8nn_ctx *ctx = ft8nn_open(argv[a], threads);
@@ -105,7 +112,12 @@ int main(int argc, char **argv) {
         char *dot = strrchr(slot, '.');
         if (dot) *dot = 0;
         int64_t t = slot_time(slot);
+        struct timespec t0, t1;
+        clock_gettime(CLOCK_MONOTONIC, &t0);
         int nd = t == INT64_MIN ? ft8nn_decode(ctx, x, n, out, 256) : ft8nn_decode_at(ctx, x, n, t, out, 256);
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+        if (timing)
+            fprintf(stderr, "time\t%s\t%.3f\t%d\n", slot, t1.tv_sec - t0.tv_sec + 1e-9 * (t1.tv_nsec - t0.tv_nsec), nd);
         free(x);
         if (nd < 0) {
             fprintf(stderr, "%s: decode failed\n", argv[i]);
