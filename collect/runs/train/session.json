@@ -1,0 +1,15 @@
+{
+ "source": "reconstructed 2026-11-07 from slot names (first 261104_030200, 120 slots per receiver); the mini copy holds recordings/ only, so whether spots were captured is unknown here",
+ "start_utc": 1793761320,
+ "until_utc": 1793763120,
+ "bands": [
+  "15m",
+  "17m",
+  "20m",
+  "30m",
+  "40m",
+  "60m",
+  "80m",
+  "160m"
+ ]
+}

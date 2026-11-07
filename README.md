@@ -53,6 +53,7 @@ the M1 Pro. Other platforms and smaller machines have not been tried.
 | `train.py` | training with built-in NN-vs-classical BP validation |
 | `bench/` | benchmark set generation, jt9 runner, our runner, comparison report |
 | `tools/` | LDPC table extraction, message pool, sync diagnostics |
+| `collect/` | real-data collection: KiwiSDR recorder, PSK Reporter capture, jt9 labelling, spot scoring, run records and SHA-256 manifests (`docs/data-collection.md`) |
 
 ## Reproduce
 

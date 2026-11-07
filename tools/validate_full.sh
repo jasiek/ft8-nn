@@ -20,7 +20,7 @@ M="--model runs/v2/model.pt --also-classical --tag $TAG --workers $W"
 step() { echo "[$(date +%H:%M)] $*"; }
 
 step "validation run 1";  uv run python bench/run_real.py "$V/recordings" $M "$@" --out data/val/run1 > "$L/run1.log" 2>&1
-python3 "$V/tools/verify.py" --decodes data/val/run1 --tag "$TAG" --list > "$L/verify_run1.txt" 2>&1
+V="$V" python3 collect/verify.py --decodes data/val/run1 --tag "$TAG" --list > "$L/verify_run1.txt" 2>&1
 step "training recordings"; uv run python bench/run_real.py "$T" $M "$@" > "$L/train.log" 2>&1
 uv run python bench/run_real.py "$T" --compare-only --tag "$TAG" > "$L/train_cmp.txt" 2>&1
 step "AWGN";              uv run python bench/run_ours.py data/bench/awgn $M "$@" > "$L/awgn.log" 2>&1

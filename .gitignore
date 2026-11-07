@@ -4,7 +4,8 @@ __pycache__/
 *.pyc
 build/
 third_party/
-runs/
+/runs/
 *.log
 .pytest_cache/
 c/build/
+.claude/worktrees/
