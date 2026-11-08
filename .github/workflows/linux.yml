@@ -1,6 +1,6 @@
-# Linux build + tests (x64 and aarch64). The trained model and recordings are not in the repository, so the C check
-# uses a random-weight model on synthetic slots (tools/ci_smoke.py); the full golden tests run locally
-# (tools/validate_full.sh).
+# Linux build + tests (x64 and aarch64). The recordings are not in this repository, so the C-vs-Python check runs the
+# trained model (models/v2) on synthetic slots (tools/ci_smoke.py); the full golden tests on real recordings run
+# locally (tools/validate_full.sh).
 name: linux
 
 on:

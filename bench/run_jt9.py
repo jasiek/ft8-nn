@@ -6,14 +6,17 @@ Writes <set>/results_jt9.json and prints decode rate per SNR.
 """
 import argparse
 import json
+import os
 import re
+import shutil
 import subprocess
 import tempfile
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-JT9 = "/usr/local/bin/jt9"
+# WSJT-X jt9: $JT9, else on PATH, else /usr/local/bin/jt9
+JT9 = os.environ.get("JT9") or shutil.which("jt9") or "/usr/local/bin/jt9"
 LINE = re.compile(r"^(\d{6})\s+(-?\d+)\s+(-?[\d.]+)\s+(\d+)\s+~\s+(.*?)\s*(?:a\d)?\s*$")
 
 

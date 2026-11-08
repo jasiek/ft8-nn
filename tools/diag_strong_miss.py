@@ -1,6 +1,6 @@
 """Classify jt9-only decodes above an SNR threshold by the stage that loses them.
 
-  uv run python tools/diag_strong_miss.py runs/v2/model.pt nn_v2 -9 [max_slots] [--root REC] [--out OUT] [--max-snr S]
+  uv run python tools/diag_strong_miss.py models/v2/model.pt nn_v2 -9 [max_slots] [--root REC] [--out OUT] [--max-snr S]
 
 --root: recordings root (default ../ft8-training-data/recordings); --out: our decodes root (default data/real).
 

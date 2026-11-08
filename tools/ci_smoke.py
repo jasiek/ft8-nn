@@ -1,12 +1,12 @@
-"""CI check without the trained model or recordings: the C library must decode exactly what the Python decoder does.
+"""CI check without the recordings: the C library must decode exactly what the Python decoder does.
 
-A randomly initialised SoftDemod (fixed seed) is saved as a checkpoint and exported to ONNX. Its LLRs are meaningless,
-but the decoder's classical fallback metrics (nsym 1/2/3) still decode strong signals, so this runs the whole C
-pipeline (candidates, sync, ONNX Runtime, BP/OSD, subtraction, unpacking) against Python, field by field, with the
-same comparison as on real data (tools/golden_c.py). Slots: random payloads at -16..-4 dB in AWGN, numbered file
-names (no context a-priori).
+Default: the trained model (models/v2), exported to ONNX here, on synthetic slots: random payloads at -24..-8 dB (near the decode limit) in
+AWGN, numbered file names (no context a-priori), so BP, OSD, a-priori and subtraction all take part. --model random:
+a randomly initialised SoftDemod (fixed seed) instead; its LLRs are meaningless, but the classical fallback metrics
+still decode the strong signals. Either way the whole C pipeline (candidates, sync, ONNX Runtime, BP/OSD,
+subtraction, unpacking) is compared with Python field by field, as on real data (tools/golden_c.py).
 
-  uv run python tools/ci_smoke.py [--dir data/ci] [--slots 8]
+  uv run python tools/ci_smoke.py [--dir data/ci] [--slots 8] [--model models/v2/model.pt|random]
 
 Needs c/build/ft8nn_cli (make -C c). Exit status 0 = C and Python agree and decoded something.
 """
@@ -39,15 +39,19 @@ def main():
     ap.add_argument("--dir", default="data/ci")
     ap.add_argument("--slots", type=int, default=8)
     ap.add_argument("--per-slot", type=int, default=8)
+    ap.add_argument("--model", default="models/v2/model.pt", help="checkpoint, or 'random'")
     a = ap.parse_args()
     d = (ROOT / a.dir).resolve()
     slots = d / "rec" / "synthetic" / "slots"
     slots.mkdir(parents=True, exist_ok=True)
 
-    torch.manual_seed(0)
-    net = model.SoftDemod()
-    ckpt, onnx = d / "random.pt", d / "random.onnx"
-    torch.save({"state_dict": net.state_dict(), "arch": {}, "step": 0}, ckpt)
+    if a.model == "random":
+        torch.manual_seed(0)
+        ckpt = d / "random.pt"
+        torch.save({"state_dict": model.SoftDemod().state_dict(), "arch": {}, "step": 0}, ckpt)
+    else:
+        ckpt = ROOT / a.model
+    onnx = d / "model.onnx"
     run(sys.executable, "tools/export_onnx.py", ckpt, onnx)
 
     rng = np.random.default_rng(1)
@@ -57,7 +61,7 @@ def main():
         for k in range(a.per_slot):
             _, tones = ft8.encode77(ft8.random_payloads(1, rng)[0])
             f0 = 300 + spacing * k + rng.uniform(0, spacing - 60)
-            sigs.append(Signal(tones, f0, rng.uniform(-0.4, 1.0), rng.uniform(-16, -4)))
+            sigs.append(Signal(tones, f0, rng.uniform(-0.4, 1.0), rng.uniform(-16, -4) if a.model == "random" else rng.uniform(-24, -8)))
         write_wav(slots / f"000000_{i:06d}.wav", synth_slot(sigs, rng))
 
     run(sys.executable, "bench/run_real.py", d / "rec", "--model", ckpt, "--also-classical", "--tag", "ci",
@@ -67,7 +71,7 @@ def main():
     m = re.search(r"py (\d+) decodes, c (\d+), same payload (\d+), all fields equal (\d+)", out)
     if not m or "PASS" not in out:
         sys.exit("C and Python differ")
-    if int(m.group(1)) < a.slots * a.per_slot // 2:
+    if int(m.group(1)) < a.slots * a.per_slot // 3:
         sys.exit(f"only {m.group(1)} decodes of {a.slots * a.per_slot} strong signals: decoder broken?")
     print(f"OK: {m.group(1)} decodes, C == Python in every field")
 

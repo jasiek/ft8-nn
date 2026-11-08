@@ -43,6 +43,7 @@ the M1 Pro. Other platforms and smaller machines have not been tried.
 
 | Path | What |
 |---|---|
+| `models/v2/` | the shipped model: `model.pt` (PyTorch), `ft8nn.onnx` (for the C library), training `log.json` |
 | `ft8nn/ft8.py` | CRC-14, LDPC encode, tone map, GFSK waveform (bit-exact vs WSJT-X `ft8code`) |
 | `ft8nn/channel.py` | 12 kHz slot synthesis, AWGN/Watterson fading, ft8sim-calibrated SNR |
 | `ft8nn/frontend.py` | candidate search, 200 Hz downsampler, semi-coherent Costas fine sync, classical metrics |
@@ -59,11 +60,18 @@ the M1 Pro. Other platforms and smaller machines have not been tried.
 
 ```sh
 uv run pytest -q tests                                     # encoder vs ft8code, LDPC, calibration
+# benchmark sets (byte-identical to the ones behind all results; 10 signals per 15 s slot, 30 slots per SNR)
 uv run python bench/make_set.py --out data/bench/awgn --channel awgn --snrs=-25:-16 --files 30 --seed 1
-uv run python bench/run_jt9.py data/bench/awgn             # WSJT-X baseline (needs /usr/local/bin/jt9)
-uv run python train.py --steps 6000 --out runs/v1
-uv run python bench/run_ours.py data/bench/awgn --tag nn --model runs/v1/model.pt
+uv run python bench/make_set.py --out data/bench/moderate --channel moderate --snrs=-24:-12 --files 30 --seed 2
+uv run python bench/make_set.py --out data/bench/disturbed --channel disturbed --snrs=-24:-10 --files 30 --seed 3
+uv run python bench/make_set.py --out data/bench/noise --channel awgn --snrs=-80:-80 --files 100 --seed 9   # noise only
+uv run python bench/run_jt9.py data/bench/awgn             # WSJT-X baseline (needs jt9 on PATH or /usr/local/bin)
+# the shipped model is models/v2; to retrain it (74 min on an M4 with MPS, ~4 h on an M1 Pro):
+uv run python train.py --cfg v1 --steps 6000 --out runs/v1
+uv run python train.py --cfg v2 --init runs/v1/model.pt --lr 5e-4 --steps 8000 --out runs/v2
+uv run python bench/run_ours.py data/bench/awgn --tag nn --model models/v2/model.pt --also-classical
 uv run python bench/report.py data/bench/awgn --dt-max 0.5
+# real recordings and the validation set: see STATUS.md and docs/data-collection.md
 ```
 
 C library:
@@ -71,8 +79,8 @@ C library:
 ```sh
 tools/get_onnxruntime.sh                                    # official ONNX Runtime into third_party/ (once)
 make -C c                                                   # c/build/libft8nn.{a,dylib|so}, c/build/ft8nn_cli
-uv run python tools/export_onnx.py runs/v2/model.pt runs/v2/ft8nn.onnx
-c/build/ft8nn_cli runs/v2/ft8nn.onnx slot.wav               # one line per decode; --threads N, --time
+uv run python tools/export_onnx.py models/v2/model.pt models/v2/ft8nn.onnx
+c/build/ft8nn_cli models/v2/ft8nn.onnx slot.wav               # one line per decode; --threads N, --time
 ```
 
 Benchmark scoring: 10 signals per 15 s slot, real messages from `ft8nn/data/messages.json`;

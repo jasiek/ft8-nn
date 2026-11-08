@@ -13,7 +13,7 @@ TAG=$1; shift
 V=${V:-$(cd .. && pwd)/ft8-validation-set}
 W=${WORKERS:-6}
 L=data/logs/$TAG; mkdir -p "$L"
-M="--model runs/v2/model.pt --also-classical --tag $TAG --workers $W"
+M="--model models/v2/model.pt --also-classical --tag $TAG --workers $W"
 
 uv run python bench/run_ours.py data/bench/noise $M "$@" > "$L/noise.log" 2>&1
 uv run python bench/run_real.py "$V/run2/recordings" $M "$@" --out data/val/run2 > "$L/run2.log" 2>&1

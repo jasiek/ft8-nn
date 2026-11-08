@@ -16,7 +16,7 @@ V=${V:-$(cd .. && pwd)/ft8-validation-set}
 T=${T:-$(cd .. && pwd)/ft8-training-data/recordings}
 W=${WORKERS:-6}
 L=data/logs/$TAG; mkdir -p "$L"
-M="--model runs/v2/model.pt --also-classical --tag $TAG --workers $W"
+M="--model models/v2/model.pt --also-classical --tag $TAG --workers $W"
 step() { echo "[$(date +%H:%M)] $*"; }
 
 step "validation run 1";  uv run python bench/run_real.py "$V/recordings" $M "$@" --out data/val/run1 > "$L/run1.log" 2>&1
