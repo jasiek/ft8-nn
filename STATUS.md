@@ -17,8 +17,8 @@ decodes verified identical to the main machine.
 ## In flight
 
 - Last commits: `collect/` data-collection tools (docs/data-collection.md), candidate reuse `nn_v2_rs` (plan 7.3b).
-- Model architecture study (conv-only, BiGRU; else int8 / narrower / distilled) runs in a separate worktree
-  (`.claude/worktrees/agent-*`, notes in its `docs/arch-study.md`), started 2026-11-07; no commits there without the user.
+- Architecture study finished 2026-11-07 (plan 7.3d): keep the transformer. Its code (`train.py --kind conv|gru`,
+  `--teacher`, `model.build`) is merged; models in `runs/{tf,conv,gru,tf_l2,tf_l2kd}_v{1,2}`, scripts `data/tmp/` (gitignored).
 - Loop log (finished): `nn_v2_eh` pass, `nn_v2_ob` fail (1 ghost), `nn_v2_og` pass, `nn_v2_p4` pass → run 2
   slot-confirmed 19,550 ≥ 19,500 with unconf 1, noise 0 false: loop stopped. Commits need the user's OK again.
   Next candidates: training with real noise + synthetic signals (exact labels, real AGC/QRM), retraining.
@@ -27,7 +27,8 @@ decodes verified identical to the main machine.
 
 Best model: `runs/v2/model.pt`. It is gitignored and exists only on this machine, so back it up.
 Recipe: v1 (6000 steps, `--cfg v1`), then fine-tune with
-`train.py --cfg v2 --init runs/v1/model.pt --lr 5e-4 --steps 8000`. That takes about 4 h on M-series with MPS.
+`train.py --cfg v2 --init runs/v1/model.pt --lr 5e-4 --steps 8000`. That took about 4 h on the M1 Pro and takes
+74 min on the M4 mini (MPS). `--kind conv|gru` trains the study's alternatives, `--teacher CKPT` distils from a checkpoint.
 
 Decoder defaults: `decoder.decode_slot`. These are 4 passes with subtraction, 2 fine-sync hypotheses,
 NN metric with classical nsym 1/2/3 fallback (`--also-classical`), OSD order 2 gated on expected errors < 40,
@@ -365,7 +366,7 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       −31% on the busiest receiver: one core now keeps up on every measured slot. Peak RSS 320–530 MB.
       Timing scripts: `data/timing/` (gitignored).
    3c. **Portable build + official ONNX Runtime — DONE 2026-11-07.** Found by the architecture study
-      (worktree, its `docs/arch-study.md`): Homebrew's onnxruntime 1.31.1 runs our graph 2.3–3.7x slower than the
+      (`docs/arch-study.md`): Homebrew's onnxruntime 1.31.1 runs our graph 2.3–3.7x slower than the
       official release of the same version (libft8nn NN stage 2.18 → 0.94 ms per hypothesis, M4, 1 thread;
       decodes byte-identical). This also explains plan 2's old "ORT 2.4 ms vs torch 0.82 ms" gap.
       `tools/get_onnxruntime.sh` downloads the official C release for the host (macOS arm64/x86_64, Linux
@@ -378,10 +379,32 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       path for ORT on Windows. Clean with `-std=c11 -pedantic -Wvla`. Linux and Windows not built yet (no Docker or
       Linux box here). Golden C vs Python with the official build: 756/756, 600/600, run 2 733/733, AWGN 430/430.
       Paired timing under load (fork's benchmarks running), 6 busy 01_40m slots, 1 thread: Homebrew 11.47 / 11.47 s,
-      official 9.14 / 7.61 s per slot, same 280 decodes. **To do:** clean timing on an idle machine (README numbers
-      are still the Homebrew ones), a Linux build (CI or a Linux box).
+      official 9.14 / 7.61 s per slot, same 280 decodes.
+      **Clean timing (2026-11-07 22:31, idle, no power events), official ORT + reuse, same slots as 7.3/7.3b:**
+      busiest receiver 01_40m 1 thread 6.93 / max 7.95 s (Homebrew 10.91 / 12.46; this morning's `nn_v2_cy` 15.76),
+      2 threads 6.21 / 7.05; training 00_40m 5.29 / 6.49; 10-station sample 2.78 / max 7.51 (0 of 200 over 15 s);
+      peak RSS 360–570 MB; decodes byte-identical to the Homebrew run. **To do:** a Linux build (CI or a Linux box).
+   3d. **Architecture study (2026-11-07, full log `docs/arch-study.md`; models `runs/{tf,conv,gru,tf_l2,tf_l2kd}_v{1,2}`,
+      scripts and logs in gitignored `data/tmp/`, `data/logs/`):
+      keep the transformer.** Same v1 → v2 recipe on the M4 (a full transformer training takes 74 min here, not 4 h).
+
+      | model | params | AWGN 50% | fading mod / dist | training rec. | run 2 dec / slot / unconf | NN ms/hyp (official ORT) |
+      |---|---|---|---|---|---|---|
+      | transformer runs/v2 | 843k | −22.52 | −20.17 / −20.17 | 17,586 | 27,930 / 20,505 / 1 | 0.97 |
+      | transformer retrained (noise) | 843k | −22.49 | −20.19 / −20.22 | 17,661 | 27,955 / 20,518 / 5 | – |
+      | conv-only (dilated residual) | 839k | −22.38 | −20.17 / −20.08 | 17,650 | 27,953 / 20,532 / 2 | 0.66 |
+      | BiGRU | 847k | −22.37 | −20.04 / −20.04 | 17,593 | 27,898 / 20,475 / 4 | 0.56 |
+      | transformer 2 layers | 512k | −22.36 | −20.22 / −20.14 | 17,611 | 27,899 / 20,486 / 6 | 0.60 |
+      | same, distilled from runs/v2 | 512k | −22.41 | −20.25 / −20.09 | 17,577 | 27,849 / 20,437 / 3 | 0.60 |
+
+      Noise 0/998 for all. Training noise: thresholds ±0.03–0.05 dB, real decodes ±0.3%, but run-2 unconf 1 vs 5 for
+      the same recipe (the a-priori gates were tuned on runs/v2; any new network needs them re-checked). Every
+      alternative loses 0.08–0.16 dB on AWGN and a lot on synthetic close overlaps (−16 dB: 0.62–0.75 vs 0.89), and is
+      level on real data. None meets "within 0.1 dB and ≥ 1.5× faster"; distillation gave nothing over training the
+      same size from labels; int8 dynamic quantization is slower than float on the official ORT (0.97–1.14 vs 0.85 ms).
+      With the official ORT the NN is about half of a busy slot, so a smaller network would save only ~19%.
 8. Optional later work:
    - More AP types: the a2 MyCall type needs the operator's own callsign, and that is only useful inside an app
      (an `ft8nn_set_mycall` would slot into the same pinned-bit machinery as context AP).
-   - Retrain on a bigger model.
+   - Retrain on a bigger model (cheap now: 74 min per transformer training on the M4).
    - Train with an AGC/passband-tilt impairment.

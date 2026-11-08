@@ -43,11 +43,14 @@ def features(y, start=None):
 def _conv_bl(h, conv):
     """'same' Conv1d on (B, L, C) via unfold + matmul. Equivalent to conv(h.transpose(1,2)).transpose(1,2)
     but ~30x faster on ARM CPUs, where torch's conv1d falls back to a slow kernel."""
-    if torch.onnx.is_in_onnx_export():  # unfold doesn't export; ONNX runtimes have fast convs anyway
+    # unfold doesn't export (ONNX runtimes have fast convs anyway), and on MPS it is slower than conv1d (dilated:
+    # 15x per training step, docs/arch-study.md)
+    if torch.onnx.is_in_onnx_export() or h.device.type != "cpu":
         return conv(h.transpose(1, 2)).transpose(1, 2)
-    k = conv.kernel_size[0]
-    hp = nn.functional.pad(h.transpose(1, 2), (k // 2, k // 2))  # (B, C, L+k-1)
-    cols = hp.unfold(2, k, 1).permute(0, 2, 1, 3).reshape(h.shape[0], h.shape[1], -1)  # (B, L, C*k)
+    k, dil = conv.kernel_size[0], conv.dilation[0]
+    span = (k - 1) * dil + 1
+    hp = nn.functional.pad(h.transpose(1, 2), (span // 2, span // 2))  # (B, C, L+span-1)
+    cols = hp.unfold(2, span, 1)[..., ::dil].permute(0, 2, 1, 3).reshape(h.shape[0], h.shape[1], -1)  # (B, L, C*k)
     return cols @ conv.weight.reshape(conv.out_channels, -1).T + conv.bias
 
 
@@ -76,6 +79,65 @@ class SoftDemod(nn.Module):
         h = self.tf(h)
         h = self.out(self.norm(h[:, self.data_pos]))  # (B,58,3)
         return h.reshape(h.shape[0], 174)
+
+
+class ConvDemod(nn.Module):
+    """Convolution-only alternative to SoftDemod (architecture study, docs/arch-study.md): residual pre-norm blocks
+    of two dilated 'same' convs over the 79 symbols. Dilations cycle through `dils`, so with 5 blocks of k=5 the
+    receptive field (249 symbols) covers the whole frame, as the transformer's attention does."""
+
+    def __init__(self, d=128, blocks=5, conv_k=5, dils=(1, 2, 4, 8, 16)):
+        super().__init__()
+        self.inp = nn.Linear(2 * NBINS, d)
+        self.pos = nn.Parameter(torch.randn(1, 79, d) * 0.02)
+        ds = [dils[i % len(dils)] for i in range(2 * blocks)]
+        self.norms = nn.ModuleList(nn.LayerNorm(d) for _ in range(blocks))
+        self.convs = nn.ModuleList(nn.Conv1d(d, d, conv_k, padding=(conv_k - 1) * dl // 2, dilation=dl) for dl in ds)
+        self.norm = nn.LayerNorm(d)
+        self.out = nn.Linear(d, 3)
+        self.register_buffer("data_pos", torch.tensor(ft8.DATA_POS), persistent=False)
+
+    def forward(self, x):
+        h = self.inp(x) + self.pos
+        gelu = nn.functional.gelu
+        for i, ln in enumerate(self.norms):
+            h = h + _conv_bl(gelu(_conv_bl(gelu(ln(h)), self.convs[2 * i])), self.convs[2 * i + 1])
+        h = self.out(self.norm(h[:, self.data_pos]))
+        return h.reshape(h.shape[0], 174)
+
+
+class GRUDemod(nn.Module):
+    """Bidirectional-GRU alternative to SoftDemod (architecture study): the same input and conv front end, then a
+    BiGRU over the 79 symbols in place of the transformer layers."""
+
+    def __init__(self, d=128, hidden=152, layers=2, conv_k=5):
+        super().__init__()
+        self.inp = nn.Linear(2 * NBINS, d)
+        self.conv = nn.Sequential(
+            nn.Conv1d(d, d, conv_k, padding=conv_k // 2), nn.GELU(),
+            nn.Conv1d(d, d, conv_k, padding=conv_k // 2), nn.GELU(),
+        )
+        self.gru = nn.GRU(d, hidden, layers, batch_first=True, bidirectional=True)
+        self.norm = nn.LayerNorm(2 * hidden)
+        self.out = nn.Linear(2 * hidden, 3)
+        self.register_buffer("data_pos", torch.tensor(ft8.DATA_POS), persistent=False)
+
+    def forward(self, x):
+        h = self.inp(x)
+        gelu = nn.functional.gelu
+        h = h + gelu(_conv_bl(gelu(_conv_bl(h, self.conv[0])), self.conv[2]))
+        h, _ = self.gru(h)
+        h = self.out(self.norm(h[:, self.data_pos]))
+        return h.reshape(h.shape[0], 174)
+
+
+KINDS = {"tf": SoftDemod, "conv": ConvDemod, "gru": GRUDemod}
+
+
+def build(arch):
+    """Model from a checkpoint's arch dict; no "kind" key = the transformer (SoftDemod), as in older checkpoints."""
+    arch = dict(arch)
+    return KINDS[arch.pop("kind", "tf")](**arch)
 
 
 def classical_llr_torch(x):

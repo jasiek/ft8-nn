@@ -7,7 +7,7 @@ from . import decoder, model
 
 def load(path, device="cpu"):
     ck = torch.load(path, map_location=device)
-    net = model.SoftDemod(**ck["arch"]).to(device).eval()
+    net = model.build(ck["arch"]).to(device).eval()
     net.load_state_dict(ck["state_dict"])
     return net
 

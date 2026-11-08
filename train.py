@@ -82,15 +82,27 @@ def main():
     ap.add_argument("--eval-every", type=int, default=500)
     ap.add_argument("--init", default=None, help="checkpoint to fine-tune from")
     ap.add_argument("--cfg", default="v1", choices=["v1", "v2"], help="training channel distribution")
+    ap.add_argument("--kind", default="tf", choices=list(model.KINDS), help="tf = SoftDemod (default), conv, gru")
+    ap.add_argument("--blocks", type=int, default=5, help="conv: residual blocks")
+    ap.add_argument("--hidden", type=int, default=152, help="gru: hidden size per direction")
+    ap.add_argument("--gru-layers", type=int, default=2)
+    ap.add_argument("--teacher", default=None, help="distil: also fit this checkpoint's P(bit=1) (soft targets)")
+    ap.add_argument("--kd-weight", type=float, default=0.5, help="weight of the soft-target loss (rest: true bits)")
     a = ap.parse_args()
 
     device = "mps" if torch.backends.mps.is_available() else "cpu"
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    arch = dict(d=a.d, layers=a.layers, ff=a.ff)
-    net = model.SoftDemod(**arch).to(device)
+    arch = {"tf": dict(d=a.d, layers=a.layers, ff=a.ff), "conv": dict(kind="conv", d=a.d, blocks=a.blocks),
+            "gru": dict(kind="gru", d=a.d, hidden=a.hidden, layers=a.gru_layers)}[a.kind]
+    net = model.build(arch).to(device)
     if a.init:
         net.load_state_dict(torch.load(a.init, map_location=device)["state_dict"])
+    teacher = None
+    if a.teacher:
+        ck = torch.load(a.teacher, map_location=device)
+        teacher = model.build(ck["arch"]).to(device).eval()
+        teacher.load_state_dict(ck["state_dict"])
     opt = torch.optim.AdamW(net.parameters(), lr=a.lr, weight_decay=0.01)
     warm = 100 if a.init else 300
     sched = torch.optim.lr_scheduler.LambdaLR(
@@ -108,7 +120,12 @@ def main():
     run_loss = 0.0
     for step, (x, bits, snr) in enumerate(dl, 1):
         x, bits = x.to(device, non_blocking=True), bits.to(device, non_blocking=True)
-        loss = torch.nn.functional.binary_cross_entropy_with_logits(net(x), bits)
+        logits = net(x)
+        loss = torch.nn.functional.binary_cross_entropy_with_logits(logits, bits)
+        if teacher is not None:
+            with torch.no_grad():
+                soft = torch.sigmoid(teacher(x))
+            loss = (1 - a.kd_weight) * loss + a.kd_weight * torch.nn.functional.binary_cross_entropy_with_logits(logits, soft)
         opt.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
