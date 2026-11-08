@@ -18,12 +18,16 @@ collection run gives a *new* data set made the same way, not the same files.
 |---|---|
 | `kiwi.py` | minimal KiwiSDR WebSocket client: USB mode 200–3000 Hz, AGC on, uncompressed 16-bit PCM at 12 kHz, written as 15 s WAVs aligned to UTC :00/:15/:30/:45 and named `YYMMDD_HHMMSS.wav` (a slot is kept only if recording started within 0.2 s of its boundary) |
 | `pskr.py` | minimal MQTT 3.1.1 subscriber for `mqtt.pskreporter.info:1883`, topics `pskr/filter/v2/<band>/FT8/#`; one JSON line per spot plus our arrival time `rx_t` |
-| `val.py` | the run driver: `probe`, `probe-fresh`, `record`, `decode` (below) |
+| `val.py` | the run driver for the validation runs: `probe`, `probe-fresh`, `record`, `decode` (below) |
+| `ft8rec.py` | the run driver of the training recordings (`probe`, `record`, `decode`); `val.py` is its successor |
+| `fill.py` | second probe pass of the training run: fills bands `ft8rec.py probe` left empty |
 | `verify.py` | scores a decoder's output against the spots (tiers slot > active > repeat > unconf) |
 | `manifest.py` | SHA-256 manifest of a run (`make`, `check`) |
+| `datarepo.py` | packs a run folder for its Git LFS data repo (FLAC + xz) and unpacks it byte for byte |
 
-These are copies of `../ft8-validation-set/tools/*.py` (2026-11-04). Only the default paths changed: `val.py`
-writes to `$OUTDIR` (default `.`) and reads the training receiver list from `$TRAIN_SELECTION` (default
+These are copies of `../ft8-validation-set/tools/*.py` (2026-11-04) and `../ft8-training-data/tools/*.py`
+(`ft8rec.py`, `fill.py`, 2026-11-03; their `kiwi.py` is byte-identical). Only the default paths changed: `val.py`
+and `ft8rec.py` write to `$OUTDIR` (default `.`) and reads the training receiver list from `$TRAIN_SELECTION` (default
 `collect/runs/train/selection.json`); `verify.py` reads the validation set from `$V` (default
 `../ft8-validation-set`). `tools/ab_run2.sh` and `tools/validate_full.sh` call `collect/verify.py`.
 
@@ -57,19 +61,55 @@ python3 collect/manifest.py make $OUTDIR pskr_spots.jsonl selection.json session
 - **decode:** jt9 labels, with jt9's invented `K1ABC …` decodes dropped. Without a MyCall jt9 uses the
   placeholder K1ABC, and its MyCall a-priori pass then "decodes" messages to it.
 
+The training recordings were made with the older driver:
+
+```sh
+export OUTDIR=data/collect/train-2026-xx RECEIVERS_JSON=<receiverbook snapshot>
+python3 collect/ft8rec.py probe                # random receiverbook Kiwis; seed printed and saved in selection.json
+python3 collect/fill.py 8                     # bands still empty: up to 8 more candidates per band
+python3 collect/ft8rec.py record
+python3 collect/ft8rec.py decode
+```
+
+`ft8rec.py probe` shuffles the receiverbook list with a seed (saved in `selection.json`), keeps one Kiwi per
+site that passes the same `/status` checks as `probe-fresh`, then probes in up to 8 rounds: each round pairs every
+band still unfilled with up to 2 untried receivers whose local time suits it (day 08–17 h: 20/17/15/12/10/30 m,
+otherwise 160/80/60/40/30/20 m; any band from round 4) and takes the first with ≥ 3 decodes per band, up to 10.
+`fill.py` then probes up to N more site-distinct candidates for each band still missing (day bands 09–16 h local,
+night bands 19–05 h). Differences from `val.py`: no PSK Reporter capture, jt9's `K1ABC …` decodes are kept.
+
 Etiquette built in: one audio channel per receiver, at least one channel left free for people, client name
 `ft8-recorder`.
+
+## Getting the data on another computer
+
+The recordings are in two public data repos, stored compressed in Git LFS (slot WAVs as FLAC, spots as `.xz`, no
+30-minute WAVs; 446 MB + 235 MB instead of 2.6 GB). Clone them next to this repo and unpack; unpack restores every
+file byte for byte (30-minute WAVs rebuilt from the slots) and checks the manifests. Needs `git-lfs`, `flac`, `xz`.
+
+```sh
+cd ..   # the folder that holds ft8-nn
+git clone https://github.com/jasiek/ft8-validation-set && git clone https://github.com/jasiek/ft8-training-data
+(cd ft8-validation-set && python3 tools/datarepo.py unpack . --manifest MANIFEST.sha256 --manifest run2/MANIFEST.sha256)
+(cd ft8-training-data && python3 tools/datarepo.py unpack . --manifest MANIFEST.sha256)
+```
+
+`collect/datarepo.py pack SRC DST` made them (`unpack` is the same file). GitHub's free LFS bandwidth is 10 GiB a
+month for the account, so about 14 full clones; `GIT_LFS_SKIP_SMUDGE=1 git clone` plus `git lfs pull --include=...`
+fetches part of a set.
 
 ## Runs archived so far
 
 | run | `collect/runs/` | data folder | when (UTC) | receivers | slots | spots |
 |---|---|---|---|---|---|---|
-| training recordings | `train/` | `../ft8-training-data/recordings` | 2026-11-04 03:02–03:33 | 10 | 1,197 | – |
+| training recordings | `train/` | `../ft8-training-data/recordings` | 2026-11-04 03:02–03:33 | 10 (random receiverbook sites) | 1,197 | none captured |
 | validation run 1 | `val1/` | `../ft8-validation-set` | 2026-11-04 22:17:45–22:47:45 | 9 (training receivers, other bands) | 1,077 | 920k |
 | validation run 2 | `val2/` | `../ft8-validation-set/run2` | 2026-11-04 22:28:30–22:58:30 | 9 (fresh sites) | 1,077 | 853k |
 
 Each `collect/runs/<run>/` holds `selection.json` (receivers, bands, probe results), `session.json` (times,
-bands, MQTT topics) and `MANIFEST.sha256`. Run 2 also holds the receiverbook snapshot it was drawn from.
+bands, MQTT topics) and `MANIFEST.sha256`. Run 2 also holds the receiverbook snapshot it was drawn from; the
+training run holds its `record.log`, and its `selection.json` is the original (probe seed 372751130, plus the
+receiver that was replaced).
 Check a copy of the data with
 
 ```sh
@@ -80,12 +120,12 @@ python3 collect/manifest.py check collect/runs/val2/MANIFEST.sha256 ../ft8-valid
 
 ## Known gaps (training recordings)
 
-- The training run predates these tools; its own scripts and its original `selection.json` (with probe
-  results) live in `../ft8-training-data` on the main machine, and only `recordings/` was copied to the mini.
-  `collect/runs/train/selection.json` and `session.json` were rebuilt from the recordings' `meta.json` files and
-  slot names. `../ft8-validation-set/probe.log` confirms it is the same 10 receivers `val.py probe` read.
-  The recordings have the same layout and `meta.json` fields as the validation runs, so they were made by an
-  earlier version of `val.py`. How those 10 Kiwis were picked from receiverbook, and whether spots were captured,
-  is only recorded on the main machine.
-- Its jt9 labels still contain 5 `K1ABC …` lines: the older script didn't filter them.
-- The jt9 build used for the labels isn't recorded. The mini has WSJT-X 3.0.2 (Improved).
+- The receiverbook snapshot the training probe used was not saved, so the seed alone can't replay the selection.
+  (`collect/runs/val2/receivers.json` is a later snapshot, from 2026-11-04 17:27.)
+- The 160 m receiver: the chosen one (EI6IZ, `http://88.81.100.130:8073/`, listed under `replaced` in
+  `selection.json`) was too busy for all 5 attempts (`record.log`), and K1RA's 160 m Kiwi was recorded instead from
+  03:03:30Z (`[04 160m replacement] done: 120 slots`). That replacement was done outside these scripts.
+- Its jt9 labels still contain 5 `K1ABC …` lines: `ft8rec.py` doesn't filter them.
+- No PSK Reporter spots: `ft8rec.py` doesn't capture them, so the training recordings have jt9 labels only.
+- The jt9 build used for the labels isn't recorded (Python was 3.12.14, from the run's `.tool-versions`). The mini
+  has WSJT-X 3.0.2 (Improved).

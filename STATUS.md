@@ -64,7 +64,9 @@ Run 1 (`recordings/`) = 9 training-set Kiwis on other bands/times; **run 2 (`run
 used for training** (the honest generalisation test). 120 slots per station, jt9 baseline in each `decodes.txt`.
 Its `tools/verify.py` puts each decode's sender into a tier: `slot` (spotted by others in that slot) > `active`
 > `repeat` > `unconf`. **`unconf` ≈ false decodes** (jt9: 13 of 27,462 checkable in run 1, 16 of 23,958 in run 2).
-Treat the folder as read-only; our decodes go to `data/val/run{1,2}/<station>/decodes_<tag>.txt`:
+Treat the folder as read-only; our decodes go to `data/val/run{1,2}/<station>/decodes_<tag>.txt`. On another
+computer both data folders come from the GitHub LFS repos `jasiek/ft8-validation-set` and `jasiek/ft8-training-data`
+(clone next to ft8-nn, then `tools/datarepo.py unpack`; see `docs/data-collection.md`):
 
 ```sh
 V=/Users/jps/tmp/ft8-validation-set

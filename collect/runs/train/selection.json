@@ -1,5 +1,5 @@
 {
- "source": "reconstructed 2026-11-07 from ../ft8-training-data/recordings/*/meta.json (the original selection.json stayed on the main machine)",
+ "seed": 372751130,
  "chosen": [
   {
    "url": "http://kiwisdr.dynpc.net:8073/",
@@ -169,6 +169,24 @@
     "030130 -20  0.4 1602 ~  JG1PXO BG5IOG 73",
     "030130 -15  0.2  993 ~  CQ HP1DAV FJ09",
     "030130 -12  0.3  545 ~  CQ BA4WEC PM01"
+   ]
+  }
+ ],
+ "replaced": [
+  {
+   "url": "http://88.81.100.130:8073/",
+   "band": "160m",
+   "freq_khz": 1840.0,
+   "label": "EI6IZ SDR #1 KiwiSDR V2  | Castlebar, Co Mayo, Ireland",
+   "station": "EI6IZ SDR #1 KiwiSDR V2  | Castlebar, Co Mayo, Ireland",
+   "lat": 53.84,
+   "lon": -9.37,
+   "probe_decodes": 4,
+   "probe_sample": [
+    "025600  -1  0.2 1257 ~  AA2T W3LL R+07",
+    "025600   0  0.1 2158 ~  KF2OG R6AA KN95",
+    "025600 -18  0.1 1882 ~  W8WEJ VE9LZ -02",
+    "025600 -19  0.2 1439 ~  CQ RK3AW/P KO86"
    ]
   }
  ]

@@ -1,5 +1,5 @@
 {
- "source": "reconstructed 2026-11-07 from slot names (first 261104_030200, 120 slots per receiver); the mini copy holds recordings/ only, so whether spots were captured is unknown here",
+ "source": "reconstructed: ft8rec.py writes no session.json. Start and length from record.log (recording 10 receivers from 03:02:00Z for 30 min) and the slot names; the 160m replacement receiver starts at 03:03:30Z. ft8rec.py captures no PSK Reporter spots.",
  "start_utc": 1793761320,
  "until_utc": 1793763120,
  "bands": [
