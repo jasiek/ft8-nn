@@ -1,4 +1,6 @@
 import json
+import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -7,7 +9,10 @@ import pytest
 
 from ft8nn import message
 
-FT8CODE = "/Applications/wsjtx.app/Contents/MacOS/ft8code"
+# WSJT-X's ft8code: $FT8CODE, else on PATH (Linux package wsjtx), else the macOS app bundle; tests skip without it
+FT8CODE = os.environ.get("FT8CODE") or shutil.which("ft8code") or "/Applications/wsjtx.app/Contents/MacOS/ft8code"
+needs_ft8code = pytest.mark.skipif(not os.path.exists(FT8CODE), reason="WSJT-X ft8code not found")
+POOL = Path("ft8nn/data/messages.json")  # made by tools/make_message_pool.py (needs ft8code)
 
 
 def bits_of(msg):
@@ -16,13 +21,15 @@ def bits_of(msg):
     return np.array([int(c) for c in s])
 
 
+@pytest.mark.skipif(not POOL.exists(), reason="ft8nn/data/messages.json not present")
 def test_message_pool_roundtrip():
-    pool = json.loads(Path("ft8nn/data/messages.json").read_text())
+    pool = json.loads(POOL.read_text())
     bad = [(m["text"], message.unpack77([int(c) for c in m["bits"]])) for m in pool]
     bad = [b for b in bad if b[0] != b[1]]
     assert not bad, bad[:5]
 
 
+@needs_ft8code
 @pytest.mark.parametrize(
     "msg,expect",
     [
@@ -42,6 +49,7 @@ def test_ft8code_roundtrip(msg, expect):
     assert message.unpack77(bits_of(msg)) == expect
 
 
+@needs_ft8code
 def test_hash_resolution():
     ht = message.HashTable()
     message.unpack77(bits_of("CQ W9XYZ EN37"), ht)  # learn W9XYZ

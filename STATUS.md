@@ -11,6 +11,8 @@ Each iteration: one idea in Python + C → `tools/ab_run2.sh TAG` → if it pass
 (2) 3 consecutive ideas fail the A/B; (3) about 8 h of loop time. Log every tried idea and its numbers here.
 Running directly on the mini (M4 4P+6E, `WORKERS=10`): quick A/B ~50 min, full check another ~1.5 h
 (background Spotlight/Siri load can slow it a lot).
+Local CI: `act push -j build-test --matrix os:ubuntu-24.04-arm -P ubuntu-24.04-arm=catthehacker/ubuntu:act-24.04
+--container-architecture linux/arm64 --container-daemon-socket -` (Colima running; DOCKER_HOST=unix://$HOME/.colima/default/docker.sock).
 Mini needs `.python-version` 3.12 and `tools/get_onnxruntime.sh` (official ONNX Runtime); WSJT-X 3.0.2 (Improved) installed, all 26 tests pass;
 decodes verified identical to the main machine.
 
@@ -383,7 +385,15 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       **Clean timing (2026-11-07 22:31, idle, no power events), official ORT + reuse, same slots as 7.3/7.3b:**
       busiest receiver 01_40m 1 thread 6.93 / max 7.95 s (Homebrew 10.91 / 12.46; this morning's `nn_v2_cy` 15.76),
       2 threads 6.21 / 7.05; training 00_40m 5.29 / 6.49; 10-station sample 2.78 / max 7.51 (0 of 200 over 15 s);
-      peak RSS 360–570 MB; decodes byte-identical to the Homebrew run. **To do:** a Linux build (CI or a Linux box).
+      peak RSS 360–570 MB; decodes byte-identical to the Homebrew run.
+      **Linux CI (2026-11-08):** `.github/workflows/linux.yml`, Ubuntu 24.04 x64 + arm64: apt WSJT-X (ft8code), uv,
+      `tools/get_onnxruntime.sh`, `make -C c`, pytest, `tools/ci_smoke.py` (random-weight model exported to ONNX,
+      8 synthetic slots × 8 strong signals, Python `run_real.py` vs C via `golden_c.py --onnx`; the classical fallback
+      metrics decode them, so the whole C pipeline is compared field by field). arm64 run locally with `act` +
+      Colima: all steps pass, 25 tests + 1 skip (test_onnx, no model), C == Python 64/64. Found on the way: `.gitignore`
+      `data/` also hid `ft8nn/data/` (ldpc.npz, messages.json), so a fresh clone couldn't import `ft8nn`; now
+      `/data/` and both files tracked. ft8code tests now skip when WSJT-X is missing. gcc: one
+      -Wmaybe-uninitialized false positive in fft.c (buffer filled by the loop above).
    3d. **Architecture study (2026-11-07, full log `docs/arch-study.md`; models `runs/{tf,conv,gru,tf_l2,tf_l2kd}_v{1,2}`,
       scripts and logs in gitignored `data/tmp/`, `data/logs/`):
       keep the transformer.** Same v1 → v2 recipe on the M4 (a full transformer training takes 74 min here, not 4 h).

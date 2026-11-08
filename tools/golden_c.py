@@ -89,8 +89,11 @@ def main():
     ap.add_argument("--n", type=int, default=20)
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--tag", default="nn_v2_rs", help="Python result tag to compare against")
+    ap.add_argument("--onnx", default=None, help="model for the C side (default runs/v2/ft8nn.onnx)")
     ap.add_argument("--out", default="data/real", help="root of the Python decodes (real mode), e.g. data/val/run2")
     a = ap.parse_args()
+    global ONNX
+    ONNX = Path(a.onnx) if a.onnx else ONNX
     ok = real(a) if a.mode == "real" else awgn(a)
     print("PASS" if ok else "DIFF")
     sys.exit(0 if ok else 1)

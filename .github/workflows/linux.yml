@@ -1,0 +1,40 @@
+# Linux build + tests (x64 and aarch64). The trained model and recordings are not in the repository, so the C check
+# uses a random-weight model on synthetic slots (tools/ci_smoke.py); the full golden tests run locally
+# (tools/validate_full.sh).
+name: linux
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: WSJT-X (ft8code for the encoder and message tests; they skip without it)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends wsjtx
+        continue-on-error: true
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: ONNX Runtime (official release)
+        run: tools/get_onnxruntime.sh
+
+      - name: Build libft8nn
+        run: make -C c
+
+      - name: Python tests
+        run: uv run pytest -q -rs
+
+      - name: C vs Python on synthetic slots
+        run: uv run python tools/ci_smoke.py

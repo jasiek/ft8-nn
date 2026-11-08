@@ -1,5 +1,7 @@
 """Bit-exact check of our encoder against WSJT-X `ft8code` output."""
+import os
 import re
+import shutil
 import subprocess
 
 import numpy as np
@@ -7,7 +9,9 @@ import pytest
 
 from ft8nn import ft8
 
-FT8CODE = "/Applications/wsjtx.app/Contents/MacOS/ft8code"
+# WSJT-X's ft8code: $FT8CODE, else on PATH (Linux package wsjtx), else the macOS app bundle; tests skip without it
+FT8CODE = os.environ.get("FT8CODE") or shutil.which("ft8code") or "/Applications/wsjtx.app/Contents/MacOS/ft8code"
+needs_ft8code = pytest.mark.skipif(not os.path.exists(FT8CODE), reason="WSJT-X ft8code not found")
 MESSAGES = ["CQ K1ABC FN42", "K1ABC W9XYZ -11", "W9XYZ K1ABC R-09", "K1ABC W9XYZ RR73", "SP5XYZ G4ABC JO01"]
 
 
@@ -20,6 +24,7 @@ def ft8code(msg):
     return bits(get("Source-encoded")), bits(get("14-bit CRC")), bits(get("83 Parity")), tones
 
 
+@needs_ft8code
 @pytest.mark.parametrize("msg", MESSAGES)
 def test_matches_ft8code(msg):
     p77, crc, parity, tones = ft8code(msg)
