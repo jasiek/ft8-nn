@@ -100,3 +100,4 @@ hash_table *ht_new(void);
 void ht_free(hash_table *h);
 void ht_clear(hash_table *h);
 void unpack77(const uint8_t *bits77, hash_table *ht, char *out, int outlen);
+int plausible77(const uint8_t *bits77, int deep); /* message.plausible */

@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "call_blocks.h"
 #include "internal.h"
 
 
@@ -273,4 +274,35 @@ void unpack77(const uint8_t *b, hash_table *ht, char *out, int outlen) {
     }
     hex_bits(b, 74, 19, 0, hx);
     snprintf(out, outlen, "<%d:%s>", i3, hx);
+}
+
+/* first character a whole call block (K, W, ...) or the first two a block in use (tools/gen_call_blocks.py) */
+static int call_block_ok(const char *c) {
+    if (c[0] && strchr(CALL_BLOCKS1, c[0])) return 1;
+    for (int i = 0; i < N_CALL_BLOCKS2; i++)
+        if (c[0] == CALL_BLOCKS2[i][0] && c[1] == CALL_BLOCKS2[i][1]) return 1;
+    return 0;
+}
+
+/* message.plausible: 0 if a standard message (i3 = 1, 2) could not be a real transmission (CQ with the R flag, locator
+ * past RR99, report code above 135; with deep also a malformed full callsign or one outside the call blocks) */
+int plausible77(const uint8_t *b, int deep) {
+    int i3 = (int)bint(b, 74, 77);
+    if (i3 != 1 && i3 != 2) return 1;
+    uint32_t n28a = (uint32_t)bint(b, 0, 28), n28b = (uint32_t)bint(b, 29, 57), igrid4 = (uint32_t)bint(b, 59, 74);
+    if (igrid4 == MAXGRID4) return 0;
+    int irpt = (int)igrid4 - MAXGRID4;
+    if (irpt > 135) return 0; /* encoders use 5..135 (negative reports as 86..135 or 5..34) */
+    if (n28a >= 2 && n28a < NTOKENS && b[58]) return 0;                    /* CQ ... with the R flag */
+    if (deep) {
+        const uint32_t ns[2] = {n28a, n28b};
+        for (int i = 0; i < 2; i++) {
+            if (ns[i] < NTOKENS + MAX22) continue; /* token or hashed call */
+            if ((ns[i] - NTOKENS - MAX22) / (36u * 10 * 27 * 27 * 27) > 36) return 0;
+            char c[16];
+            unpack28(ns[i], NULL, c, sizeof c);
+            if (strchr(c, ' ') || !call_block_ok(c)) return 0;
+        }
+    }
+    return 1;
 }

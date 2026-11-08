@@ -4,6 +4,8 @@ Supported: i3=1/2 standard (incl. /R, /P, hashed calls, CQ variants), i3=4 nonst
 i3=0 n3=0 free text, n3=1 DXpedition, n3=5 telemetry. Others are rendered as '<i3.n3:hex>'.
 Hashed callsigns resolve through a HashTable that learns from every decoded full callsign.
 """
+from pathlib import Path
+
 import numpy as np
 
 NTOKENS = 2063592
@@ -75,6 +77,49 @@ def unpack28(n28, ht):
     if ht:
         ht.add(call)
     return call
+
+
+_BLOCKS = None
+
+
+def _call_blocks():
+    global _BLOCKS
+    if _BLOCKS is None:
+        lines = [l for l in (Path(__file__).parent / "data" / "call_blocks.txt").read_text().splitlines() if not l.startswith("#")]
+        _BLOCKS = set(lines[0]), set(lines[1].split())
+    return _BLOCKS
+
+
+def plausible(bits, deep=False):
+    """Could this payload be a real transmission? Standard messages (i3 = 1, 2) only; everything else passes.
+
+    Always rejected: a CQ with the R flag ("CQ K1ABC R FN42"; WSJT-X never sends it), a locator past RR99, a report
+    code above 135 (no encoder makes them; they unpack as nonsense like +112). Codes 5..135 are all real: WSJT-X packs
+    -30..+49 as 5..84 and -50..-31 as 86..105, other programs pack every negative report as 86..135. deep (OSD-family decodes, which can turn noise into a CRC-valid word): also every
+    full callsign must be well-formed and start with an amateur call block in use (data/call_blocks.txt).
+    On validation data no confirmed decode breaks these; false ones often do (STATUS plan 7.4).
+    """
+    if _int(bits[74:77]) not in (1, 2):
+        return True
+    n28a, n28b, ir, igrid4 = _int(bits[0:28]), _int(bits[29:57]), int(bits[58]), _int(bits[59:74])
+    if igrid4 == MAXGRID4:  # would unpack as "SA00": not a locator
+        return False
+    irpt = igrid4 - MAXGRID4
+    if irpt > 135:
+        return False
+    if 2 <= n28a < NTOKENS and ir:  # CQ / CQ nnn / CQ ABCD with the R flag
+        return False
+    if deep:
+        one, two = _call_blocks()
+        for n in (n28a, n28b):
+            if n < NTOKENS + MAX22:  # token or hashed call: nothing to check
+                continue
+            if (n - NTOKENS - MAX22) // (36 * 10 * 27 * 27 * 27) > 36:
+                return False  # first character out of range
+            call = unpack28(n, None)
+            if " " in call or not (call[0] in one or call[:2] in two):
+                return False
+    return True
 
 
 def _report(ir, igrid4):

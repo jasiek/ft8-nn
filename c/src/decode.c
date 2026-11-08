@@ -411,6 +411,15 @@ static int any_bits(const uint8_t *b, int n) {
 }
 
 /* One pass. Appends new decodes (payload not in all[0..nall)) to all; returns count added, -1 on error. */
+/* decoder._plausible: method if the payload could be a real transmission (callsign-block test only for OSD-family
+ * methods), else -1 */
+static int plausible(int method, const uint8_t *a91) {
+    if (method < 0) return method;
+    int deep = method == FT8NN_OSD || method == FT8NN_OSD_AP || method == FT8NN_OSD_ERASE || method == FT8NN_OSD_BP ||
+               method == FT8NN_OSD_CTX;
+    return plausible77(a91, deep) ? method : -1;
+}
+
 /* tried-table slot of a candidate, or -1 if outside the table */
 static int tried_idx(const candidate *cd) {
     long b = lround(cd->f0 / 3.125), l = lround(cd->dt * 25.0) + TRIED_LAG0;
@@ -497,21 +506,22 @@ static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall,
             n_bp++;
             /* early-DT candidates have weaker sync evidence: no OSD on BP sums or under a-priori bits, no erasure stages */
             int early = cands[ci].early;
+            /* every stage's result must be a plausible message (decoder._plausible); if not, the next stage tries */
             if (bp_decode(l, 30, bits, &nhard) && crc_ok(bits)) {
-                method = FT8NN_BP;
                 memcpy(a91, bits, 91);
-            } else if (k < 1 && exp_err < OSD_GATE && ++n_osd) {
+                method = plausible(FT8NN_BP, a91);
+            }
+            if (method < 0 && k < 1 && exp_err < OSD_GATE && ++n_osd) {
                 if (osd_decode(l, OSD_ORDER, bits, &dist, &nhard) && nhard <= OSD_MAX_HARD) {
-                    method = FT8NN_OSD;
                     memcpy(a91, bits, 91);
-                } else if (OSD_SNAPS > 0 && !early) {
-                    method = try_osd_bp(l, a91);
+                    method = plausible(FT8NN_OSD, a91);
                 }
+                if (method < 0 && OSD_SNAPS > 0 && !early) method = plausible(try_osd_bp(l, a91), a91);
             }
             if (method < 0 && k == 0 && ncx > 0 && !early && exp_err < CTX_GATE)
-                method = try_ctx(l, cx, ncx, hyps[h].f0, hyps[h].dt, a91);
-            if (method < 0 && k == 0 && exp_err < AP_GATE) method = try_ap(l, a91, early ? -1 : OSD_ORDER);
-            if (method < 0 && k == 0 && exp_err < ERASE_GATE && !early) method = try_erase(l, a91);
+                method = plausible(try_ctx(l, cx, ncx, hyps[h].f0, hyps[h].dt, a91), a91);
+            if (method < 0 && k == 0 && exp_err < AP_GATE) method = plausible(try_ap(l, a91, early ? -1 : OSD_ORDER), a91);
+            if (method < 0 && k == 0 && exp_err < ERASE_GATE && !early) method = plausible(try_erase(l, a91), a91);
             if (method < 0) continue;
             if (!any_bits(a91, 77)) break; /* all-zero payload: classic false decode */
             int known = 0;

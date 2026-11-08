@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from . import frontend as fe
-from . import ft8, ldpc
+from . import ft8, ldpc, message
 from .subtract import subtract
 
 
@@ -172,23 +172,25 @@ def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd
         early = cands[ci].early
         for k in range(len(metrics[hi])):
             r = row[(hi, k)]
+            # every stage's result must be a message that could really be sent (_plausible); if not, the next stage
+            # gets its turn
             a91 = None
             if bp_ok[r] and ft8.crc_ok(bp_bits[r, :91]):
-                a91, info = bp_bits[r, :91], {"method": "bp", "nhard": int(bp_nhard[r])}
-            elif osd_order >= 0 and k < osd_metrics and exp_err[r] < osd_gate:
+                a91, info = _plausible(bp_bits[r, :91], {"method": "bp", "nhard": int(bp_nhard[r])})
+            if a91 is None and osd_order >= 0 and k < osd_metrics and exp_err[r] < osd_gate:
                 cw, crc, dist, nh = ldpc.osd_decode(L[r], osd_order)
                 if crc and nh <= osd_max_hard:
-                    a91, info = cw[:91], {"method": "osd", "nhard": nh, "dist": dist}
-                elif osd_snaps and not early:
-                    a91, info = _try_osd_bp(L[r], osd_snaps, osd_order, osd_max_hard)
+                    a91, info = _plausible(cw[:91], {"method": "osd", "nhard": nh, "dist": dist})
+                if a91 is None and osd_snaps and not early:
+                    a91, info = _plausible(*_try_osd_bp(L[r], osd_snaps, osd_order, osd_max_hard))
             if a91 is None and k == 0 and context and not early and exp_err[r] < ctx_gate:
                 pats = context_patterns(context, h.f0, h.dt)
                 if pats:
-                    a91, info = _try_ctx(L[r], pats)
+                    a91, info = _plausible(*_try_ctx(L[r], pats))
             if a91 is None and k == 0 and ap and exp_err[r] < ap_gate:
-                a91, info = _try_ap(L[r], ap, -1 if early else osd_order, osd_max_hard)
+                a91, info = _plausible(*_try_ap(L[r], ap, -1 if early else osd_order, osd_max_hard))
             if a91 is None and k == 0 and exp_err[r] < erase_gate and not early:
-                a91, info = _try_erase(L[r], erase_osd_dmax)
+                a91, info = _plausible(*_try_erase(L[r], erase_osd_dmax))
             if a91 is None:
                 continue
             if not a91[:77].any():  # all-zero payload: classic false decode
@@ -262,6 +264,14 @@ ERASE_WINDOWS = sorted({(a, min(58, a + w)) for w in (6, 10, 14, 18) for a in ra
 # Wider bursts (message changed early or late in the frame): too many erasures for BP, so OSD-0. At most 24
 # symbols (72 bits) erased leaves >= 102 kept bits: 91 form the OSD basis, the other >= 11 plus CRC-14 check it.
 ERASE_OSD_WINDOWS = sorted({(a, min(58, a + w)) for w in (20, 22, 24) for a in range(0, 58 - w + 2, 2)})
+
+
+def _plausible(a91, info):
+    """(a91, info) if the payload could be a real transmission (message.plausible; the callsign-block test only for
+    OSD-family methods, which can make CRC-valid words out of noise), else (None, None)."""
+    if a91 is not None and not message.plausible(a91[:77], deep=info["method"].startswith("osd")):
+        return None, None
+    return a91, info
 
 
 def _try_erase(llr, osd_dmax=3.0):
