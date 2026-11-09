@@ -99,6 +99,7 @@ class ChannelCfg:
     burst_p: float = 0.0  # prob. of a noise/interference burst covering part of the frame
     burst_db: tuple = (10.0, 30.0)  # burst power above the noise floor, dB
     burst_len: tuple = (0.5, 5.0)  # burst duration, s
+    real_noise_p: float = 0.0  # prob. of real receiver noise (make_batch noise_bank) instead of Gaussian noise
 
 
 def v2_cfg():
@@ -133,10 +134,13 @@ def _interferers(q, amp, cfg, U, device):
     return out
 
 
-def make_batch(B, cfg: ChannelCfg, device, snr=None, payload_bits=None):
+def make_batch(B, cfg: ChannelCfg, device, snr=None, payload_bits=None, noise_bank=None):
     """Returns (y (B,3200) complex64 baseband, bits (B,174) float, snr (B,), tones (B,79)).
 
     If payload_bits (B,77) is given, transmits real FT8 codewords for those payloads.
+    noise_bank: (N, 3200) complex64 segments of real receiver noise (tools/make_noise_bank.py); with probability
+    cfg.real_noise_p a row gets a random segment in place of the Gaussian noise and bursts. The segments come from
+    the decoder's own baseband conversion, so they already have the band mask and the noise scaling.
     """
     if payload_bits is not None:
         cws = np.stack([ft8.encode77(p)[0] for p in payload_bits])
@@ -151,7 +155,7 @@ def make_batch(B, cfg: ChannelCfg, device, snr=None, payload_bits=None):
         bits = np.stack([(vals >> 2) & 1, (vals >> 1) & 1, vals & 1], -1).reshape(B, 174)
     else:
         payload = np.random.randint(0, 2, (B, 77), dtype=np.uint8)
-        return make_batch(B, cfg, device, snr, payload)
+        return make_batch(B, cfg, device, snr, payload, noise_bank)
     tones_t = torch.tensor(tones, device=device)
     bits_t = torch.tensor(bits, dtype=torch.float32, device=device)
 
@@ -202,6 +206,9 @@ def make_batch(B, cfg: ChannelCfg, device, snr=None, payload_bits=None):
             break
         y = y + _interferers(active, amp, cfg, U, device)
 
+    real = None
+    if noise_bank is not None and cfg.real_noise_p > 0:
+        real = torch.rand(B, device=device) < cfg.real_noise_p
     noise = torch.complex(torch.randn(B, NBB, device=device), torch.randn(B, NBB, device=device)) * math.sqrt(NOISE_VAR / 2)
     if cfg.burst_p > 0:
         # burst of extra noise over part of the frame (static crash, splatter, a keyed-up neighbour)
@@ -212,6 +219,8 @@ def make_batch(B, cfg: ChannelCfg, device, snr=None, payload_bits=None):
         inside = (n >= b0[:, None]) & (n < (b0 + ln)[:, None]) & bu[:, None]
         boost = 10 ** (U(*cfg.burst_db) / 20)[:, None]
         noise = torch.where(inside, noise * boost, noise)
+    if real is not None:
+        noise = torch.where(real[:, None], torch.zeros_like(noise), noise)
     y = y + noise
 
     # timing error (fractional) + band mask in frequency domain
@@ -220,4 +229,7 @@ def make_batch(B, cfg: ChannelCfg, device, snr=None, payload_bits=None):
     Y = torch.fft.fft(y) * band_mask(device)[None, :]
     Y = Y * torch.polar(torch.ones_like(k), -2 * math.pi * k / NBB * tau[:, None].float())
     y = torch.fft.ifft(Y)
+    if real is not None and real.any():
+        pick = np.random.randint(0, len(noise_bank), int(real.sum()))
+        y[real] = y[real] + torch.from_numpy(np.asarray(noise_bank[np.sort(pick)])).to(device)
     return y, bits_t, snr, tones_t

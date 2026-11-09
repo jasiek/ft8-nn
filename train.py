@@ -19,8 +19,8 @@ from ft8nn import ldpc, model, synth_bb
 
 
 class Stream(IterableDataset):
-    def __init__(self, batch, cfg):
-        self.batch, self.cfg = batch, cfg
+    def __init__(self, batch, cfg, noise_bank=None):
+        self.batch, self.cfg, self.noise_bank = batch, cfg, noise_bank
 
     def __iter__(self):
         info = torch.utils.data.get_worker_info()
@@ -28,8 +28,9 @@ class Stream(IterableDataset):
         np.random.seed(seed)
         torch.manual_seed(seed)
         torch.set_num_threads(1)
+        bank = np.load(self.noise_bank, mmap_mode="r") if self.noise_bank else None
         while True:
-            y, bits, snr, _ = synth_bb.make_batch(self.batch, self.cfg, "cpu")
+            y, bits, snr, _ = synth_bb.make_batch(self.batch, self.cfg, "cpu", noise_bank=bank)
             yield model.features(y), bits, snr
 
 
@@ -88,6 +89,9 @@ def main():
     ap.add_argument("--gru-layers", type=int, default=2)
     ap.add_argument("--teacher", default=None, help="distil: also fit this checkpoint's P(bit=1) (soft targets)")
     ap.add_argument("--kd-weight", type=float, default=0.5, help="weight of the soft-target loss (rest: true bits)")
+    ap.add_argument("--noise-bank", default=None, help="real-noise segments (.npy, tools/make_noise_bank.py)")
+    ap.add_argument("--real-noise-p", type=float, default=0.5, help="share of training rows with real noise (with --noise-bank)")
+    ap.add_argument("--seed", type=int, default=None, help="training-data seed (default: fixed by the validation sets, so reruns are identical)")
     a = ap.parse_args()
 
     device = "mps" if torch.backends.mps.is_available() else "cpu"
@@ -114,7 +118,12 @@ def main():
         for snr in snrs:
             val[f"{ch}@{snr}"] = make_val(512, snr, VAL_CHANNELS[ch], seed=1000 + snr)
 
-    dl = DataLoader(Stream(a.batch, synth_bb.v2_cfg() if a.cfg == "v2" else synth_bb.ChannelCfg()), batch_size=None, num_workers=a.workers, prefetch_factor=4, persistent_workers=True)
+    cfg = synth_bb.v2_cfg() if a.cfg == "v2" else synth_bb.ChannelCfg()
+    if a.noise_bank:
+        cfg.real_noise_p = a.real_noise_p
+    if a.seed is not None:
+        torch.manual_seed(a.seed)  # DataLoader worker seeds derive from this
+    dl = DataLoader(Stream(a.batch, cfg, a.noise_bank), batch_size=None, num_workers=a.workers, prefetch_factor=4, persistent_workers=True)
     log = []
     t0 = time.time()
     run_loss = 0.0

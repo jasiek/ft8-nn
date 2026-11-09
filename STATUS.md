@@ -454,6 +454,49 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       `1F8PNC K2AKA DB13` from context AP, `J11WYG/R OA4ENG -22` ×2): per model 1→0, 5→4 (tf retrain), 2→1, 4→1,
       6→2, 3→0. C == Python: 301k random payloads, golden 756/756, 599/599 (and 120-slot 08_80m), run 2 733/733,
       AWGN 429/429.
+   5. **Real noise + synthetic signals — gain confirmed; candidate `runs/rn_real_seed1` validated, not shipped yet.** `tools/make_noise_bank.py`
+      subtracts every `nn_v2_pl` decode from each training-recording slot (never run 1 or 2) and cuts 24 segments at
+      random 200..2900 Hz with the decoder's own `Baseband.downsample`: 28,728 × 3,200 complex samples
+      (`data/noise/train_bank.npy`, 701 MB). Real receiver noise, AGC, carriers, interference and undecoded weak
+      signals; vs the Gaussian noise it replaces: segment power p10–p99 0.37–6.99 (Gaussian 0.83–0.95), 1-s power
+      fluctuation 0.35 (0.12). `synth_bb.ChannelCfg.real_noise_p` = share of training rows whose Gaussian noise is
+      replaced by a bank segment (added after the band mask); `train.py --noise-bank B --real-noise-p 0.5`.
+      `train.py --seed` (new): without it the worker seeds are fixed by the validation sets built just before, so two
+      runs of a recipe are bit-identical. Fine-tunes from `models/v2`, lr 2e-4, 4000 steps (21 min each, M4 MPS):
+
+      | model (run 2) | decodes | slot-confirmed | unconf | noise false | AWGN 50% / 90% |
+      |---|---|---|---|---|---|
+      | `nn_v2_pl` (shipped) | 27,928 | 20,504 | 0 | 0/998 | −22.52 / −21.24 |
+      | control, Gaussian only: default / seed 1 / seed 2 | 27,962 / 27,975 / 27,960 | 20,521 / 20,534 / 20,520 | 0 / 0 / 2 | 0 | −22.55 / −22.53 / −22.53 |
+      | real noise p 0.5, all 10 stations: default / seed 1 | 28,178 / 28,198 | 20,681 / 20,701 | 1 / 1 | 0 | −22.50 / −22.49 |
+      | real noise, 3 stations (8,616 segs) / 5 stations (14,352) | 28,154 / 28,126 | 20,671 / 20,651 | 2 / 2 | 0 | −22.49 / −22.48 |
+
+      Real noise: +146..+176 slot-confirmed over the control mean (20,525; control spread 14), on every bank size;
+      AWGN ~0.04 dB worse (90% unchanged). Learning curve flat: 3 receivers already give the whole gain, so more
+      recordings for the bank aren't needed. Unconfirmed 1–2 vs control 0–2: within retraining noise; the decodes:
+      `HY3TBG 5V5SMW CQ25` (osd0, same frequency as a real decode 2.9 s earlier; 3 of 4 real-noise models),
+      `CQ CR4UVW PI49`, `CQ UE6AJV MC49`, `CQ R75NIA/R AL38`. Training-recording counts are no longer a clean test for
+      these models (their noise is in the bank); runs 1 and 2 are.
+      **Full validation of `nn_rn_real_seed1` vs `nn_v2_pl`** (`tools/validate_full.sh`, `ONNX=` = its export, 1 h 28
+      min with 10 workers): run 1 31,951 → 32,244 decodes, slot-confirmed 24,444 → 24,660, unconf 2 → 1
+      (`CQ KR9ZUC/R AO63`); training recordings 17,583 → 17,706, jt9-only 309 → 305 (biased, see above); AWGN 50%
+      −22.52 → −22.49, 90% −21.24 → −21.24; golden C == Python with its ONNX 764/764, 607/607, run 2 733/733, AWGN
+      429/429. Fails the "AWGN 50% not worse" rule by 0.03 dB (~6 of ~190 signals at −22 dB), against +0.8–0.9%
+      slot-confirmed on runs 1 and 2. **Next:** decide whether to ship it as `models/v3` (user's call).
+   6. **After that: low-latency decoding for operating** (agreed 2026-11-08). Throughput is fine (busiest receiver 6.9 s
+      per 15 s slot on one M4 core, 2.8 s average), but replying in the next slot needs decodes ~1.5–2 s after the
+      transmission ends (13.1 s into the slot). Busy 01_40m slots, per pass: 2.4 s / 28 of 45 decodes, 2.2 s / 13,
+      1.3 s / 3, 0.4 s / 1. Plan: (1) hand out each pass's decodes as soon as it finishes (C API callback), (2) start an
+      early pass before the slot ends (WSJT-X decodes at ~11.8 s on partial audio), (3) parallelise the per-hypothesis
+      decoding across cores (today only ONNX Runtime uses threads: 2 threads 6.9 → 6.2 s).
+      **6a. Early pass: classical vs truncation-trained transformer.** At ~11.8 s the last ~9 of the 79 symbols are
+      missing (for DT ≈ 0.5 s: the third Costas sync block, symbols 72–78, plus data symbols 70–71, i.e. ~6 of the 174
+      code bits; more for a later DT). Compare (a) the classical nsym 1/2/3 LLRs with the missing bits at LLR 0,
+      against (b) a transformer fine-tuned from `models/v2` with random tail truncation (in some training rows the
+      end of the signal is zeroed or replaced by noise, so the network learns LLR ≈ 0 for missing symbols), with a
+      control fine-tune without truncation as in 7.5. Measure on truncated audio: run-2 decodes at 11.8 s,
+      slot-confirmed and unconfirmed, noise-only false decodes, AWGN 50% threshold at 11.8 s. Also check that (b)
+      loses nothing on full-length signals (the usual A/B + AWGN); if so, ship one network for both passes.
 8. Optional later work:
    - More AP types: the a2 MyCall type needs the operator's own callsign, and that is only useful inside an app
      (an `ft8nn_set_mycall` would slot into the same pinned-bit machinery as context AP).
