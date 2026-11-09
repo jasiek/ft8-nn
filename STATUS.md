@@ -54,25 +54,25 @@ context a-priori decoding from our own decodes 30/60 s earlier (`bp_cx`/`osd_cx`
 | disturbed fading (1 Hz / 2 ms) | −19.19 | −19.85 | **−20.09** |
 | noise only, 100 slots | – | 0 false | **0 false** |
 
-Real KiwiSDR recordings (10 stations, 1197 slots, `../ft8-training-data/recordings`, read-only; another agent owns it):
+Real KiwiSDR recordings (10 stations, 1197 slots, `datasets/ft8-training-data/recordings`, read-only submodule):
 **Current default `nn_v2_pl` decodes 17583, jt9 decodes 15729 (+11.8%).**
 2166 decodes are ours only (2087 name a callsign jt9 heard at that station); 309 are jt9 only.
 History: `nn_v2` 16055 (jt9-only 663) → baseline fix `nn_v2_bm` 16336 (jt9-only 512) → erasure `nn_v2_er` 16443 (jt9-only 466) → fmax 3100 `nn_v2_f31` 16452 (jt9-only 463) → early-DT + osd_er `nn_v2_eh` 16460 (463) → osd_bp `nn_v2_og` 16621 (405) → 4 passes `nn_v2_p4` 16638 (400) → context AP `nn_v2_cy` 17586 (309).
 08_80m: 3477 vs jt9 3258. AWGN 50% with `nn_v2_og`/`nn_v2_p4`/`nn_v2_cy`/`nn_v2_rs`/`nn_v2_pl`: −22.52 (90%: −21.28; `nn_v2_pl` −21.24).
 
-### Validation set with ground truth (`../ft8-validation-set`, added by the user 2026-11-04)
+### Validation set with ground truth (`datasets/ft8-validation-set`, added by the user 2026-11-04)
 
 KiwiSDR recordings plus every PSK Reporter FT8 spot logged at the same time; its `README.md` explains it all.
 Run 1 (`recordings/`) = 9 training-set Kiwis on other bands/times; **run 2 (`run2/recordings`) = 9 Kiwis never
 used for training** (the honest generalisation test). 120 slots per station, jt9 baseline in each `decodes.txt`.
 Its `tools/verify.py` puts each decode's sender into a tier: `slot` (spotted by others in that slot) > `active`
 > `repeat` > `unconf`. **`unconf` ≈ false decodes** (jt9: 13 of 27,462 checkable in run 1, 16 of 23,958 in run 2).
-Treat the folder as read-only; our decodes go to `data/val/run{1,2}/<station>/decodes_<tag>.txt`. On another
-computer both data folders come from the GitHub LFS repos `jasiek/ft8-validation-set` and `jasiek/ft8-training-data`
-(clone next to ft8-nn, then `tools/datarepo.py unpack`; see `docs/data-collection.md`):
+Treat the folder as read-only; our decodes go to `data/val/run{1,2}/<station>/decodes_<tag>.txt`. Both data
+folders are git submodules under `datasets/` (GitHub LFS repos `jasiek/ft8-validation-set`, `jasiek/ft8-training-data`;
+`git submodule update --init`, then `tools/datarepo.py unpack`; see `docs/data-collection.md`):
 
 ```sh
-V=/Users/jps/tmp/ft8-validation-set
+V=datasets/ft8-validation-set
 uv run python bench/run_real.py $V/recordings --model models/v2/model.pt --also-classical --tag nn_v2_pl --workers 6 --out data/val/run1
 uv run python bench/run_real.py $V/run2/recordings --model models/v2/model.pt --also-classical --tag nn_v2_pl --workers 6 --out data/val/run2
 python3 collect/verify.py --decodes data/val/run1 --tag nn_v2_pl --list
@@ -115,8 +115,8 @@ e.g. run 2 00_40m `E70A KU2X FN13` at +4…+9 dB missed in 3 slots. Many were ab
 uv run pytest -q                                                    # 26 tests
 uv run python bench/run_ours.py data/bench/awgn --model models/v2/model.pt --also-classical --tag nn_v2_pl --workers 6
 uv run python bench/report.py data/bench/awgn --dt-max 0.5
-uv run python bench/run_real.py /Users/jps/tmp/ft8-training-data/recordings --model models/v2/model.pt --also-classical --tag nn_v2_pl --workers 6
-uv run python bench/run_real.py /Users/jps/tmp/ft8-training-data/recordings --compare-only --tag nn_v2_pl
+uv run python bench/run_real.py datasets/ft8-training-data/recordings --model models/v2/model.pt --also-classical --tag nn_v2_pl --workers 6
+uv run python bench/run_real.py datasets/ft8-training-data/recordings --compare-only --tag nn_v2_pl
 ```
 `run_real.py` decodes each (station, slot parity) chain in time order so context AP sees the decoder's own earlier
 slots; `--no-context` turns that off (per-slot decodes, the `nn_v2_p4` behaviour). `run_ours.py` has no context.

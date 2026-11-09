@@ -12,8 +12,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 TAG=$1; shift
-V=${V:-$(cd .. && pwd)/ft8-validation-set}
-T=${T:-$(cd .. && pwd)/ft8-training-data/recordings}
+V=${V:-$PWD/datasets/ft8-validation-set}
+T=${T:-$PWD/datasets/ft8-training-data/recordings}
 W=${WORKERS:-6}
 L=data/logs/$TAG; mkdir -p "$L"
 M="--model models/v2/model.pt --also-classical --tag $TAG --workers $W"

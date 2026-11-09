@@ -11,7 +11,7 @@
   OUTDIR=<run dir> python3 collect/val.py decode
                                  -> jt9 baseline decodes.txt + 30-min WAV per receiver (needs `jt9` on PATH)
 
-Copied from ../ft8-validation-set/tools/val.py (2026-11-04); only the default paths differ (see docs/data-collection.md).
+Copied from datasets/ft8-validation-set/tools/val.py (2026-11-04); only the default paths differ (see docs/data-collection.md).
 """
 import concurrent.futures as cf
 import json, os, random, re, subprocess, sys, tempfile, threading, time, urllib.request, wave

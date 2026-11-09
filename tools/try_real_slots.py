@@ -3,7 +3,7 @@ import sys, time
 sys.path.insert(0, "bench")
 import run_real as rr
 from ft8nn import message
-st = "/Users/jps/tmp/ft8-training-data/recordings/" + sys.argv[1]
+st = "datasets/ft8-training-data/recordings/" + sys.argv[1]
 slots = sys.argv[2].split(",")
 rr._init("runs/v1/model.pt", "--cl" in sys.argv, 2)
 jt9 = rr.load_jt9(st + "/decodes.txt")

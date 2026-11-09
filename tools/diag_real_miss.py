@@ -8,7 +8,7 @@ import run_real as rr
 from ft8nn import frontend as fe, ldpc, nn_metric, message, decoder, ft8
 from ft8nn.subtract import subtract
 
-st = "/Users/jps/tmp/ft8-training-data/recordings/" + sys.argv[1]; slot = sys.argv[2]
+st = "datasets/ft8-training-data/recordings/" + sys.argv[1]; slot = sys.argv[2]
 _, x = wavfile.read(f"{st}/slots/{slot}.wav"); x = x.astype(float); x /= x.std()
 fn = nn_metric.make_llr_fn("runs/v1/model.pt")
 ds = decoder.decode_slot(x, llr_fn=fn)

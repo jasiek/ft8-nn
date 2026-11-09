@@ -7,7 +7,7 @@ Payload (JSON): sq, f (Hz), md, rp (SNR dB), t (spot unix time), t_tx (tx unix t
   python3 collect/pskr.py OUT.jsonl SECONDS [topic ...]   (default topic: all FT8)
 Each received spot is written as one JSON line with "rx_t" (our arrival time) added.
 
-Copied from ../ft8-validation-set/tools/pskr.py (2026-11-04), unchanged.
+Copied from datasets/ft8-validation-set/tools/pskr.py (2026-11-04), unchanged.
 """
 import json, os, socket, struct, sys, time
 

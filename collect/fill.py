@@ -2,7 +2,7 @@
 
   RECEIVERS_JSON=rx.json OUTDIR=<run dir> python3 collect/fill.py [per_band]
 
-Copied from ../ft8-training-data/tools/fill.py (2026-11-03), unchanged (paths come from ft8rec).
+Copied from datasets/ft8-training-data/tools/fill.py (2026-11-03), unchanged (paths come from ft8rec).
 """
 import concurrent.futures as cf, json, os, random, sys
 sys.path.insert(0, os.path.dirname(__file__))

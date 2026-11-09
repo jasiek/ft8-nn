@@ -5,9 +5,9 @@ idle Mac roughly doubles experiment throughput. The main machine is an M1 Pro (8
 Mac mini (2024), M4 (4P+6E) or M4 Pro (8–10P+4E). Folder layout is the same on both machines:
 
 ```
-~/tmp/ft8-nn                          this repo
-~/tmp/ft8-validation-set              KiwiSDR recordings + PSK Reporter spots (read-only)
-~/tmp/ft8-training-data/recordings    another agent's folder (read-only; the mini holds a copy)
+~/tmp/ft8-nn                              this repo
+~/tmp/ft8-nn/datasets/ft8-validation-set  submodule: KiwiSDR recordings + PSK Reporter spots (read-only)
+~/tmp/ft8-nn/datasets/ft8-training-data   submodule: training recordings (read-only)
 ```
 
 ## One-time setup
@@ -47,16 +47,16 @@ Mac mini (2024), M4 (4P+6E) or M4 Pro (8–10P+4E). Folder layout is the same on
    tools/mini.sh push
    ```
    This copies the working tree **including uncommitted changes** (no git push needed), the model in `runs/`,
-   `data/`, the validation set, the training recordings, and the Claude Code memory for this project
+   `data/`, the unpacked data submodules in `datasets/`, and the Claude Code memory for this project
    (`~/.claude/projects/<path>/memory/`). Then it runs `uv sync` and `make -C c` on the mini.
 6. Smoke test (C library + ONNX model):
    ```sh
-   tools/mini.sh run './c/build/ft8nn_cli models/v2/ft8nn.onnx $(ls ~/tmp/ft8-validation-set/recordings/02_40m_kiwisdr-k1ra-us-8073/slots/*.wav | sed -n 6p) | head -5'
+   tools/mini.sh run './c/build/ft8nn_cli models/v2/ft8nn.onnx $(ls datasets/ft8-validation-set/recordings/02_40m_kiwisdr-k1ra-us-8073/slots/*.wav | sed -n 6p) | head -5'
    ```
 7. Check that both machines decode identically before trusting any A/B from the mini: decode one receiver there
    with the current default tag and diff against this machine's file:
    ```sh
-   tools/mini.sh run 'uv run python bench/run_real.py ~/tmp/ft8-validation-set/run2/recordings --stations 07 --model models/v2/model.pt --also-classical --tag mini_check --workers 6 --out data/val/run2'
+   tools/mini.sh run 'uv run python bench/run_real.py datasets/ft8-validation-set/run2/recordings --stations 07 --model models/v2/model.pt --also-classical --tag mini_check --workers 6 --out data/val/run2'
    tools/mini.sh pull
    diff <(cut -f1-5 data/val/run2/07_12m_203-129-16-92-8073/decodes_mini_check.txt) \
         <(cut -f1-5 data/val/run2/07_12m_203-129-16-92-8073/decodes_nn_v2_eg.txt) && echo IDENTICAL

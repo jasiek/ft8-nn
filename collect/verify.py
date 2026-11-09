@@ -3,8 +3,8 @@
   python3 collect/verify.py                                 # jt9 baseline (recordings/*/decodes.txt)
   python3 collect/verify.py --decodes data/val/run1 --tag nn_v2   # <root>/<station>/decodes_<tag>.txt
   python3 collect/verify.py --tag nn_v2 --decodes ... --list   # also print every unconfirmed decode
-Defaults read the validation set in $V, else ../ft8-validation-set next to this repository.
-Copied from ../ft8-validation-set/tools/verify.py (2026-11-04); only the default root differs.
+Defaults read the validation set in $V, else datasets/ft8-validation-set next to this repository.
+Copied from datasets/ft8-validation-set/tools/verify.py (2026-11-04); only the default root differs.
 
 Accepts jt9 lines ("<slot> <hhmmss> <snr> <dt> <freq> ~ <text>") and ft8nn tab lines
 ("<slot>\\t<f0>\\t<dt>\\t<method>\\t<text>[\\t...]").
@@ -26,7 +26,7 @@ from bisect import bisect_left, bisect_right
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 
-ROOT = os.path.abspath(os.environ.get("V") or os.path.join(os.path.dirname(__file__), "..", "..", "ft8-validation-set"))
+ROOT = os.path.abspath(os.environ.get("V") or os.path.join(os.path.dirname(__file__), "..", "datasets", "ft8-validation-set"))
 FREQ_TOL = 50       # Hz, after removing this receiver's median offset (reporters differ too)
 ACTIVE_WIN = 600    # s
 CQ_MODS = re.compile(r"^([A-Z]{1,4}|\d{3})$")  # CQ DX / CQ POTA / CQ NA / CQ 123 ...

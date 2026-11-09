@@ -1,6 +1,6 @@
 """Pack a recording folder for a Git LFS data repo, and unpack it back byte for byte.
 
-  python3 collect/datarepo.py pack SRC DST       # SRC = ../ft8-validation-set or ../ft8-training-data
+  python3 collect/datarepo.py pack SRC DST       # SRC = datasets/ft8-validation-set or datasets/ft8-training-data
   python3 collect/datarepo.py unpack DIR [--manifest M ...]
 
 pack: slot WAVs -> FLAC (`flac -8`, lossless, ~60% of the size), PSK Reporter *.jsonl -> *.jsonl.xz (`xz -9`, ~6%),

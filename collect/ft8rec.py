@@ -4,7 +4,7 @@
   OUTDIR=<run dir> python3 collect/ft8rec.py record  -> records all selected receivers in parallel
   OUTDIR=<run dir> python3 collect/ft8rec.py decode  -> runs jt9 on every slot, writes labels + 30-min WAVs
 
-Copied from ../ft8-training-data/tools/ft8rec.py (2026-11-03); only the default paths differ (see
+Copied from datasets/ft8-training-data/tools/ft8rec.py (2026-11-03); only the default paths differ (see
 docs/data-collection.md). collect/val.py is its successor (PSK Reporter spots, K1ABC filter).
 """
 import concurrent.futures as cf

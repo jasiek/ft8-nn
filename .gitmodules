@@ -1,0 +1,6 @@
+[submodule "datasets/ft8-training-data"]
+	path = datasets/ft8-training-data
+	url = https://github.com/jasiek/ft8-training-data.git
+[submodule "datasets/ft8-validation-set"]
+	path = datasets/ft8-validation-set
+	url = https://github.com/jasiek/ft8-validation-set.git

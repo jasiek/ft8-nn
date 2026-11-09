@@ -2,7 +2,7 @@
 
   uv run python tools/diag_strong_miss.py models/v2/model.pt nn_v2 -9 [max_slots] [--root REC] [--out OUT] [--max-snr S]
 
---root: recordings root (default ../ft8-training-data/recordings); --out: our decodes root (default data/real).
+--root: recordings root (default datasets/ft8-training-data/recordings); --out: our decodes root (default data/real).
 
 For each slot: subtract our saved decodes, then look for a candidate near the jt9 signal in the
 residual. Stages: NOCAND (no candidate within 5 Hz / 0.2 s), FAIL (candidate, NN decode fails;
@@ -24,7 +24,7 @@ import argparse
 _ap = argparse.ArgumentParser()
 _ap.add_argument("model"); _ap.add_argument("tag"); _ap.add_argument("thr", type=int)
 _ap.add_argument("max_slots", type=int, nargs="?", default=40)
-_ap.add_argument("--root", default="/Users/jps/tmp/ft8-training-data/recordings")
+_ap.add_argument("--root", default="datasets/ft8-training-data/recordings")
 _ap.add_argument("--out", default="data/real")
 _ap.add_argument("--max-snr", type=int, default=99)
 _a = _ap.parse_args()

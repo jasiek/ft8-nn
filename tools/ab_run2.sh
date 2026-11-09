@@ -10,7 +10,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 TAG=$1; shift
-V=${V:-$(cd .. && pwd)/ft8-validation-set}
+V=${V:-$PWD/datasets/ft8-validation-set}
 W=${WORKERS:-6}
 L=data/logs/$TAG; mkdir -p "$L"
 M="--model models/v2/model.pt --also-classical --tag $TAG --workers $W"

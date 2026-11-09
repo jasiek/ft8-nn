@@ -25,11 +25,11 @@ collection run gives a *new* data set made the same way, not the same files.
 | `manifest.py` | SHA-256 manifest of a run (`make`, `check`) |
 | `datarepo.py` | packs a run folder for its Git LFS data repo (FLAC + xz) and unpacks it byte for byte |
 
-These are copies of `../ft8-validation-set/tools/*.py` (2026-11-04) and `../ft8-training-data/tools/*.py`
-(`ft8rec.py`, `fill.py`, 2026-11-03; their `kiwi.py` is byte-identical). Only the default paths changed: `val.py`
+These are copies of the data repos' `tools/*.py` (`datasets/ft8-validation-set`, 2026-11-04; `datasets/ft8-training-data`
+`ft8rec.py`, `fill.py`, 2026-11-03; their `kiwi.py` is byte-identical). Only the default paths changed: `val.py`
 and `ft8rec.py` write to `$OUTDIR` (default `.`) and reads the training receiver list from `$TRAIN_SELECTION` (default
 `collect/runs/train/selection.json`); `verify.py` reads the validation set from `$V` (default
-`../ft8-validation-set`). `tools/ab_run2.sh` and `tools/validate_full.sh` call `collect/verify.py`.
+`datasets/ft8-validation-set`). `tools/ab_run2.sh` and `tools/validate_full.sh` call `collect/verify.py`.
 
 Requirements: network access to the Kiwis (HTTP/WebSocket, usually port 8073) and to PSK Reporter MQTT;
 `jt9` from WSJT-X on `PATH` for `decode` and the probes (mini: `/usr/local/bin/jt9`, WSJT-X 3.0.2 Improved; it also
@@ -84,27 +84,32 @@ Etiquette built in: one audio channel per receiver, at least one channel left fr
 ## Getting the data on another computer
 
 The recordings are in two public data repos, stored compressed in Git LFS (slot WAVs as FLAC, spots as `.xz`, no
-30-minute WAVs; 446 MB + 235 MB instead of 2.6 GB). Clone them next to this repo and unpack; unpack restores every
-file byte for byte (30-minute WAVs rebuilt from the slots) and checks the manifests. Needs `git-lfs`, `flac`, `xz`.
+30-minute WAVs; 446 MB + 235 MB instead of 2.6 GB). They are git submodules of this repo under `datasets/`, pinned
+to the commit the results were made with. Fetch them and unpack in place; unpack restores every file byte for byte
+(30-minute WAVs rebuilt from the slots, ignored by the data repos' `.gitignore`, so the submodules stay clean) and
+checks the manifests. Needs `git-lfs`, `flac`, `xz`.
 
 ```sh
-cd ..   # the folder that holds ft8-nn
-git clone https://github.com/jasiek/ft8-validation-set && git clone https://github.com/jasiek/ft8-training-data
-(cd ft8-validation-set && python3 tools/datarepo.py unpack . --manifest MANIFEST.sha256 --manifest run2/MANIFEST.sha256)
-(cd ft8-training-data && python3 tools/datarepo.py unpack . --manifest MANIFEST.sha256)
+git submodule update --init                      # or clone with --recurse-submodules
+(cd datasets/ft8-validation-set && python3 tools/datarepo.py unpack . --manifest MANIFEST.sha256 --manifest run2/MANIFEST.sha256)
+(cd datasets/ft8-training-data && python3 tools/datarepo.py unpack . --manifest MANIFEST.sha256)
 ```
+
+Code that needs no recordings (the C library, the unit tests, CI) works without the submodules; a plain
+`git clone` does not fetch them.
 
 `collect/datarepo.py pack SRC DST` made them (`unpack` is the same file). GitHub's free LFS bandwidth is 10 GiB a
 month for the account, so about 14 full clones; `GIT_LFS_SKIP_SMUDGE=1 git clone` plus `git lfs pull --include=...`
-fetches part of a set.
+fetches part of a set (`GIT_LFS_SKIP_SMUDGE=1 git submodule update --init`, then
+`git -C datasets/<repo> lfs pull --include=...`).
 
 ## Runs archived so far
 
 | run | `collect/runs/` | data folder | when (UTC) | receivers | slots | spots |
 |---|---|---|---|---|---|---|
-| training recordings | `train/` | `../ft8-training-data/recordings` | 2026-11-04 03:02–03:33 | 10 (random receiverbook sites) | 1,197 | none captured |
-| validation run 1 | `val1/` | `../ft8-validation-set` | 2026-11-04 22:17:45–22:47:45 | 9 (training receivers, other bands) | 1,077 | 920k |
-| validation run 2 | `val2/` | `../ft8-validation-set/run2` | 2026-11-04 22:28:30–22:58:30 | 9 (fresh sites) | 1,077 | 853k |
+| training recordings | `train/` | `datasets/ft8-training-data/recordings` | 2026-11-04 03:02–03:33 | 10 (random receiverbook sites) | 1,197 | none captured |
+| validation run 1 | `val1/` | `datasets/ft8-validation-set` | 2026-11-04 22:17:45–22:47:45 | 9 (training receivers, other bands) | 1,077 | 920k |
+| validation run 2 | `val2/` | `datasets/ft8-validation-set/run2` | 2026-11-04 22:28:30–22:58:30 | 9 (fresh sites) | 1,077 | 853k |
 
 Each `collect/runs/<run>/` holds `selection.json` (receivers, bands, probe results), `session.json` (times,
 bands, MQTT topics) and `MANIFEST.sha256`. Run 2 also holds the receiverbook snapshot it was drawn from; the
@@ -113,9 +118,9 @@ receiver that was replaced).
 Check a copy of the data with
 
 ```sh
-python3 collect/manifest.py check collect/runs/train/MANIFEST.sha256 ../ft8-training-data
-python3 collect/manifest.py check collect/runs/val1/MANIFEST.sha256 ../ft8-validation-set
-python3 collect/manifest.py check collect/runs/val2/MANIFEST.sha256 ../ft8-validation-set/run2
+python3 collect/manifest.py check collect/runs/train/MANIFEST.sha256 datasets/ft8-training-data
+python3 collect/manifest.py check collect/runs/val1/MANIFEST.sha256 datasets/ft8-validation-set
+python3 collect/manifest.py check collect/runs/val2/MANIFEST.sha256 datasets/ft8-validation-set/run2
 ```
 
 ## Known gaps (training recordings)

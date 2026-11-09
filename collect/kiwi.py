@@ -3,7 +3,7 @@
 Writes 15-second WAV files aligned to FT8 slot boundaries (UTC :00/:15/:30/:45),
 named YYMMDD_HHMMSS.wav so jt9 can decode them directly.
 
-Copied from ../ft8-validation-set/tools/kiwi.py (2026-11-04), unchanged.
+Copied from datasets/ft8-validation-set/tools/kiwi.py (2026-11-04), unchanged.
 """
 import base64, os, socket, ssl, struct, sys, time, wave, json, random
 from urllib.parse import urlparse

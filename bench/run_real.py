@@ -1,7 +1,7 @@
 """Decode real 15 s slot recordings and compare with jt9 decodes (no ground truth).
 
-  uv run python bench/run_real.py ../ft8-training-data/recordings --model runs/v1/model.pt --tag nn_v1
-  uv run python bench/run_real.py ../ft8-training-data/recordings --compare-only --tag nn_v1
+  uv run python bench/run_real.py datasets/ft8-training-data/recordings --model runs/v1/model.pt --tag nn_v1
+  uv run python bench/run_real.py datasets/ft8-training-data/recordings --compare-only --tag nn_v1
 
 Recordings layout: <root>/<station>/slots/*.wav (+ optional decodes.txt from jt9:
 "<slot> <hhmmss> <snr> <dt> <freq> ~ <text>"). The recordings folder is only read; our
