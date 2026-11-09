@@ -1,7 +1,8 @@
 # Status and plan (resume here)
 
-Last updated 2026-11-09 (**`models/v3` shipped**: v2 fine-tuned with real receiver noise, tag `nn_v3`, plan 7.5; before
-that validation run 3 and a 10,000-slot noise-only set, data repos as submodules in `datasets/`).
+Last updated 2026-11-09 (**`wsjtx/ft8nn_sidecar`**: the decoder as WSJT-X's external FT8 decoder,
+`WSJTX_FT8_DECODER`, plan 9; before that **`models/v3` shipped**: v2 fine-tuned with real receiver noise, tag `nn_v3`, plan 7.5,
+validation run 3 and a 10,000-slot noise-only set, data repos as submodules in `datasets/`).
 
 ## Improve loop (2026-11-05 on the Mac mini, user-approved) — FINISHED 18:40, stop condition (1) met
 
@@ -26,8 +27,24 @@ decodes verified identical to the main machine.
   `data/bench/noise` set is 100 slots (its "998" counts the invisible −80 dB signals, 10 per slot), so 0 false there
   only bounds the rate below ~3 per 100 slots; 0 on noise10k bounds it below ~3 per 10,000. Run 4 is set to record
   2026-11-09 15:00 UTC (EU afternoon, US morning) into the working folder; not in the data repo yet.
-- Last commit: `models/v3` shipped (real-noise fine-tune, plan 7.5; default tag `nn_v3`). Next: low-latency decoding
-  (plan 7.6, with 6a: early pass, classical vs truncation-trained transformer).
+- **WSJT-X integration added 2026-11-09 (plan 9).** `wsjtx/ft8nn_sidecar` is `libft8nn` as
+  WSJT-X's *external FT8 decoder*: with `WSJTX_FT8_DECODER="<path>/ft8nn_sidecar --model <path>/ft8nn.onnx"` set,
+  WSJT-X starts it once and per decode pass sends one compact JSON line (`utc`, `pass` = `nzhsym`, `final`, `disk`,
+  `period_start`, and every `dec_data.params` field) followed by `samples * 2` bytes of mono s16le 12 kHz audio;
+  we answer one JSON line per decode (`snr`, `dt`, `freq`, `msg`, `ap`) and one `{"seq":N,"done":true}`. WSJT-X
+  formats those into `jt9`'s FT8 lines itself, so filtering, ALL.TXT, UDP, PSK Reporter and auto-sequencing are
+  unchanged. Only FT8 arrives here (every other mode, Fox and SuperFox stay with WSJT-X's own `jt9`, which also
+  takes FT8 back if we exit), so there is nothing to forward, and no shared memory and no Qt in this build - the
+  protocol is JSON lines and raw audio on a pipe. Protocol: `doc/ft8-sidecar-protocol.md` in the wsjtx fork
+  (commit `9f6f04258`, `Decoder/Ft8Sidecar.cpp`). `wsjtx/README.md` has the install steps and the limits;
+  `wsjtx/test_sidecar.sh` (`make -C wsjtx test`, also in CI, 116 s for 2 slots on the M1) drives the whole protocol
+  with `wsjtx/fake_wsjtx` and checks 8 things: the protocol path against a plain decode of the same audio, the
+  `jt9` column layout of every line WSJT-X would build, `[nfa, nfb]`, the early pass, a re-decode (`samples: 0`),
+  a non-JSON line, exit on `quit`, and a missing model. The first attempt, a `jt9` shared-memory shim (`jt9nn`,
+  Qt 5 + the 46 MiB `dec_data` segment, so stock WSJT-X would work too), was dropped: the fork has the sidecar
+  interface and stock WSJT-X is not a target.
+- Last commit: `wsjtx/ft8nn_sidecar`, the decoder as WSJT-X's external FT8 decoder (plan 9). Next: low-latency
+  decoding (plan 7.6, with 6a: early pass, classical vs truncation-trained transformer).
 - Architecture study finished 2026-11-07 (plan 7.3d): keep the transformer. Its code (`train.py --kind conv|gru`,
   `--teacher`, `model.build`) is merged; models in `runs/{tf,conv,gru,tf_l2,tf_l2kd}_v{1,2}`, scripts `data/tmp/` (gitignored).
 - Loop log (finished): `nn_v2_eh` pass, `nn_v2_ob` fail (1 ghost), `nn_v2_og` pass, `nn_v2_p4` pass → run 2
@@ -506,7 +523,19 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       control fine-tune without truncation as in 7.5. Measure on truncated audio: run-2 decodes at 11.8 s,
       slot-confirmed and unconfirmed, noise-only false decodes, AWGN 50% threshold at 11.8 s. Also check that (b)
       loses nothing on full-length signals (the usual A/B + AWGN); if so, ship one network for both passes.
-8. Optional later work:
+9. **WSJT-X integration (`wsjtx/`) — first version DONE 2026-11-09.** `ft8nn_sidecar` speaks the
+   fork's external-FT8-decoder protocol (`WSJTX_FT8_DECODER`, `doc/ft8-sidecar-protocol.md`): JSON lines and the
+   period's audio on stdin, JSON decode lines and `done` on stdout, stderr into the WSJT-X log. Decided along the
+   way: early passes (`final: false`, about 11.8 s and 13.2 s into the period) answer at once with no decodes,
+   because WSJT-X skips a request that arrives while the decoder is busy and a slow early pass would cost the full
+   pass (`--early` to decode them); a re-decode (`samples: 0`) replays the last period's audio; `[nfa, nfb]` is
+   honoured and decodes are reported in frequency order; our CQ a-priori decodes report `ap: 1` and context ones
+   `ap: 2`, which WSJT-X shows as `a1`/`a2`; a missing model exits so WSJT-X falls back to its own `jt9`. Measured
+   9-12 s per slot on the plain M1 for the busiest 40 m station (M4 mini: 6.9-8.0 s), against WSJT-X's 15 s
+   request timeout - the low-latency work in 7.6 matters for live use, and a pass that overruns is logged.
+   Next, if wanted: a side-by-side live run in WSJT-X against `jt9` (not tried yet - no WSJT-X build here), and
+   `ft8nn_set_mycall` so WSJT-X's own callsign and AP settings can be used (plan 8).
+10. Optional later work:
    - More AP types: the a2 MyCall type needs the operator's own callsign, and that is only useful inside an app
      (an `ft8nn_set_mycall` would slot into the same pinned-bit machinery as context AP).
    - Retrain on a bigger model (cheap now: 74 min per transformer training on the M4).

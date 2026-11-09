@@ -38,3 +38,9 @@ jobs:
 
       - name: C vs Python on synthetic slots
         run: uv run python tools/ci_smoke.py
+
+      # WSJT-X's external FT8 decoder (wsjtx/): driven through the whole protocol -- hello, a decode
+      # request with its audio, the replies, a re-decode, quit -- by wsjtx/fake_wsjtx, on the slots
+      # the step above wrote.
+      - name: WSJT-X FT8 sidecar
+        run: env TEST_SHIM_SLOTS="$PWD/data/ci/rec/synthetic/slots" make -C wsjtx test NSLOTS=2

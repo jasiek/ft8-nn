@@ -58,6 +58,7 @@ the M1 Pro. Other platforms and smaller machines have not been tried.
 | `tools/` | LDPC table extraction, message pool, sync diagnostics |
 | `datasets/` | submodules: the training recordings and the validation set (packed; unpack in place) |
 | `collect/` | real-data collection: KiwiSDR recorder, PSK Reporter capture, jt9 labelling, spot scoring, run records and SHA-256 manifests (`docs/data-collection.md`) |
+| `wsjtx/` | `ft8nn_sidecar`: this decoder as WSJT-X's external FT8 decoder (`WSJTX_FT8_DECODER`, JSON lines + raw audio on a pipe), so WSJT-X decodes FT8 with it (`wsjtx/README.md`) |
 
 ## Reproduce
 
@@ -89,6 +90,13 @@ tools/get_onnxruntime.sh                                    # official ONNX Runt
 make -C c                                                   # c/build/libft8nn.{a,dylib|so}, c/build/ft8nn_cli
 uv run python tools/export_onnx.py models/v3/model.pt models/v3/ft8nn.onnx
 c/build/ft8nn_cli models/v3/ft8nn.onnx slot.wav               # one line per decode; --threads N, --time
+```
+
+Inside WSJT-X (`wsjtx/README.md` has the install steps and the limits):
+
+```sh
+make -C wsjtx                                                # wsjtx/build/ft8nn_sidecar
+make -C wsjtx test                                           # drives the whole sidecar protocol
 ```
 
 Benchmark scoring: 10 signals per 15 s slot, real messages from `ft8nn/data/messages.json`;
