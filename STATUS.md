@@ -25,8 +25,10 @@ decodes verified identical to the main machine.
   (24,291 / 17,993 / 16). `nn_v2_pl`: 26,535 / 19,982 / 1 (`CQ K39HUN FG27`), `nn_v3` 26,688 / 20,105 / 0; noise10k 0 false for both. Treat it like run 2: never train or tune on it. Judge
   false-decode changes on runs 2 + 3 pooled. Noise-only: `data/bench/noise10k` (10,000 slots, seed 19, README); the
   `data/bench/noise` set is 100 slots (its "998" counts the invisible −80 dB signals, 10 per slot), so 0 false there
-  only bounds the rate below ~3 per 100 slots; 0 on noise10k bounds it below ~3 per 10,000. Run 4 is set to record
-  2026-11-09 15:00 UTC (EU afternoon, US morning) into the working folder; not in the data repo yet.
+  only bounds the rate below ~3 per 100 slots; 0 on noise10k bounds it below ~3 per 10,000. Run 4 (`$V/run4`):
+  15 more fresh Kiwis (no training, run-2 or run-3 site), Mon 15:00–15:30 UTC: European afternoon / US morning on
+  20/17/15/12/10 m, Alberta 40 m, Okayama 80 m. jt9 38,432 / 28,053 / 29 unconf (all garbage calls), the biggest run;
+  runs 2–4 together are about 3.5× run 2's checkable decodes. Not yet scored with our decoder.
 - **WSJT-X integration added 2026-11-09 (plan 9).** `wsjtx/ft8nn_sidecar` is `libft8nn` as
   WSJT-X's *external FT8 decoder*: with `WSJTX_FT8_DECODER="<path>/ft8nn_sidecar --model <path>/ft8nn.onnx"` set,
   WSJT-X starts it once and per decode pass sends one compact JSON line (`utc`, `pass` = `nzhsym`, `final`, `disk`,
@@ -91,10 +93,11 @@ History: `nn_v2` 16055 (jt9-only 663) → baseline fix `nn_v2_bm` 16336 (jt9-onl
 KiwiSDR recordings plus every PSK Reporter FT8 spot logged at the same time; its `README.md` explains it all.
 Run 1 (`recordings/`) = 9 training-set Kiwis on other bands/times; **run 2 (`run2/recordings`) = 9 Kiwis never
 used for training** (the honest generalisation test); **run 3 (`run3/recordings`, 2026-11-09) = 12 more unseen Kiwis
-at another day and time** (no site shared with training, run 1 or run 2). 120 slots per station, jt9 baseline in each `decodes.txt`.
+at another day and time** (no site shared with training, run 1 or run 2); **run 4 (`run4/recordings`, 2026-11-09
+15:00 UTC) = 15 more unseen Kiwis, European afternoon / US morning on the high bands**. 120 slots per station, jt9 baseline in each `decodes.txt`.
 Its `tools/verify.py` puts each decode's sender into a tier: `slot` (spotted by others in that slot) > `active`
-> `repeat` > `unconf`. **`unconf` ≈ false decodes** (jt9: 13 of 27,462 checkable in run 1, 16 of 23,958 in run 2, 17 of 23,139 in run 3).
-Treat the folder as read-only; our decodes go to `data/val/run{1,2,3}/<station>/decodes_<tag>.txt`. Both data
+> `repeat` > `unconf`. **`unconf` ≈ false decodes** (jt9: 13 of 27,462 checkable in run 1, 16 of 23,958 in run 2, 17 of 23,139 in run 3, 29 of 37,521 in run 4).
+Treat the folder as read-only; our decodes go to `data/val/run{1,2,3,4}/<station>/decodes_<tag>.txt`. Both data
 folders are git submodules under `datasets/` (GitHub LFS repos `jasiek/ft8-validation-set`, `jasiek/ft8-training-data`;
 `git submodule update --init`, then `tools/datarepo.py unpack`; see `docs/data-collection.md`):
 
@@ -106,6 +109,8 @@ python3 collect/verify.py --decodes data/val/run1 --tag nn_v3 --list
 python3 collect/verify.py --recordings $V/run2/recordings --spots $V/run2/pskr_spots.jsonl --decodes data/val/run2 --tag nn_v3 --list
 uv run python bench/run_real.py $V/run3/recordings --model models/v3/model.pt --also-classical --tag nn_v3 --workers 6 --out data/val/run3
 python3 collect/verify.py --recordings $V/run3/recordings --spots $V/run3/pskr_spots.jsonl --decodes data/val/run3 --tag nn_v3 --list
+uv run python bench/run_real.py $V/run4/recordings --model models/v3/model.pt --also-classical --tag nn_v3 --workers 6 --out data/val/run4
+python3 collect/verify.py --recordings $V/run4/recordings --spots $V/run4/pskr_spots.jsonl --decodes data/val/run4 --tag nn_v3 --list
 ```
 
 Scores (vs jt9 baseline, checkable = sender call is spotted-checkable):

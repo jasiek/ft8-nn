@@ -20,7 +20,7 @@ and past decisions are there too. `README.md` covers setup; `docs/data-collectio
 
 - The recordings are git submodules (Git LFS, packed): `datasets/ft8-training-data`, `datasets/ft8-validation-set`.
   Fetch and unpack them as in `docs/data-collection.md`. They are read-only; outputs go under `data/` (gitignored).
-- Validation runs 2 and 3 (unseen receivers) are the honest tests: never train or tune thresholds on them.
+- Validation runs 2–4 (unseen receivers) are the honest tests: never train or tune thresholds on them.
 - Decoder changes: Python first (`ft8nn/`), then the C port (`c/`); C must equal Python (`tools/golden_c.py`).
   Accept a change with `tools/ab_run2.sh TAG` (run 2 decodes and slot-confirmed up, unconfirmed not up, noise 0
   false), then `tools/validate_full.sh TAG` (run 1, training recordings, AWGN, all golden tests).

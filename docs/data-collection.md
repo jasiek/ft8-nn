@@ -111,9 +111,10 @@ fetches part of a set (`GIT_LFS_SKIP_SMUDGE=1 git submodule update --init`, then
 | validation run 1 | `val1/` | `datasets/ft8-validation-set` | 2026-11-04 22:17:45–22:47:45 | 9 (training receivers, other bands) | 1,077 | 920k |
 | validation run 2 | `val2/` | `datasets/ft8-validation-set/run2` | 2026-11-04 22:28:30–22:58:30 | 9 (fresh sites) | 1,077 | 853k |
 | validation run 3 | `val3/` | `datasets/ft8-validation-set/run3` | 2026-11-09 05:32:00–06:02:00 (Mon) | 12 (fresh sites, none from run 2) | 1,435 | 556k |
+| validation run 4 | `val4/` | `datasets/ft8-validation-set/run4` | 2026-11-09 15:00:00–15:30:00 (Mon) | 15 (fresh sites, none from runs 2–3) | 1,790 | 1,473k |
 
 Each `collect/runs/<run>/` holds `selection.json` (receivers, bands, probe results), `session.json` (times,
-bands, MQTT topics) and `MANIFEST.sha256`. Run 2 also holds the receiverbook snapshot it was drawn from (run 3 reused it, `N_RX=16 PER_BAND=6`: 12 passed); the
+bands, MQTT topics) and `MANIFEST.sha256`. Run 2 also holds the receiverbook snapshot it was drawn from (runs 3 and 4 reused it, `N_RX=16 PER_BAND=6`: 12 and 15 passed; run 4 via the data repo's `tools/scheduled_run.sh`, which waits for a set UTC time); the
 training run holds its `record.log`, and its `selection.json` is the original (probe seed 372751130, plus the
 receiver that was replaced).
 Check a copy of the data with
