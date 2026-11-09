@@ -51,10 +51,10 @@ python3 collect/manifest.py make $OUTDIR pskr_spots.jsonl selection.json session
   dawn: 20/30/40/17 m; night: 40/80/30/20 m), decodes it with jt9, then picks greedily: busiest
   (receiver, band) pairs first, one band per receiver, at most 2 receivers per band, at least 3 decodes.
 - **probe-fresh:** shuffles the receiverbook list (`RECEIVERS_JSON`, a flattened receiverbook.de/map snapshot),
-  keeps one Kiwi per site, drops training sites (by URL and by lat/lon rounded to 0.1°), keeps only Kiwis whose
+  keeps one Kiwi per site, drops training sites and the sites of every run in `collect/runs/` (by URL and by lat/lon rounded to 0.1°), keeps only Kiwis whose
   `/status` shows them online with at least 2 free channels and 0–30 MHz coverage, skips any with an inactivity
-  or IP time limit shorter than the run, probes up to 4 per band in parallel and takes up to 10 with
-  ≥ 5 decodes (first 1 per band, then a second where it pays). The shuffle is unseeded.
+  or IP time limit shorter than the run, probes up to `PER_BAND` (4) per band in parallel and takes up to `N_RX` (10) with
+  ≥ 5 decodes (first 1 per band, then a second and a third where it pays). The shuffle is unseeded.
 - **record:** all receivers in parallel from the next slot boundary, reconnecting on errors (up to 5 attempts
   per receiver), while `pskr.py` captures spots for the same bands until 12 min after the last slot: reporters
   upload in batches.
@@ -110,9 +110,10 @@ fetches part of a set (`GIT_LFS_SKIP_SMUDGE=1 git submodule update --init`, then
 | training recordings | `train/` | `datasets/ft8-training-data/recordings` | 2026-11-04 03:02–03:33 | 10 (random receiverbook sites) | 1,197 | none captured |
 | validation run 1 | `val1/` | `datasets/ft8-validation-set` | 2026-11-04 22:17:45–22:47:45 | 9 (training receivers, other bands) | 1,077 | 920k |
 | validation run 2 | `val2/` | `datasets/ft8-validation-set/run2` | 2026-11-04 22:28:30–22:58:30 | 9 (fresh sites) | 1,077 | 853k |
+| validation run 3 | `val3/` | `datasets/ft8-validation-set/run3` | 2026-11-09 05:32:00–06:02:00 (Mon) | 12 (fresh sites, none from run 2) | 1,435 | 556k |
 
 Each `collect/runs/<run>/` holds `selection.json` (receivers, bands, probe results), `session.json` (times,
-bands, MQTT topics) and `MANIFEST.sha256`. Run 2 also holds the receiverbook snapshot it was drawn from; the
+bands, MQTT topics) and `MANIFEST.sha256`. Run 2 also holds the receiverbook snapshot it was drawn from (run 3 reused it, `N_RX=16 PER_BAND=6`: 12 passed); the
 training run holds its `record.log`, and its `selection.json` is the original (probe seed 372751130, plus the
 receiver that was replaced).
 Check a copy of the data with

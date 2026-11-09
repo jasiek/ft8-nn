@@ -1,7 +1,7 @@
 # Status and plan (resume here)
 
-Last updated 2026-11-08 (message plausibility rules committed as `nn_v2_pl`, plan 7.4; portability
-done: model in `models/v2`, data in GitHub LFS repos, `CLAUDE.md`).
+Last updated 2026-11-09 (validation run 3 and a 10,000-slot noise-only set added; before that message plausibility
+rules `nn_v2_pl`, plan 7.4; portability: model in `models/v2`, data in GitHub LFS repos, `CLAUDE.md`).
 
 ## Improve loop (2026-11-05 on the Mac mini, user-approved) — FINISHED 18:40, stop condition (1) met
 
@@ -18,6 +18,14 @@ decodes verified identical to the main machine.
 
 ## In flight
 
+- **Validation set expanded 2026-11-09.** Run 3 (`$V/run3`, data repo `794a63d`): 12 fresh Kiwis, none at a training,
+  run-1 or run-2 site, Mon 05:32–06:02 UTC (run 2 was Wed 22:30): Oceania/Asia/Qatar daytime 20/15/10 m, Europe dawn
+  40 m and 60 m (new band), western USA 80 m. jt9 23,524 decodes / 17,888 slot-confirmed / 17 unconf, the size of run 2
+  (24,291 / 17,993 / 16). Not yet scored with our decoder. Treat it like run 2: never train or tune on it. Judge
+  false-decode changes on runs 2 + 3 pooled. Noise-only: `data/bench/noise10k` (10,000 slots, seed 19, README); the
+  `data/bench/noise` set is 100 slots (its "998" counts the invisible −80 dB signals, 10 per slot), so 0 false there
+  only bounds the rate below ~3 per 100 slots; 0 on noise10k bounds it below ~3 per 10,000. Run 4 is set to record
+  2026-11-09 15:00 UTC (EU afternoon, US morning) into the working folder; not in the data repo yet.
 - Last commit: message plausibility rules (`nn_v2_pl`, plan 7.4). Next: train with real noise + synthetic
   signals (noise from the training recordings and run 1 only, never run 2), with a learning curve over the real data.
 - Architecture study finished 2026-11-07 (plan 7.3d): keep the transformer. Its code (`train.py --kind conv|gru`,
@@ -64,10 +72,11 @@ History: `nn_v2` 16055 (jt9-only 663) → baseline fix `nn_v2_bm` 16336 (jt9-onl
 
 KiwiSDR recordings plus every PSK Reporter FT8 spot logged at the same time; its `README.md` explains it all.
 Run 1 (`recordings/`) = 9 training-set Kiwis on other bands/times; **run 2 (`run2/recordings`) = 9 Kiwis never
-used for training** (the honest generalisation test). 120 slots per station, jt9 baseline in each `decodes.txt`.
+used for training** (the honest generalisation test); **run 3 (`run3/recordings`, 2026-11-09) = 12 more unseen Kiwis
+at another day and time** (no site shared with training, run 1 or run 2). 120 slots per station, jt9 baseline in each `decodes.txt`.
 Its `tools/verify.py` puts each decode's sender into a tier: `slot` (spotted by others in that slot) > `active`
-> `repeat` > `unconf`. **`unconf` ≈ false decodes** (jt9: 13 of 27,462 checkable in run 1, 16 of 23,958 in run 2).
-Treat the folder as read-only; our decodes go to `data/val/run{1,2}/<station>/decodes_<tag>.txt`. Both data
+> `repeat` > `unconf`. **`unconf` ≈ false decodes** (jt9: 13 of 27,462 checkable in run 1, 16 of 23,958 in run 2, 17 of 23,139 in run 3).
+Treat the folder as read-only; our decodes go to `data/val/run{1,2,3}/<station>/decodes_<tag>.txt`. Both data
 folders are git submodules under `datasets/` (GitHub LFS repos `jasiek/ft8-validation-set`, `jasiek/ft8-training-data`;
 `git submodule update --init`, then `tools/datarepo.py unpack`; see `docs/data-collection.md`):
 
@@ -77,6 +86,8 @@ uv run python bench/run_real.py $V/recordings --model models/v2/model.pt --also-
 uv run python bench/run_real.py $V/run2/recordings --model models/v2/model.pt --also-classical --tag nn_v2_pl --workers 6 --out data/val/run2
 python3 collect/verify.py --decodes data/val/run1 --tag nn_v2_pl --list
 python3 collect/verify.py --recordings $V/run2/recordings --spots $V/run2/pskr_spots.jsonl --decodes data/val/run2 --tag nn_v2_pl --list
+uv run python bench/run_real.py $V/run3/recordings --model models/v2/model.pt --also-classical --tag nn_v2_pl --workers 6 --out data/val/run3
+python3 collect/verify.py --recordings $V/run3/recordings --spots $V/run3/pskr_spots.jsonl --decodes data/val/run3 --tag nn_v2_pl --list
 ```
 
 Scores (vs jt9 baseline, checkable = sender call is spotted-checkable):

@@ -67,6 +67,7 @@ uv run python bench/make_set.py --out data/bench/awgn --channel awgn --snrs=-25:
 uv run python bench/make_set.py --out data/bench/moderate --channel moderate --snrs=-24:-12 --files 30 --seed 2
 uv run python bench/make_set.py --out data/bench/disturbed --channel disturbed --snrs=-24:-10 --files 30 --seed 3
 uv run python bench/make_set.py --out data/bench/noise --channel awgn --snrs=-80:-80 --files 100 --seed 9   # noise only
+uv run python bench/make_set.py --out data/bench/noise10k --channel awgn --snrs=-80:-80 --files 10000 --seed 19   # 10,000 noise-only slots (false-rate bound)
 uv run python bench/run_jt9.py data/bench/awgn             # WSJT-X baseline (needs jt9 on PATH or /usr/local/bin)
 # the shipped model is models/v2; to retrain it (74 min on an M4 with MPS, ~4 h on an M1 Pro):
 uv run python train.py --cfg v1 --steps 6000 --out runs/v1
