@@ -17,7 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / "c/build/ft8nn_cli"
-ONNX = ROOT / "models/v2/ft8nn.onnx"
+ONNX = ROOT / "models/v3/ft8nn.onnx"
 
 
 def run_cli(files):
@@ -88,8 +88,8 @@ def main():
     ap.add_argument("path")
     ap.add_argument("--n", type=int, default=20)
     ap.add_argument("--workers", type=int, default=6)
-    ap.add_argument("--tag", default="nn_v2_pl", help="Python result tag to compare against")
-    ap.add_argument("--onnx", default=None, help="model for the C side (default models/v2/ft8nn.onnx)")
+    ap.add_argument("--tag", default="nn_v3", help="Python result tag to compare against")
+    ap.add_argument("--onnx", default=None, help="model for the C side (default models/v3/ft8nn.onnx)")
     ap.add_argument("--out", default="data/real", help="root of the Python decodes (real mode), e.g. data/val/run2")
     a = ap.parse_args()
     global ONNX

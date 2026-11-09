@@ -24,8 +24,9 @@ and past decisions are there too. `README.md` covers setup; `docs/data-collectio
 - Decoder changes: Python first (`ft8nn/`), then the C port (`c/`); C must equal Python (`tools/golden_c.py`).
   Accept a change with `tools/ab_run2.sh TAG` (run 2 decodes and slot-confirmed up, unconfirmed not up, noise 0
   false), then `tools/validate_full.sh TAG` (run 1, training recordings, AWGN, all golden tests).
-- `models/v2` is the shipped model. New trainings write to `runs/` (gitignored). Retraining moves run-2 unconfirmed
-  decodes by several (1 vs 5 for the same recipe), so a new network needs the AP/OSD gates re-checked.
+- `models/v3` is the shipped model (`models/v2` is kept as its starting point). New trainings write to `runs/`
+  (gitignored). Retraining moves run-2 unconfirmed decodes by several (1 vs 5 for the same recipe), so a new network
+  needs the AP/OSD gates re-checked; judge false decodes on runs 2 + 3 pooled and `data/bench/noise10k`.
 - The data repos (Git LFS) share 10 GiB/month of download bandwidth: avoid needless full clones.
 
 ## Machine notes (Mac mini M4)

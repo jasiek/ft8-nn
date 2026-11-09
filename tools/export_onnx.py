@@ -1,6 +1,6 @@
 """Export SoftDemod to ONNX and check it against torch with onnxruntime.
 
-    uv run python tools/export_onnx.py models/v2/model.pt models/v2/ft8nn.onnx
+    uv run python tools/export_onnx.py models/v3/model.pt models/v3/ft8nn.onnx
 
 ONNX graph: input "features" (B, 79, 48) float32  ->  output "llr" (B, 174) float32.
 The features are model.features(): per-symbol 64-pt DFT, bins -4..19, real parts then imag parts,

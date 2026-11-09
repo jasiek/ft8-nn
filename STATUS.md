@@ -1,7 +1,7 @@
 # Status and plan (resume here)
 
-Last updated 2026-11-09 (validation run 3 and a 10,000-slot noise-only set added; before that message plausibility
-rules `nn_v2_pl`, plan 7.4; portability: model in `models/v2`, data in GitHub LFS repos, `CLAUDE.md`).
+Last updated 2026-11-09 (**`models/v3` shipped**: v2 fine-tuned with real receiver noise, tag `nn_v3`, plan 7.5; before
+that validation run 3 and a 10,000-slot noise-only set, data repos as submodules in `datasets/`).
 
 ## Improve loop (2026-11-05 on the Mac mini, user-approved) — FINISHED 18:40, stop condition (1) met
 
@@ -21,13 +21,13 @@ decodes verified identical to the main machine.
 - **Validation set expanded 2026-11-09.** Run 3 (`$V/run3`, data repo `794a63d`): 12 fresh Kiwis, none at a training,
   run-1 or run-2 site, Mon 05:32–06:02 UTC (run 2 was Wed 22:30): Oceania/Asia/Qatar daytime 20/15/10 m, Europe dawn
   40 m and 60 m (new band), western USA 80 m. jt9 23,524 decodes / 17,888 slot-confirmed / 17 unconf, the size of run 2
-  (24,291 / 17,993 / 16). Not yet scored with our decoder. Treat it like run 2: never train or tune on it. Judge
+  (24,291 / 17,993 / 16). `nn_v2_pl`: 26,535 / 19,982 / 1 (`CQ K39HUN FG27`), `nn_v3` 26,688 / 20,105 / 0; noise10k 0 false for both. Treat it like run 2: never train or tune on it. Judge
   false-decode changes on runs 2 + 3 pooled. Noise-only: `data/bench/noise10k` (10,000 slots, seed 19, README); the
   `data/bench/noise` set is 100 slots (its "998" counts the invisible −80 dB signals, 10 per slot), so 0 false there
   only bounds the rate below ~3 per 100 slots; 0 on noise10k bounds it below ~3 per 10,000. Run 4 is set to record
   2026-11-09 15:00 UTC (EU afternoon, US morning) into the working folder; not in the data repo yet.
-- Last commit: message plausibility rules (`nn_v2_pl`, plan 7.4). Next: train with real noise + synthetic
-  signals (noise from the training recordings and run 1 only, never run 2), with a learning curve over the real data.
+- Last commit: `models/v3` shipped (real-noise fine-tune, plan 7.5; default tag `nn_v3`). Next: low-latency decoding
+  (plan 7.6, with 6a: early pass, classical vs truncation-trained transformer).
 - Architecture study finished 2026-11-07 (plan 7.3d): keep the transformer. Its code (`train.py --kind conv|gru`,
   `--teacher`, `model.build`) is merged; models in `runs/{tf,conv,gru,tf_l2,tf_l2kd}_v{1,2}`, scripts `data/tmp/` (gitignored).
 - Loop log (finished): `nn_v2_eh` pass, `nn_v2_ob` fail (1 ghost), `nn_v2_og` pass, `nn_v2_p4` pass → run 2
@@ -37,11 +37,11 @@ decodes verified identical to the main machine.
 
 ## Where we are
 
-Best model: `models/v2/model.pt` (+ `ft8nn.onnx`, training `log.json`), tracked in git since 2026-11-08; `runs/` is the
-gitignored output folder for new training runs (the study models are there, `runs/v2` is the same model as `models/v2`).
-Recipe: v1 (6000 steps, `--cfg v1`), then fine-tune with
-`train.py --cfg v2 --init runs/v1/model.pt --lr 5e-4 --steps 8000`. That took about 4 h on the M1 Pro and takes
-74 min on the M4 mini (MPS). `--kind conv|gru` trains the study's alternatives, `--teacher CKPT` distils from a checkpoint.
+Best model: `models/v3/model.pt` (+ `ft8nn.onnx`, training `log.json`), shipped 2026-11-09; `models/v2` stays in git as
+its starting point. `runs/` is the gitignored output folder for new training runs (the study models are there,
+`runs/v2` = `models/v2`, `runs/rn_real_seed1` = `models/v3`). Recipe: v1 (6000 steps, `--cfg v1`), then v2 =
+`train.py --cfg v2 --init runs/v1/model.pt --lr 5e-4 --steps 8000` (about 4 h on the M1 Pro, 74 min on the M4 mini, MPS),
+then v3 = 4000 steps from v2 with real noise in half the rows (21 min; README has the commands, plan 7.5 the results). `--kind conv|gru` trains the study's alternatives, `--teacher CKPT` distils from a checkpoint.
 
 Decoder defaults: `decoder.decode_slot`. These are 4 passes with subtraction, 2 fine-sync hypotheses,
 NN metric with classical nsym 1/2/3 fallback (`--also-classical`), OSD order 2 gated on expected errors < 40,
@@ -63,10 +63,11 @@ context a-priori decoding from our own decodes 30/60 s earlier (`bp_cx`/`osd_cx`
 | noise only, 100 slots | – | 0 false | **0 false** |
 
 Real KiwiSDR recordings (10 stations, 1197 slots, `datasets/ft8-training-data/recordings`, read-only submodule):
-**Current default `nn_v2_pl` decodes 17583, jt9 decodes 15729 (+11.8%).**
-2166 decodes are ours only (2087 name a callsign jt9 heard at that station); 309 are jt9 only.
-History: `nn_v2` 16055 (jt9-only 663) → baseline fix `nn_v2_bm` 16336 (jt9-only 512) → erasure `nn_v2_er` 16443 (jt9-only 466) → fmax 3100 `nn_v2_f31` 16452 (jt9-only 463) → early-DT + osd_er `nn_v2_eh` 16460 (463) → osd_bp `nn_v2_og` 16621 (405) → 4 passes `nn_v2_p4` 16638 (400) → context AP `nn_v2_cy` 17586 (309).
-08_80m: 3477 vs jt9 3258. AWGN 50% with `nn_v2_og`/`nn_v2_p4`/`nn_v2_cy`/`nn_v2_rs`/`nn_v2_pl`: −22.52 (90%: −21.28; `nn_v2_pl` −21.24).
+**Current default `nn_v3` decodes 17706, jt9 decodes 15729 (+12.6%)** (biased upward: `models/v3` was trained with
+these recordings' residual noise; `nn_v2_pl` 17583, +11.8%, is the clean number). 2282 decodes are ours only (2204 name
+a callsign jt9 heard at that station); 305 are jt9 only.
+History: `nn_v2` 16055 (jt9-only 663) → baseline fix `nn_v2_bm` 16336 (jt9-only 512) → erasure `nn_v2_er` 16443 (jt9-only 466) → fmax 3100 `nn_v2_f31` 16452 (jt9-only 463) → early-DT + osd_er `nn_v2_eh` 16460 (463) → osd_bp `nn_v2_og` 16621 (405) → 4 passes `nn_v2_p4` 16638 (400) → context AP `nn_v2_cy` 17586 (309) → plausibility `nn_v2_pl` 17583 (309) → model v3 `nn_v3` 17706 (305).
+08_80m: 3477 (`nn_v3` 3506) vs jt9 3258. AWGN 50% with `nn_v2_og`/`nn_v2_p4`/`nn_v2_cy`/`nn_v2_rs`/`nn_v2_pl`: −22.52 (90%: −21.28; `nn_v2_pl` −21.24); `nn_v3` −22.49 / −21.24.
 
 ### Validation set with ground truth (`datasets/ft8-validation-set`, added by the user 2026-11-04)
 
@@ -82,12 +83,12 @@ folders are git submodules under `datasets/` (GitHub LFS repos `jasiek/ft8-valid
 
 ```sh
 V=datasets/ft8-validation-set
-uv run python bench/run_real.py $V/recordings --model models/v2/model.pt --also-classical --tag nn_v2_pl --workers 6 --out data/val/run1
-uv run python bench/run_real.py $V/run2/recordings --model models/v2/model.pt --also-classical --tag nn_v2_pl --workers 6 --out data/val/run2
-python3 collect/verify.py --decodes data/val/run1 --tag nn_v2_pl --list
-python3 collect/verify.py --recordings $V/run2/recordings --spots $V/run2/pskr_spots.jsonl --decodes data/val/run2 --tag nn_v2_pl --list
-uv run python bench/run_real.py $V/run3/recordings --model models/v2/model.pt --also-classical --tag nn_v2_pl --workers 6 --out data/val/run3
-python3 collect/verify.py --recordings $V/run3/recordings --spots $V/run3/pskr_spots.jsonl --decodes data/val/run3 --tag nn_v2_pl --list
+uv run python bench/run_real.py $V/recordings --model models/v3/model.pt --also-classical --tag nn_v3 --workers 6 --out data/val/run1
+uv run python bench/run_real.py $V/run2/recordings --model models/v3/model.pt --also-classical --tag nn_v3 --workers 6 --out data/val/run2
+python3 collect/verify.py --decodes data/val/run1 --tag nn_v3 --list
+python3 collect/verify.py --recordings $V/run2/recordings --spots $V/run2/pskr_spots.jsonl --decodes data/val/run2 --tag nn_v3 --list
+uv run python bench/run_real.py $V/run3/recordings --model models/v3/model.pt --also-classical --tag nn_v3 --workers 6 --out data/val/run3
+python3 collect/verify.py --recordings $V/run3/recordings --spots $V/run3/pskr_spots.jsonl --decodes data/val/run3 --tag nn_v3 --list
 ```
 
 Scores (vs jt9 baseline, checkable = sender call is spotted-checkable):
@@ -102,7 +103,8 @@ Scores (vs jt9 baseline, checkable = sender call is spotted-checkable):
 | 1 | nn_v2_p4 | 30,116 (+8.6%) | 23,230 (+8.1%) | 3 | | |
 | 1 | nn_v2_cy | 31,957 (+15.2%) | 24,449 (+13.8%) | 3 | | |
 | 1 | nn_v2_rs | 31,952 (+15.2%) | 24,444 (+13.7%) | 3 | | |
-| 1 | **nn_v2_pl** | **31,951 (+15.2%)** | **24,444 (+13.7%)** | **2** | | |
+| 1 | nn_v2_pl | 31,951 (+15.2%) | 24,444 (+13.7%) | 2 | | |
+| 1 | **nn_v3** | **32,244 (+16.3%)** | **24,660 (+14.7%)** | **1** | | |
 | 2 (unseen sites) | jt9 | 24,291 | 17,993 | 16 | – | – |
 | 2 | nn_v2_er | 25,994 (+7.0%) | 19,244 (+7.0%) | 1 | 886 | 2590 |
 | 2 | nn_v2_f31 | 26,032 (+7.2%) | 19,281 (+7.2%) | 1 | 850 | |
@@ -111,7 +113,11 @@ Scores (vs jt9 baseline, checkable = sender call is spotted-checkable):
 | 2 | nn_v2_p4 | 26,439 (+8.8%) | 19,550 (+8.7%) | 1 | | |
 | 2 | nn_v2_cy | 27,930 (+15.0%) | 20,505 (+14.0%) | 1 | | |
 | 2 | nn_v2_rs | 27,929 (+15.0%) | 20,504 (+14.0%) | 1 | | |
-| 2 | **nn_v2_pl** | **27,928 (+15.0%)** | **20,504 (+14.0%)** | **0** | | |
+| 2 | nn_v2_pl | 27,928 (+15.0%) | 20,504 (+14.0%) | 0 | | |
+| 2 | **nn_v3** | **28,198 (+16.1%)** | **20,701 (+15.1%)** | **1** | | |
+| 3 (unseen sites, other day) | jt9 | 23,524 | 17,888 | 17 | – | – |
+| 3 | nn_v2_pl | 26,535 (+12.8%) | 19,982 (+11.7%) | 1 | | |
+| 3 | **nn_v3** | **26,688 (+13.5%)** | **20,105 (+12.4%)** | **0** | | |
 
 The gain is larger on unseen receivers than on training sites, and it holds up against outside spots:
 false decodes are below jt9's. **Caveat for `nn_v2_cy`:** a context decode's sender is by construction a station
@@ -124,10 +130,10 @@ e.g. run 2 00_40m `E70A KU2X FN13` at +4…+9 dB missed in 3 slots. Many were ab
 
 ```sh
 uv run pytest -q                                                    # 26 tests
-uv run python bench/run_ours.py data/bench/awgn --model models/v2/model.pt --also-classical --tag nn_v2_pl --workers 6
+uv run python bench/run_ours.py data/bench/awgn --model models/v3/model.pt --also-classical --tag nn_v3 --workers 6
 uv run python bench/report.py data/bench/awgn --dt-max 0.5
-uv run python bench/run_real.py datasets/ft8-training-data/recordings --model models/v2/model.pt --also-classical --tag nn_v2_pl --workers 6
-uv run python bench/run_real.py datasets/ft8-training-data/recordings --compare-only --tag nn_v2_pl
+uv run python bench/run_real.py datasets/ft8-training-data/recordings --model models/v3/model.pt --also-classical --tag nn_v3 --workers 6
+uv run python bench/run_real.py datasets/ft8-training-data/recordings --compare-only --tag nn_v3
 ```
 `run_real.py` decodes each (station, slot parity) chain in time order so context AP sees the decoder's own earlier
 slots; `--no-context` turns that off (per-slot decodes, the `nn_v2_p4` behaviour). `run_ours.py` has no context.
@@ -180,7 +186,8 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
      `ft8nn_cli` uses `ft8nn_decode_at` when the file name is a `yymmdd_HHMMSS` slot time. One context per thread; the context's hash table learns callsigns.
      `ft8nn_decode` normalises audio to unit std internally (as `bench/run_real.py` does).
    - LDPC tables: `c/src/ldpc_tables.h`, generated by `tools/gen_c_tables.py`.
-   - Golden test `tools/golden_c.py` (uses `models/v2/ft8nn.onnx`; compares against tag `nn_v2_pl` by default; last
+   - Golden test `tools/golden_c.py` (uses `models/v3/ft8nn.onnx`; compares against tag `nn_v3` by default; `nn_v3`
+     2026-11-09: 764/764 + 607/607 real, run 2 02_80m 733/733, AWGN 429/429; before that
      verified with `nn_v2_pl`: 756/756 + 599/599 real (08_80m all 120 slots too), run 2 02_80m 733/733, 430/430 AWGN; the real-data golden
      decodes the slots in order through `ft8nn_decode_at`, so context AP is covered):
      real 00_40m + 08_80m, first 20 slots each: 1231/1231 decodes identical in every output field;
@@ -454,7 +461,7 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       `1F8PNC K2AKA DB13` from context AP, `J11WYG/R OA4ENG -22` ×2): per model 1→0, 5→4 (tf retrain), 2→1, 4→1,
       6→2, 3→0. C == Python: 301k random payloads, golden 756/756, 599/599 (and 120-slot 08_80m), run 2 733/733,
       AWGN 429/429.
-   5. **Real noise + synthetic signals — gain confirmed; candidate `runs/rn_real_seed1` validated, not shipped yet.** `tools/make_noise_bank.py`
+   5. **Real noise + synthetic signals — DONE, shipped as `models/v3` (tag `nn_v3`, = `runs/rn_real_seed1`).** `tools/make_noise_bank.py`
       subtracts every `nn_v2_pl` decode from each training-recording slot (never run 1 or 2) and cuts 24 segments at
       random 200..2900 Hz with the decoder's own `Baseband.downsample`: 28,728 × 3,200 complex samples
       (`data/noise/train_bank.npy`, 701 MB). Real receiver noise, AGC, carriers, interference and undecoded weak
@@ -482,7 +489,9 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       (`CQ KR9ZUC/R AO63`); training recordings 17,583 → 17,706, jt9-only 309 → 305 (biased, see above); AWGN 50%
       −22.52 → −22.49, 90% −21.24 → −21.24; golden C == Python with its ONNX 764/764, 607/607, run 2 733/733, AWGN
       429/429. Fails the "AWGN 50% not worse" rule by 0.03 dB (~6 of ~190 signals at −22 dB), against +0.8–0.9%
-      slot-confirmed on runs 1 and 2. **Next:** decide whether to ship it as `models/v3` (user's call).
+      slot-confirmed on runs 1 and 2. Run 3 (12 more unseen Kiwis, another day): `nn_v2_pl` 26,535 / 19,982 / unconf 1
+      → candidate 26,688 / 20,105 / 0; runs 2 + 3 pooled unconf 1 → 1. noise10k (10,000 noise-only slots): 0 false
+      for both (bound < ~3 per 10,000). Shipped 2026-11-09 (user's call: accept the 0.03 dB AWGN loss for the real-data gain).
    6. **After that: low-latency decoding for operating** (agreed 2026-11-08). Throughput is fine (busiest receiver 6.9 s
       per 15 s slot on one M4 core, 2.8 s average), but replying in the next slot needs decodes ~1.5–2 s after the
       transmission ends (13.1 s into the slot). Busy 01_40m slots, per pass: 2.4 s / 28 of 45 decodes, 2.2 s / 13,
@@ -492,7 +501,7 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       **6a. Early pass: classical vs truncation-trained transformer.** At ~11.8 s the last ~9 of the 79 symbols are
       missing (for DT ≈ 0.5 s: the third Costas sync block, symbols 72–78, plus data symbols 70–71, i.e. ~6 of the 174
       code bits; more for a later DT). Compare (a) the classical nsym 1/2/3 LLRs with the missing bits at LLR 0,
-      against (b) a transformer fine-tuned from `models/v2` with random tail truncation (in some training rows the
+      against (b) a transformer fine-tuned from `models/v3` with random tail truncation (in some training rows the
       end of the signal is zeroed or replaced by noise, so the network learns LLR ≈ 0 for missing symbols), with a
       control fine-tune without truncation as in 7.5. Measure on truncated audio: run-2 decodes at 11.8 s,
       slot-confirmed and unconfirmed, noise-only false decodes, AWGN 50% threshold at 11.8 s. Also check that (b)

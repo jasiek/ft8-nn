@@ -6,10 +6,10 @@
 #   tools/validate_full.sh nn_v2_xx [decoder flags for the bench scripts]
 #
 # Pass if: run 1 decodes/slot-confirmed rise and unconf does not; training decodes rise; AWGN 50% not worse
-# (−22.37 dB as of nn_v2_f31); every golden line says identical. Then set tools/golden_c.py's default --tag,
+# (−22.49 dB as of nn_v3); every golden line says identical. Then set tools/golden_c.py's default --tag,
 # update STATUS.md, commit.
 # Env: V, T (validation set dir, training recordings dir), WORKERS (default 6), ONNX (C-side model of the golden
-# tests, default models/v2/ft8nn.onnx; set it when passing another --model). Logs: data/logs/<tag>/.
+# tests, default models/v3/ft8nn.onnx; set it when passing another --model). Logs: data/logs/<tag>/.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 TAG=$1; shift
@@ -18,7 +18,7 @@ T=${T:-$PWD/datasets/ft8-training-data/recordings}
 W=${WORKERS:-6}
 G=${ONNX:+--onnx $ONNX}
 L=data/logs/$TAG; mkdir -p "$L"
-M="--model models/v2/model.pt --also-classical --tag $TAG --workers $W"
+M="--model models/v3/model.pt --also-classical --tag $TAG --workers $W"
 step() { echo "[$(date +%H:%M)] $*"; }
 
 step "validation run 1";  uv run python bench/run_real.py "$V/recordings" $M "$@" --out data/val/run1 > "$L/run1.log" 2>&1

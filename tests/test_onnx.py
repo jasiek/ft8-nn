@@ -2,10 +2,10 @@ from pathlib import Path
 
 import pytest
 
-CKPT = Path(__file__).resolve().parents[1] / "models/v2/model.pt"
+CKPT = Path(__file__).resolve().parents[1] / "models/v3/model.pt"
 
 
-@pytest.mark.skipif(not CKPT.exists(), reason="models/v2/model.pt not present")
+@pytest.mark.skipif(not CKPT.exists(), reason="models/v3/model.pt not present")
 def test_onnx_export_matches_torch(tmp_path):
     pytest.importorskip("onnxruntime")
     import sys

@@ -51,17 +51,17 @@ Mac mini (2024), M4 (4P+6E) or M4 Pro (8–10P+4E). Folder layout is the same on
    (`~/.claude/projects/<path>/memory/`). Then it runs `uv sync` and `make -C c` on the mini.
 6. Smoke test (C library + ONNX model):
    ```sh
-   tools/mini.sh run './c/build/ft8nn_cli models/v2/ft8nn.onnx $(ls datasets/ft8-validation-set/recordings/02_40m_kiwisdr-k1ra-us-8073/slots/*.wav | sed -n 6p) | head -5'
+   tools/mini.sh run './c/build/ft8nn_cli models/v3/ft8nn.onnx $(ls datasets/ft8-validation-set/recordings/02_40m_kiwisdr-k1ra-us-8073/slots/*.wav | sed -n 6p) | head -5'
    ```
 7. Check that both machines decode identically before trusting any A/B from the mini: decode one receiver there
    with the current default tag and diff against this machine's file:
    ```sh
-   tools/mini.sh run 'uv run python bench/run_real.py datasets/ft8-validation-set/run2/recordings --stations 07 --model models/v2/model.pt --also-classical --tag mini_check --workers 6 --out data/val/run2'
+   tools/mini.sh run 'uv run python bench/run_real.py datasets/ft8-validation-set/run2/recordings --stations 07 --model models/v3/model.pt --also-classical --tag mini_check --workers 6 --out data/val/run2'
    tools/mini.sh pull
    diff <(cut -f1-5 data/val/run2/07_12m_203-129-16-92-8073/decodes_mini_check.txt) \
-        <(cut -f1-5 data/val/run2/07_12m_203-129-16-92-8073/decodes_nn_v2_eg.txt) && echo IDENTICAL
+        <(cut -f1-5 data/val/run2/07_12m_203-129-16-92-8073/decodes_nn_v3.txt) && echo IDENTICAL
    ```
-   (Use the current default tag from STATUS.md in place of `nn_v2_eg`.)
+   (Use the current default tag from STATUS.md in place of `nn_v3`.)
 
 ## Working on the mini directly
 

@@ -1,12 +1,12 @@
 """CI check without the recordings: the C library must decode exactly what the Python decoder does.
 
-Default: the trained model (models/v2), exported to ONNX here, on synthetic slots: random payloads at -24..-8 dB (near the decode limit) in
+Default: the trained model (models/v3), exported to ONNX here, on synthetic slots: random payloads at -24..-8 dB (near the decode limit) in
 AWGN, numbered file names (no context a-priori), so BP, OSD, a-priori and subtraction all take part. --model random:
 a randomly initialised SoftDemod (fixed seed) instead; its LLRs are meaningless, but the classical fallback metrics
 still decode the strong signals. Either way the whole C pipeline (candidates, sync, ONNX Runtime, BP/OSD,
 subtraction, unpacking) is compared with Python field by field, as on real data (tools/golden_c.py).
 
-  uv run python tools/ci_smoke.py [--dir data/ci] [--slots 8] [--model models/v2/model.pt|random]
+  uv run python tools/ci_smoke.py [--dir data/ci] [--slots 8] [--model models/v3/model.pt|random]
 
 Needs c/build/ft8nn_cli (make -C c). Exit status 0 = C and Python agree and decoded something.
 """
@@ -39,7 +39,7 @@ def main():
     ap.add_argument("--dir", default="data/ci")
     ap.add_argument("--slots", type=int, default=8)
     ap.add_argument("--per-slot", type=int, default=8)
-    ap.add_argument("--model", default="models/v2/model.pt", help="checkpoint, or 'random'")
+    ap.add_argument("--model", default="models/v3/model.pt", help="checkpoint, or 'random'")
     a = ap.parse_args()
     d = (ROOT / a.dir).resolve()
     slots = d / "rec" / "synthetic" / "slots"
