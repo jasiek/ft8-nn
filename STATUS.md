@@ -1,6 +1,8 @@
 # Status and plan (resume here)
 
-Last updated 2026-11-09 (**`wsjtx/ft8nn_sidecar`**: the decoder as WSJT-X's external FT8 decoder,
+Last updated 2026-11-09 (**validation run 4 scored with `nn_v3`**: 45,744 decodes vs jt9's 38,432, +19.0%, 2
+unconfirmed; the results vs stock jt9 are now summarised in `README.md`. Before that **`wsjtx/ft8nn_sidecar`**:
+the decoder as WSJT-X's external FT8 decoder,
 `WSJTX_FT8_DECODER`, plan 9; before that **`models/v3` shipped**: v2 fine-tuned with real receiver noise, tag `nn_v3`, plan 7.5,
 validation run 3 and a 10,000-slot noise-only set, data repos as submodules in `datasets/`).
 
@@ -23,12 +25,19 @@ decodes verified identical to the main machine.
   run-1 or run-2 site, Mon 05:32–06:02 UTC (run 2 was Wed 22:30): Oceania/Asia/Qatar daytime 20/15/10 m, Europe dawn
   40 m and 60 m (new band), western USA 80 m. jt9 23,524 decodes / 17,888 slot-confirmed / 17 unconf, the size of run 2
   (24,291 / 17,993 / 16). `nn_v2_pl`: 26,535 / 19,982 / 1 (`CQ K39HUN FG27`), `nn_v3` 26,688 / 20,105 / 0; noise10k 0 false for both. Treat it like run 2: never train or tune on it. Judge
-  false-decode changes on runs 2 + 3 pooled. Noise-only: `data/bench/noise10k` (10,000 slots, seed 19, README); the
+  false-decode changes on runs 2–4 pooled (jt9 62 unconf of 84,618 checkable decodes, `nn_v3` 3). Noise-only: `data/bench/noise10k` (10,000 slots, seed 19, README); the
   `data/bench/noise` set is 100 slots (its "998" counts the invisible −80 dB signals, 10 per slot), so 0 false there
-  only bounds the rate below ~3 per 100 slots; 0 on noise10k bounds it below ~3 per 10,000. Run 4 (`$V/run4`):
+  only bounds the rate below ~3 per 100 slots; 0 on noise10k bounds it below ~3 per 10,000. Run 4 (`$V/run4`, data
+  repo `0635402`, unpacked here 2026-11-09):
   15 more fresh Kiwis (no training, run-2 or run-3 site), Mon 15:00–15:30 UTC: European afternoon / US morning on
   20/17/15/12/10 m, Alberta 40 m, Okayama 80 m. jt9 38,432 / 28,053 / 29 unconf (all garbage calls), the biggest run;
-  runs 2–4 together are about 3.5× run 2's checkable decodes. Not yet scored with our decoder.
+  runs 2–4 together are about 3.5× run 2's checkable decodes. **Scored with `nn_v3` 2026-11-09:** 45,744 decodes /
+  33,070 slot-confirmed / 2 unconf (`CQ U87GYB/R LC30` at 07_20m, `TNX 73 GL` at 09_15m), i.e. +19.0% decodes and
+  +17.9% slot-confirmed over jt9, the largest gain of the four runs (its afternoon high bands are also the busiest
+  audio we have, up to 45 decodes per slot); jt9-only 948, 59 of them at ≥ 0 dB; ours-only 8,259, 99% naming a
+  callsign jt9 heard at that receiver. Decoding it took 1 h 40 min for 1,790 slots with `--workers 6` on an
+  8-core M1 (not the mini; 35 min of that went on the three busiest stations alone, at ~45 decodes per slot), so
+  estimate a run from its decodes per slot, not its slot count.
 - **WSJT-X integration added 2026-11-09 (plan 9).** `wsjtx/ft8nn_sidecar` is `libft8nn` as
   WSJT-X's *external FT8 decoder*: with `WSJTX_FT8_DECODER="<path>/ft8nn_sidecar --model <path>/ft8nn.onnx"` set,
   WSJT-X starts it once and per decode pass sends one compact JSON line (`utc`, `pass` = `nzhsym`, `final`, `disk`,
@@ -140,6 +149,10 @@ Scores (vs jt9 baseline, checkable = sender call is spotted-checkable):
 | 3 (unseen sites, other day) | jt9 | 23,524 | 17,888 | 17 | – | – |
 | 3 | nn_v2_pl | 26,535 (+12.8%) | 19,982 (+11.7%) | 1 | | |
 | 3 | **nn_v3** | **26,688 (+13.5%)** | **20,105 (+12.4%)** | **0** | | |
+| 4 (unseen sites, high bands, afternoon) | jt9 | 38,432 | 28,053 | 29 | – | – |
+| 4 | **nn_v3** | **45,744 (+19.0%)** | **33,070 (+17.9%)** | **2** | 948 | 8,259 |
+| **2 + 3 + 4 pooled (unseen)** | jt9 | 86,247 | 63,934 | 62 | – | – |
+| **2 + 3 + 4 pooled (unseen)** | **nn_v3** | **100,630 (+16.7%)** | **73,876 (+15.6%)** | **3** | | |
 
 The gain is larger on unseen receivers than on training sites, and it holds up against outside spots:
 false decodes are below jt9's. **Caveat for `nn_v2_cy`:** a context decode's sender is by construction a station

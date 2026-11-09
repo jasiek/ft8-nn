@@ -26,7 +26,7 @@ and past decisions are there too. `README.md` covers setup; `docs/data-collectio
   false), then `tools/validate_full.sh TAG` (run 1, training recordings, AWGN, all golden tests).
 - `models/v3` is the shipped model (`models/v2` is kept as its starting point). New trainings write to `runs/`
   (gitignored). Retraining moves run-2 unconfirmed decodes by several (1 vs 5 for the same recipe), so a new network
-  needs the AP/OSD gates re-checked; judge false decodes on runs 2 + 3 pooled and `data/bench/noise10k`.
+  needs the AP/OSD gates re-checked; judge false decodes on runs 2–4 pooled and `data/bench/noise10k`.
 - The data repos (Git LFS) share 10 GiB/month of download bandwidth: avoid needless full clones.
 
 ## Machine notes (Mac mini M4)
