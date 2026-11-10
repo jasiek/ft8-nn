@@ -1,6 +1,9 @@
 # Status and plan (resume here)
 
-Last updated 2026-11-11 (**decoding runs on every performance core and streams within a pass**, plan 6 step (3):
+Last updated 2026-11-11 (**compared against JTDX and FT8TW on the unseen validation runs** (plan 11,
+`docs/decoder-comparison.md`): pooled over runs 2+3+4, `nn_v3` is +7.8% decodes / +6.8% slot-confirmed over JTDX
+2.2.x at its defaults, which is itself +8.3% over stock jt9; FT8TW publishes no decoder source, so ft8_lib stands
+in for it and finds half as much as we do. Before that **decoding runs on every performance core and streams within a pass**, plan 6 step (3):
 same decodes in every field, 0.3% more instructions; 40 busy run-1 `01_40m` slots through the sidecar on the M4 mini
 with other jobs running, median time to first decodes 5.20 -> 0.33 s, whole slot 13.0 -> 4.6 s, every decode within
 WSJT-X's 15 s. Before that **Windows CI added**: x64 MinGW-w64 build, C == Python 57/57 on
@@ -51,6 +54,21 @@ decodes verified identical to the main machine.
   callsign jt9 heard at that receiver. Decoding it took 1 h 40 min for 1,790 slots with `--workers 6` on an
   8-core M1 (not the mini; 35 min of that went on the three busiest stations alone, at ~45 decodes per slot), so
   estimate a run from its decodes per slot, not its slot count.
+- **Compared against JTDX and FT8TW 2026-11-10 (plan 11).** Report: `docs/decoder-comparison.md`. Runs 2+3+4
+  pooled (4,302 slots, 36 unseen receivers), the same slots and the same scorer as the `nn_v3` and jt9 numbers
+  above, so the rows are directly comparable: ft8_lib 49,835 decodes / 37,113 slot-confirmed / 4 unconf; jt9
+  86,247 / 63,934 / 62; **JTDX at its own defaults 93,392 / 69,159 / 11; `nn_v3` 100,630 / 73,876 / 3**, i.e. ours
+  is +7.8% decodes and +6.8% slot-confirmed over JTDX while JTDX is +8.3% over jt9 — about half of our margin over
+  WSJT-X is margin JTDX also finds. Per run, ours vs JTDX: run 2 +7.2%/+6.5%, run 3 +5.6%/+5.1%, run 4
+  +9.4%/+8.1%. **JTDX at its ceiling** (`-w -c 3 -s 2`: SWL mode, 9 subtraction passes, `lft8subpass`), measured on
+  run 2 only, reaches 27,417 / 20,202 but **16 unconf against its default's 1**, for 6× the CPU (29.4 vs 4.9
+  s/slot/core); ours stays 28,198 / 20,701 / 1, so the ceiling closes about half our run-2 margin and buys it
+  sixteen times the false decodes. Runs 3 and 4 at those settings are in flight (started 15:50, ~5 h).
+  Two findings worth keeping: (a) over half of JTDX's output (`^`, 53.8%) comes from its `ft8sd1`/`ft8mf1`/
+  `ft8mfcq` tone-matching stages, which bypass the LDPC CRC entirely, and PSK Reporter contradicted **none** of
+  50,350 checkable ones — every false decode JTDX makes comes from its ordinary BP/OSD path; (b) JTDX misses 3,449
+  of jt9's callsign-slots, **228 of them at ≥ 0 dB**, the same class of strong miss as plan 7.1 — strong signals
+  two independent decoders disagree on are worth a look.
 - **Fading sets re-measured 2026-11-10.** `models/v3` on regenerated moderate and disturbed sets (seeds 2, 3):
   50% −20.12 and −20.16, 90% −17.48 and −18.09, 0 false decodes; the AWGN control reproduced −22.49 / −21.24
   exactly, so the regenerated sets equal the originals and the recorded jt9 baselines (−19.40, −19.19) still apply.
@@ -756,6 +774,27 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
    request timeout - the low-latency work in 7.6 matters for live use, and a pass that overruns is logged.
    Next, if wanted: a side-by-side live run in WSJT-X against `jt9` (not tried yet - no WSJT-X build here), and
    `ft8nn_set_mycall` so WSJT-X's own callsign and AP settings can be used (plan 8).
+11. **Comparison against JTDX and FT8TW — DONE 2026-11-10.** Report and reproduce commands:
+    `docs/decoder-comparison.md`; numbers in "In flight" above. Three things to know before touching this again:
+    - **JTDX's decoder cannot read a WAV file.** JTDX deleted WSJT-X's file-reading branch from `lib/jt9.f90`
+      (its header now says "Can run as the back end of JTDX only, with data placed in a shared memory region") and
+      dropped the `-8` option. The decoder subroutines are untouched, so `tools/jtdx_ft8_file.f90` re-adds file
+      mode: it mirrors `lib/jt9a.f90`'s `ndiskdat` branch and fills `params_block` the way `MainWindow::decode()`
+      does, then calls JTDX's own `multimode_decoder`. `tools/jtdx_build.py` clones the SourceForge tree
+      (`2a0e2be`, 2022-03-01, the last public commit) into `third_party/jtdx` and builds decoder + driver with no
+      Qt, hamlib or libusb; it parses the source lists out of JTDX's own CMakeLists so they track the revision,
+      and patches two upstream files that modern toolchains reject (`lib/{char,int}.h` Reed-Solomon prototypes,
+      `lib/jplsubs.f`'s own `SPLIT` vs the F2023 intrinsic — neither on the FT8 path). `tools/jtdx_run.py` runs
+      one process per station with all its slots in chronological order, because JTDX keeps cross-slot state (an
+      even/odd message memory and a callsign hash table) and loses decodes without it.
+    - **Keep JTDX's `HideFT8Dupes` on** (its own default). With duplicate suppression off it emits weak spurious
+      copies of messages it just decoded at unrelated frequencies (+8% decode lines on a spot check), and
+      `verify.py` scores those as slot-confirmed because they name a station that really is there.
+    - **FT8TW cannot be run and cannot be measured.** Neither FT8TW nor its upstream FT8CN publishes decoder
+      source: FT8TW's tree is Java with every JNI entry point commented out, and FT8CN ships the decoder only as a
+      prebuilt Android arm64 `libft8cn.so`. ft8_lib (`kgoba/ft8_lib`, `9fec6ca`, `tools/ft8lib_{build.sh,run.py}`)
+      stands in on FT8CN's own README grounds (it credits Karlis Goba and says it uses lightweight rather than
+      deep decoding); read that row as a floor for the family, not a measurement of the app.
 10. Optional later work:
    - More AP types: the a2 MyCall type needs the operator's own callsign, and that is only useful inside an app
      (an `ft8nn_set_mycall` would slot into the same pinned-bit machinery as context AP).
