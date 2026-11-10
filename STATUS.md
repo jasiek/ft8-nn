@@ -1,6 +1,8 @@
 # Status and plan (resume here)
 
-Last updated 2026-11-09 (**validation run 4 scored with `nn_v3`**: 45,744 decodes vs jt9's 38,432, +19.0%, 2
+Last updated 2026-11-10 (**the two fading sets re-measured with `models/v3`**: moderate −20.12, disturbed −20.16,
+so 0.72 and 0.97 dB over jt9, and the README table is now all current measurements. Before that **validation run 4
+scored with `nn_v3`**: 45,744 decodes vs jt9's 38,432, +19.0%, 2
 unconfirmed; the results vs stock jt9 are now summarised in `README.md`. Before that **`wsjtx/ft8nn_sidecar`**:
 the decoder as WSJT-X's external FT8 decoder,
 `WSJTX_FT8_DECODER`, plan 9; before that **`models/v3` shipped**: v2 fine-tuned with real receiver noise, tag `nn_v3`, plan 7.5,
@@ -38,6 +40,12 @@ decodes verified identical to the main machine.
   callsign jt9 heard at that receiver. Decoding it took 1 h 40 min for 1,790 slots with `--workers 6` on an
   8-core M1 (not the mini; 35 min of that went on the three busiest stations alone, at ~45 decodes per slot), so
   estimate a run from its decodes per slot, not its slot count.
+- **Fading sets re-measured 2026-11-10.** `models/v3` on regenerated moderate and disturbed sets (seeds 2, 3):
+  50% −20.12 and −20.16, 90% −17.48 and −18.09, 0 false decodes; the AWGN control reproduced −22.49 / −21.24
+  exactly, so the regenerated sets equal the originals and the recorded jt9 baselines (−19.40, −19.19) still apply.
+  Generating all three sets took 78 s and decoding them 11 min with `--workers 6` on the 8-core M1 (synthetic slots
+  carry 10 signals, so they cost about a third of a busy real slot). `data/bench/{awgn,moderate,disturbed}` now
+  exist on this machine again; `data/bench/noise10k` does not.
 - **WSJT-X integration added 2026-11-09 (plan 9).** `wsjtx/ft8nn_sidecar` is `libft8nn` as
   WSJT-X's *external FT8 decoder*: with `WSJTX_FT8_DECODER="<path>/ft8nn_sidecar --model <path>/ft8nn.onnx"` set,
   WSJT-X starts it once and per decode pass sends one compact JSON line (`utc`, `pass` = `nzhsym`, `final`, `disk`,
@@ -83,12 +91,18 @@ context a-priori decoding from our own decodes 30/60 s earlier (`bp_cx`/`osd_cx`
 
 50% decode threshold, DT ≤ 0.5 s, 10 signals per slot:
 
-| set | jt9 | v1 | **v2** |
-|---|---|---|---|
-| AWGN | −21.31 | −22.20 | **−22.37** |
-| moderate fading (0.5 Hz / 1 ms) | −19.40 | −20.12 | **−20.12** |
-| disturbed fading (1 Hz / 2 ms) | −19.19 | −19.85 | **−20.09** |
-| noise only, 100 slots | – | 0 false | **0 false** |
+| set | jt9 | v1 | v2 | **v3 (shipped)** |
+|---|---|---|---|---|
+| AWGN | −21.31 | −22.20 | −22.37 | **−22.49** |
+| moderate fading (0.5 Hz / 1 ms) | −19.40 | −20.12 | −20.12 | **−20.12** |
+| disturbed fading (1 Hz / 2 ms) | −19.19 | −19.85 | −20.09 | **−20.16** |
+| noise only, 100 slots | – | 0 false | 0 false | **0 false** |
+
+The v3 column is `models/v3` with today's decoder defaults, re-measured 2026-11-10 on the regenerated sets
+(seeds 1/2/3; 90% thresholds −21.24 / −17.48 / −18.09, 0 false decodes in all three). The AWGN 50% and 90% numbers
+matched the mini's run to the 0.01 dB printed, which confirms the regenerated sets match the ones behind the
+older columns. jt9 was not re-run: no WSJT-X on the machine used (8-core M1), so its column is the recorded baseline for
+the same sets. Gains vs jt9: AWGN 1.18 dB, moderate 0.72 dB, disturbed 0.97 dB.
 
 Real KiwiSDR recordings (10 stations, 1197 slots, `datasets/ft8-training-data/recordings`, read-only submodule):
 **Current default `nn_v3` decodes 17706, jt9 decodes 15729 (+12.6%)** (biased upward: `models/v3` was trained with

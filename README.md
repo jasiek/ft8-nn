@@ -23,14 +23,16 @@ difference**:
 | set | `jt9 -d 3` | ft8nn | gain |
 |---|---|---|---|
 | AWGN | −21.31 dB | **−22.49 dB** | **1.18 dB** |
-| moderate fading (0.5 Hz spread / 1 ms delay) | −19.40 dB | −20.12 dB | 0.72 dB |
-| disturbed fading (1 Hz / 2 ms) | −19.19 dB | −20.09 dB | 0.90 dB |
+| moderate fading (0.5 Hz spread / 1 ms delay) | −19.40 dB | **−20.12 dB** | **0.72 dB** |
+| disturbed fading (1 Hz / 2 ms) | −19.19 dB | **−20.16 dB** | **0.97 dB** |
 | 10,000 noise-only slots | – | 0 false decodes | – |
 
-The AWGN row is the shipped default (its 90% threshold is −21.24 dB). The two fading rows were last measured with
-`models/v2` and an earlier decoder that was about 0.1 dB worse than today's on AWGN, so treat them as a floor rather
-than a current measurement. 1.2 dB is roughly the difference between hearing a station and not: on FT8's
-exponential-ish SNR distribution it is what produces the double-digit decode gains below.
+All three ft8nn rows are the shipped default, measured 2026-11-10 (90% thresholds: −21.24, −17.48 and −18.09 dB;
+no false decodes on any of the three sets). The `jt9` column is the recorded baseline for the same sets, not re-run
+for this table — the sets regenerate byte-identically from their seeds (1, 2, 3 in [Reproduce](#reproduce)), and the
+AWGN 50% and 90% thresholds came out identical to the earlier run on different hardware, which is the check that
+they do. 1.2 dB is roughly the difference between hearing a station and not: on FT8's exponential-ish SNR
+distribution it is what produces the double-digit decode gains below.
 
 ### Extra decodes on real air: +17% over `jt9`, on receivers we never trained on
 
