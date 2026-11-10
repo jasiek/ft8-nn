@@ -50,9 +50,14 @@ decodes verified identical to the main machine.
   is +7.8% decodes and +6.8% slot-confirmed over JTDX while JTDX is +8.3% over jt9 — about half of our margin over
   WSJT-X is margin JTDX also finds. Per run, ours vs JTDX: run 2 +7.2%/+6.5%, run 3 +5.6%/+5.1%, run 4
   +9.4%/+8.1%. **JTDX at its ceiling** (`-w -c 3 -s 2`: SWL mode, 9 subtraction passes, `lft8subpass`), measured on
-  run 2 only, reaches 27,417 / 20,202 but **16 unconf against its default's 1**, for 6× the CPU (29.4 vs 4.9
-  s/slot/core); ours stays 28,198 / 20,701 / 1, so the ceiling closes about half our run-2 margin and buys it
-  sixteen times the false decodes. Runs 3 and 4 at those settings are in flight (started 15:50, ~5 h).
+  runs 2 and 3 in full plus 13 of run 4's 15 receivers, buys **+4 to +5% decodes** over its own defaults for
+  6× the CPU (29.4 vs 4.9 s/slot/core, 132.5 and 122.6 min per run), and pays for it in false decodes: unconf
+  1→16 (run 2), 3→9 (run 3), 7→19 (run 4's 13). Pooled over the two complete runs, deep JTDX is
+  53,738 / 40,057 / **25** against its defaults' 51,572 / 38,560 / 4, stock jt9's 33 unconf on the same slots, and
+  `nn_v3`'s 54,886 / 40,806 / **1** — so ours is still +2.1% decodes / +1.9% slot-confirmed ahead of JTDX's
+  ceiling with a twenty-fifth of its false decodes. **Not finished:** run 4's last two receivers
+  (`13_15m_95-88-77-200`, `14_12m_82-64-206-44`) were never run, so there is no all-runs deep total; the user took
+  the sweep to another machine.
   Two findings worth keeping: (a) over half of JTDX's output (`^`, 53.8%) comes from its `ft8sd1`/`ft8mf1`/
   `ft8mfcq` tone-matching stages, which bypass the LDPC CRC entirely, and PSK Reporter contradicted **none** of
   50,350 checkable ones — every false decode JTDX makes comes from its ordinary BP/OSD path; (b) JTDX misses 3,449
