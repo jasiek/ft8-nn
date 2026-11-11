@@ -75,8 +75,14 @@ static int prof = -1;
 /* later passes skip a candidate (same bin, lag, track) tried in an earlier pass when no decode subtracted since lies
  * within REUSE_DF Hz (decoder.decode_slot reuse_df); 0 = off */
 #define REUSE_DF 62.5
-#define TRIED_LAG0 80 /* lag offset in the tried table: lags -80..79 frames (early track starts at -2.5 s = -63) */
-#define TRIED_NL 160
+/* decoder.decode_slot dt_recenter: when the median DT of the decodes in hand (this slot's plus the context's from
+ * 30/60 s earlier) is at least DT_RECENTER s from 0, the receiver's own clock or audio stream is off by that much
+ * and every signal sits at the same wrong DT; later passes then search a window shifted by that median */
+#define DT_RECENTER 0.8
+#define DT_RECENTER_MIN 6   /* decodes needed before their median is trusted (decoder.DT_RECENTER_MIN) */
+#define DT_RECENTER_MAX 2.5 /* largest shift applied, so the window cannot walk away (decoder.DT_RECENTER_MAX) */
+#define TRIED_LAG0 160 /* lag offset in the tried table: lags -160..159 frames (early track -63, shift up to -62) */
+#define TRIED_NL 320
 #define TRIED_NB ((int)(FMAX / 3.125) + 1)
 #define NOISE_BIN (3200.0 / 1000.0)
 #define SNR_OFFSET 0.23
@@ -437,12 +443,12 @@ static int reuse_skip(const candidate *cd, const signed char *tried, const dec *
 }
 
 static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall, int cap, int pass, const dec *cx, int ncx,
-                       signed char *tried) {
+                       signed char *tried, double dt_shift) {
     if (prof < 0) prof = getenv("FT8NN_PROFILE") != NULL;
     double t0 = tnow(), t1, t2, t3, t4, t5;
     long n_bp = 0, n_osd = 0;
     candidate *cands = malloc(sizeof(candidate) * (MAX_CAND + (int)(FMAX / 3.125) + 1));
-    int nc = find_candidates(x, n, 150.0, FMAX, MAX_CAND, 1.3, BASE_MEDIAN, EARLY_DT, EARLY_MIN, cands);
+    int nc = find_candidates(x, n, 150.0, FMAX, MAX_CAND, 1.3, BASE_MEDIAN, EARLY_DT, EARLY_MIN, dt_shift, cands);
     t1 = tnow();
     baseband bb;
     baseband_init(&bb, x, n);
@@ -572,6 +578,28 @@ done:
     return added;
 }
 
+/* decoder._dt_shift: receiver DT offset from decoded (CRC-checked) DTs - their median, snapped to the lag grid.
+ * Senders' clocks scatter by a few tenths of a second, so a median this far from 0 over this many decodes is the
+ * receiver's own offset (a KiwiSDR stream that slips, or a sound card / clock that is off in an app). */
+static int cmp_dbl(const void *a, const void *b) {
+    double x = *(const double *)a, y = *(const double *)b;
+    return x < y ? -1 : x > y ? 1 : 0;
+}
+
+static double dt_recenter_shift(const dec *all, int nall, const dec *cx, int ncx) {
+    int n = nall + ncx;
+    if (n < DT_RECENTER_MIN) return 0.0;
+    double *d = malloc(sizeof(double) * (size_t)n);
+    for (int i = 0; i < nall; i++) d[i] = all[i].dt;
+    for (int i = 0; i < ncx; i++) d[nall + i] = cx[i].dt;
+    qsort(d, (size_t)n, sizeof(double), cmp_dbl);
+    double med = n % 2 ? d[n / 2] : (d[n / 2 - 1] + d[n / 2]) / 2;
+    free(d);
+    if (med > DT_RECENTER_MAX) med = DT_RECENTER_MAX;
+    if (med < -DT_RECENTER_MAX) med = -DT_RECENTER_MAX;
+    return fabs(med) < DT_RECENTER ? 0.0 : nearbyint(med * 25.0) / 25.0; /* snap to the lag grid (25 frames/s) */
+}
+
 static once_t ap_once = ONCE_INIT, erase_once = ONCE_INIT;
 
 static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_decode_t *out, int max_out) {
@@ -600,7 +628,8 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
                 }
     }
     for (int p = 0; p < PASSES; p++) {
-        int k = decode_pass(c, x, n, all, nall, DEC_CAP, p, cx, ncx, tried);
+        double shift = DT_RECENTER > 0 ? dt_recenter_shift(all, nall, cx, ncx) : 0.0;
+        int k = decode_pass(c, x, n, all, nall, DEC_CAP, p, cx, ncx, tried, shift);
         if (k < 0) {
             free(x);
             free(all);

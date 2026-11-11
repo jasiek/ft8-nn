@@ -52,9 +52,13 @@ static int cmp_cand(const void *a, const void *b) { /* descending by (score, f, 
 }
 
 int find_candidates(const double *x, int n, double fmin, double fmax, int max_cand, double min_score, int base_median,
-                    double early_dt, double early_min, candidate *out) {
+                    double early_dt, double early_min, double dt_shift, candidate *out) {
     const double dtmin = -1.5, dtmax = 2.5, typ_lo = -0.6, typ_hi = 1.2;
     const int lag_excl = 10;
+    /* dt_shift (frontend.find_candidates dt_shift) moves the whole window - main range, typical-DT track and
+     * early band - by whole frames: a receiver whose clock or audio stream is off puts every signal at the
+     * same wrong DT, and the window is only 4 s wide (decode() estimates the shift from its own decodes) */
+    const int sh = (int)rnd(dt_shift * FPS);
     int T = (n - NSPS) / HOP + 1;
     if (T <= 0) return 0;
     int b0 = (int)(fmin / 3.125), b1 = (int)(fmax / 3.125), nf = b1 - b0;
@@ -78,9 +82,9 @@ int find_candidates(const double *x, int n, double fmin, double fmax, int max_ca
     int lag0 = (int)rnd(NOMINAL_START * FPS);
     /* main lags from dtmin, plus n_early "early" lags [early_dt, dtmin) that only feed a separate track
      * (as frontend.find_candidates: kept out of the baseline and the main tracks) */
-    int lmin = (int)floor(dtmin * FPS), lmax = (int)ceil(dtmax * FPS), nl = lmax - lmin + 1;
-    int n_early = early_dt < dtmin ? lmin - (int)floor(early_dt * FPS) : 0;
+    int n_early = early_dt < dtmin ? (int)floor(dtmin * FPS) - (int)floor(early_dt * FPS) : 0;
     if (n_early < 0) n_early = 0;
+    int lmin = (int)floor(dtmin * FPS) + sh, lmax = (int)ceil(dtmax * FPS) + sh, nl = lmax - lmin + 1;
     lmin -= n_early;
     nl += n_early;
     double *num = calloc((size_t)nl * nf, sizeof(double)), *den = calloc((size_t)nl * nf, sizeof(double));
@@ -158,7 +162,7 @@ int find_candidates(const double *x, int n, double fmin, double fmax, int max_ca
                 j2 = li;
                 s2 = s;
             }
-            double dtl = (double)(lmin + li) / FPS;
+            double dtl = (double)(lmin + li - sh) / FPS;
             if (dtl >= typ_lo && dtl <= typ_hi && (j3 < 0 || s > s3)) {
                 j3 = li;
                 s3 = s;

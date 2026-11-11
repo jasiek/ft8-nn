@@ -64,7 +64,7 @@ typedef struct {
 } candidate;
 /* out must hold max_cand + (fmax - fmin) / 3.125 entries: up to max_cand main candidates, then the early-DT track */
 int find_candidates(const double *x, int n, double fmin, double fmax, int max_cand, double min_score, int base_median,
-                    double early_dt, double early_min, candidate *out);
+                    double early_dt, double early_min, double dt_shift, candidate *out);
 
 typedef struct {
     fft_plan *full, *bb;
