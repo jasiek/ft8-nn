@@ -50,6 +50,8 @@ CTX_DF = 10.0  # Hz
 # A sender's clock is stable: run 2, same sender within CTX_DF 30/60 s later, |dDT| p90 0.05 s, p99 0.49 s. Without this
 # limit a late copy (DT 2.36) of a strong neighbour decoded as `9R2NKT NI8T R IC50` and then fed itself as context.
 CTX_DDT = 0.5  # s
+# Repeat stage (_repeat_stage, plan 12): (rho_min, margin, LLR clip), chosen on validation run 1.
+REPEAT = (0.40, 0.15, 2.0)
 
 
 def context_patterns(context, f0, dt):
@@ -89,7 +91,7 @@ def classical_metrics(hyps):
     return out
 
 
-def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=4, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, context=(), ctx_gate=48.0, cand_kw=None, reuse_df=62.5, dt_recenter=0.8):
+def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=4, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, context=(), ctx_gate=48.0, cand_kw=None, reuse_df=62.5, dt_recenter=0.8, repeat=REPEAT):
     """Decode one 15 s slot (real audio @12 kHz, any scale), with multi-pass subtraction.
 
     llr_fn(hyps) -> per-hypothesis list of LLR vectors to try in order (first success wins).
@@ -117,6 +119,8 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
     earlier) is at least this many seconds from 0, the receiver's own clock or audio stream is off by that much
     and every signal sits at the same wrong DT; later passes then search a window shifted by that median
     (find_candidates(dt_shift=)). 0 disables.
+    repeat: (rho_min, margin, clip) for the repeat stage (_repeat_stage) after the last pass, which tests each context
+    message whose sender has no decode in the slot as a whole known message (needs context); None: off.
     """
     x = np.array(x, dtype=np.float64, copy=True)
     found = {}
@@ -139,8 +143,113 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
             subtract(x, ft8.encode77(d.bits77)[1], d.f0, d.dt)
         if not new:
             break
+    if repeat and context:
+        for d in _repeat_stage(x, llr_fn, found, context, n_hyp, *repeat):
+            found[d.key] = d
     _drop_ctx_dupes(found)
     return list(found.values())
+
+
+# Repeat stage (plan 12): a station that sent a standard message 30 or 60 s ago often sends exactly the same one
+# again (CQ, grid). With all 77 bits known the whole codeword is known, so instead of decoding, test it: rho =
+# sum(l*s)/sum(|l|) between the NN LLRs and the codeword s = +-1 (1 = perfect agreement, ~0 = noise). The test runs
+# last, on the residual after every decode of the slot is subtracted, at the earlier decode's (f0, dt) - no
+# candidate search needed. Competitors: the sender's other earlier messages and every message the same two calls
+# could send next (same R flag both ways x grid/RRR/RR73/73/reports -30..+30, and its own CQ with any grid it sent),
+# so a sender who moved on to the next over is not read as repeating the last one; a payload 1 bit away still
+# scores up to rho 0.54 on a perfect signal, which is why the margin is needed. Only the earlier messages themselves
+# are emitted. LLRs are clipped to +-clip first: interference on a few symbols can give |l| ~ 9 on a handful of bits
+# (run 2, 07_12m 22:29:30: bits 0-14 only, which every CQ shares), and unclipped they dominate rho.
+# Thresholds (rho 0.40, margin 0.15, clip 2) chosen on validation run 1: 0 of 223,643 shuffled-context tests (each
+# receiver given another band's context: every acceptance false) pass; at margin 0.10, 1.
+REPEAT_REPORTS = [message.MAXGRID4 + v for v in (2, 3, 4)] + [message.MAXGRID4 + 35 + n for n in range(-30, 31)]
+_CW_CACHE = {}
+
+
+def _codeword(bits77):
+    k = bits77.tobytes()
+    if k not in _CW_CACHE:
+        if len(_CW_CACHE) > 200000:
+            _CW_CACHE.clear()
+        _CW_CACHE[k] = 2.0 * ft8.encode77(bits77)[0] - 1.0
+    return _CW_CACHE[k]
+
+
+def _successors(b, grids=()):
+    """Payloads with b's two call fields and i3, every R flag and g15 a standard sender could use next, plus the
+    sender's own CQ with each grid in `grids` (a sender who went back to calling CQ: run 3, `R3RZ BD1AUJ ON80`
+    read again while jt9 and JTDX both decoded `CQ BD1AUJ ON80`)."""
+    out = []
+    for gv in grids:
+        c = b.copy()
+        c[0:28] = [(2 >> (27 - i)) & 1 for i in range(28)]
+        c[28], c[58] = 0, 0
+        c[59:74] = [(gv >> (14 - i)) & 1 for i in range(15)]
+        out.append(c)
+    g = message._int(b[59:74])
+    for gv in ([g] if g < message.MAXGRID4 else []) + REPEAT_REPORTS:
+        gb = np.array([(gv >> (14 - i)) & 1 for i in range(15)], dtype=np.uint8)
+        for r in (0, 1):
+            c = b.copy()
+            c[58], c[59:74] = r, gb
+            out.append(c)
+    return out
+
+
+def _repeat_stage(x, llr_fn, found, context, n_hyp, rho_min, margin, clip, log=None):
+    """Decodes for context messages whose sender has no decode in this slot (see the comment above). log: list to
+    append (best rho, runner-up rho, best is an earlier message, best payload) to for every tested sender."""
+    have_s = {_sender_key(d) for d in found.values()}
+    have_b = set(found)
+    groups = {}  # sender -> [(f0, dt, bits77)]
+    for fc, dc, b in context:
+        if b[74:77].tolist() not in ([0, 0, 1], [0, 1, 0]) or "".join(map(str, b)) in have_b:
+            continue
+        sk = b[29:58].tobytes()
+        if sk not in have_s:
+            groups.setdefault(sk, []).append((fc, dc, b))
+    if not groups:
+        return []
+    bb = fe.Baseband(x)
+    out = []
+    for msgs in groups.values():
+        prior = {m[2].tobytes(): m[2] for m in msgs}
+        alts = dict(prior)
+        grids = sorted({message._int(b[59:74]) for b in prior.values() if message._int(b[59:74]) < message.MAXGRID4})
+        for b in prior.values():
+            for c in _successors(b, grids):
+                alts.setdefault(c.tobytes(), c)
+        keys = list(alts)
+        S = np.stack([_codeword(alts[k]) for k in keys])  # (n_alt, 174)
+        best = None
+        for fc, dc in dict.fromkeys((m[0], m[1]) for m in msgs):  # each distinct location, in context order
+            hs = fe.fine_sync2(bb, _Loc(fc, dc), n_hyp=n_hyp)
+            if not hs:
+                continue
+            for h, llrs in zip(hs, llr_fn(hs)):
+                l = np.clip(llrs[0], -clip, clip)
+                rho = S @ l / (np.abs(l).sum() + 1e-9)
+                order = np.argsort(-rho, kind="stable")  # ties: lowest index, as the C port
+                i1, i2 = order[0], order[1]
+                if best is None or rho[i1] > best[0]:
+                    best = (float(rho[i1]), float(rho[i2]), keys[i1], h)
+        if best is None:
+            continue
+        r1, r2, k1, h = best
+        if log is not None:
+            log.append((r1, r2, k1 in prior, alts[k1]))
+        if k1 in prior and r1 >= rho_min and r1 - r2 >= margin:
+            d = Decode(prior[k1].copy(), h.f0, h.dt, h.metric, "rp", {"rho": r1, "rho2": r2, "metric": 0})
+            d.snr = estimate_snr(h, d.bits77)
+            out.append(d)
+    return out
+
+
+@dataclass
+class _Loc:
+    """A fine_sync2 starting point that is not a search candidate."""
+    f0: float
+    dt: float
 
 
 def _cand_key(c):

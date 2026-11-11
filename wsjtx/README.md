@@ -104,9 +104,10 @@ per WSJT-X pass (`seq 7:   decoder pass 0: 28 decode(s) sent at 2.41 s` …
   (`--threads N` to change that); the decodes are the same for any number of threads.
 - **`[nfa, nfb]` is honoured** — decodes outside the frequency range of WSJT-X's waterfall settings
   are dropped (`--no-range` keeps them).
-- **A-priori annotations:** `"ap":1` marks our CQ a-priori decodes and `"ap":2` the context ones
-  (the calls of a message the same station sent 30 or 60 s earlier — `jt9` has no equivalent);
-  WSJT-X shows them as `a1` and `a2`. We never set `lowconf`.
+- **A-priori annotations:** `"ap":1` marks our CQ a-priori decodes, `"ap":2` the context ones
+  (the calls of a message the same station sent 30 or 60 s earlier) and `"ap":3` the repeat stage's
+  (exactly the message that station sent 30 or 60 s earlier, tested whole against the audio) — `jt9`
+  has no equivalent of the last two; WSJT-X shows them as `a1`, `a2` and `a3`. We never set `lowconf`.
 - **Ignored `params` fields:** `ndepth`, `nfqso`/`ntol`, `lft8apon`/`lapcqonly`/`napwid`,
   `nQSOProgress`, `mycall`/`hiscall`/`hisgrid`, the `ft8md` options — this decoder has its own
   settings and its own a-priori decoding, and does not take WSJT-X's.

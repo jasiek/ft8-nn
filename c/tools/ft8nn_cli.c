@@ -71,8 +71,8 @@ out:
 }
 
 static const char *method_name(int m) {
-    static const char *names[] = {"bp", "osd", "bp_ap0", "osd_ap0", "bp_er", "osd_er", "osd_bp", "bp_cx", "osd_cx"};
-    return m >= 0 && m < 9 ? names[m] : "?";
+    static const char *names[] = {"bp", "osd", "bp_ap0", "osd_ap0", "bp_er", "osd_er", "osd_bp", "bp_cx", "osd_cx", "rp"};
+    return m >= 0 && m < 10 ? names[m] : "?";
 }
 
 static void print_decode(const char *slot, const ft8nn_decode_t *d) {

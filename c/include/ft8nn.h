@@ -14,7 +14,7 @@ extern "C" {
 typedef struct ft8nn_ctx ft8nn_ctx;
 
 enum { FT8NN_BP = 0, FT8NN_OSD = 1, FT8NN_BP_AP = 2, FT8NN_OSD_AP = 3, FT8NN_BP_ERASE = 4, FT8NN_OSD_ERASE = 5, FT8NN_OSD_BP = 6,
-       FT8NN_BP_CTX = 7, FT8NN_OSD_CTX = 8 };
+       FT8NN_BP_CTX = 7, FT8NN_OSD_CTX = 8, FT8NN_REPEAT = 9 };
 
 typedef struct {
     char text[48];      /* decoded message, WSJT-X formatting; hashed calls as <CALL> or <...> */
@@ -27,7 +27,9 @@ typedef struct {
                            FT8NN_OSD_ERASE (OSD-0 with a wider burst of 20-24 symbols erased),
                            FT8NN_OSD_BP (OSD on the summed BP posteriors of the first iterations),
                            FT8NN_BP_CTX / FT8NN_OSD_CTX (context a-priori: calls of a message decoded 30 or
-                           60 s earlier near this frequency; ft8nn_decode_at only) */
+                           60 s earlier near this frequency; ft8nn_decode_at only),
+                           FT8NN_REPEAT (a message decoded 30 or 60 s earlier, tested whole against the audio at
+                           its frequency and time after everything else is subtracted; ft8nn_decode_at only) */
     int metric;         /* soft metric that decoded it: 0 = NN, 1..3 = classical nsym 1..3 */
     int pass;           /* subtraction pass, 0-based */
 } ft8nn_decode_t;
@@ -59,7 +61,7 @@ int ft8nn_decode_at(ft8nn_ctx *ctx, const float *audio12k, int n, int64_t slot_t
  * candidates are tried first, so the first call comes after a fraction of the pass), and once more when the pass
  * ends, with the rest of it (n may be 0); then exactly once with pass = -1 and the context a-priori decodes
  * (FT8NN_BP_CTX / FT8NN_OSD_CTX), which wait for the end because a later pass may decode the same sender's
- * real message and drop them. Every decode is reported exactly once, and the decodes together equal what
+ * real message and drop them, plus the repeat stage's (FT8NN_REPEAT), which runs after the last pass. Every decode is reported exactly once, and the decodes together equal what
  * ft8nn_decode_at returns. Calls come from the thread that called ft8nn_decode_stream. The array is only valid
  * during the call (NULL when n is 0). If the decode fails (returns -1) the pass = -1 call is not made. */
 typedef void (*ft8nn_pass_cb)(const ft8nn_decode_t *decodes, int n, int pass, void *user);

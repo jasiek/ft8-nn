@@ -63,6 +63,7 @@ def main():
     ap.add_argument("--passes", type=int, default=4, help="decode-subtract passes per slot")
     ap.add_argument("--reuse-df", type=float, default=62.5, help="skip candidates tried before with no subtraction within this many Hz (0 = off)")
     ap.add_argument("--dt-recenter", type=float, default=0.8, help="shift the DT search window by the median DT of the decodes so far when it is at least this far from 0 (0 = off)")
+    ap.add_argument("--repeat", default="", help="accepted for run_real.py parity; inert here (slots have no context)")
     ap.add_argument("--osd-order", type=int, default=2)
     ap.add_argument("--osd-max-hard", type=int, default=40)
     ap.add_argument("--workers", type=int, default=8)

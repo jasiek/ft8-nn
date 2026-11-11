@@ -87,6 +87,11 @@ static int prof = -1;
 #define CTX_DF 10.0
 #define CTX_DDT 0.5
 #define CTX_HIST 4 /* slots of history kept per context */
+/* repeat stage (decoder._repeat_stage): context message tested as a whole known codeword on the residual */
+#define REPEAT_RHO 0.40
+#define REPEAT_MARGIN 0.15
+#define REPEAT_CLIP 2.0
+#define MAXGRID4 32400
 #define DEC_CAP 512 /* decodes per slot */
 #define ERASE_GATE 15.0 /* burst-erasure retry for confident NN metrics that still fail */
 /* osd_er ghost test (decoder._is_ghost): neighbour within GHOST_MAX_DF Hz whose tones, shifted by whole symbols and
@@ -799,6 +804,161 @@ done:
     return added;
 }
 
+/* Repeat stage (decoder._repeat_stage): for each sender of a standard context message with no decode in this slot,
+ * test its earlier messages as whole known codewords on the residual x at their (f0, dt): rho = sum(l*s)/sum(|l|) on
+ * NN LLRs clipped to +-REPEAT_CLIP, s = +-1 per codeword bit, against competitors (the sender's CQ with any grid it
+ * sent, then each earlier message with every R flag x grid/RRR/RR73/73/report -30..+30). Accept the best if it is an
+ * earlier message, rho >= REPEAT_RHO and it beats the runner-up of the same hypothesis by REPEAT_MARGIN. Appends to
+ * all; returns the new count, or -1 on an ONNX Runtime error. */
+static void set_bits(uint8_t *b, int v, int n) {
+    for (int i = 0; i < n; i++) b[i] = (v >> (n - 1 - i)) & 1;
+}
+static int get_bits(const uint8_t *b, int n) {
+    int v = 0;
+    for (int i = 0; i < n; i++) v = v << 1 | b[i];
+    return v;
+}
+static int add_alt(uint8_t (*alt)[77], int na, int cap, const uint8_t *b) {
+    for (int i = 0; i < na; i++)
+        if (same_payload(alt[i], b)) return na;
+    if (na < cap) memcpy(alt[na++], b, 77);
+    return na;
+}
+
+static int repeat_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int nall, const dec *cx, int ncx) {
+    enum { MAXPRI = 16, MAXALT = 2048 };
+    uint8_t *done = calloc((size_t)ncx, 1); /* context entry already in an earlier sender group */
+    uint8_t(*alt)[77] = malloc(sizeof *alt * MAXALT);
+    double *S = malloc(sizeof(double) * MAXALT * 174), *rho = malloc(sizeof(double) * MAXALT);
+    sync_hyp *hyps = malloc(sizeof(sync_hyp) * N_HYP), *hp[N_HYP];
+    float *feat = malloc(sizeof(float) * NN_BATCH * NN * NFEAT);
+    double llr[N_HYP * 174];
+    baseband bb;
+    int bb_ready = 0, rc = nall;
+    for (int g = 0; g < ncx; g++) {
+        const uint8_t *b0 = cx[g].bits77;
+        if (done[g] || !std_msg(b0)) continue;
+        int skip = 0;
+        for (int q = 0; q < nall && !skip; q++) skip = same_payload(all[q].bits77, b0);
+        if (skip) continue;
+        for (int q = 0; q < nall && !skip; q++) skip = std_msg(all[q].bits77) && !memcmp(all[q].bits77 + 29, b0 + 29, 29);
+        if (skip) continue;
+        /* the sender group: g and every later eligible context entry with the same sender, in context order */
+        int mem[2 * DEC_CAP], nm = 0;
+        for (int i = g; i < ncx; i++) {
+            if (done[i] || !std_msg(cx[i].bits77) || memcmp(cx[i].bits77 + 29, b0 + 29, 29)) continue;
+            int known = 0;
+            for (int q = 0; q < nall && !known; q++) known = same_payload(all[q].bits77, cx[i].bits77);
+            done[i] = 1;
+            if (!known) mem[nm++] = i;
+        }
+        /* alternatives: earlier messages first (deduplicated), then the competitors */
+        int na = 0;
+        for (int i = 0; i < nm; i++) na = add_alt(alt, na, MAXPRI, cx[mem[i]].bits77);
+        int npri = na, grids[MAXPRI], ng = 0;
+        for (int i = 0; i < npri; i++) {
+            int gv = get_bits(alt[i] + 59, 15), dup = 0;
+            for (int j = 0; j < ng; j++) dup |= grids[j] == gv;
+            if (gv < MAXGRID4 && !dup) grids[ng++] = gv;
+        }
+        for (int i = 1; i < ng; i++) /* sorted, as decoder.py */
+            for (int j = i; j > 0 && grids[j - 1] > grids[j]; j--) {
+                int t = grids[j];
+                grids[j] = grids[j - 1];
+                grids[j - 1] = t;
+            }
+        for (int i = 0; i < npri; i++) {
+            uint8_t a[77];
+            for (int j = 0; j < ng; j++) { /* the sender's own CQ */
+                memcpy(a, alt[i], 77);
+                set_bits(a, 2, 28);
+                a[28] = a[58] = 0;
+                set_bits(a + 59, grids[j], 15);
+                na = add_alt(alt, na, MAXALT, a);
+            }
+            int gv0 = get_bits(alt[i] + 59, 15);
+            for (int k = gv0 < MAXGRID4 ? -1 : 0; k < 64; k++) {
+                int gv = k < 0 ? gv0 : k < 3 ? MAXGRID4 + 2 + k : MAXGRID4 + 35 + (k - 3 - 30);
+                for (int r = 0; r < 2; r++) {
+                    memcpy(a, alt[i], 77);
+                    a[58] = (uint8_t)r;
+                    set_bits(a + 59, gv, 15);
+                    na = add_alt(alt, na, MAXALT, a);
+                }
+            }
+        }
+        for (int i = 0; i < na; i++) {
+            uint8_t cw[174];
+            int tones[NN];
+            encode77(alt[i], cw, tones);
+            for (int j = 0; j < 174; j++) S[(size_t)i * 174 + j] = cw[j] ? 1.0 : -1.0;
+        }
+        if (!bb_ready) {
+            baseband_init(&bb, x, n, c->pool);
+            bb_ready = 1;
+        }
+        double r1 = 0, r2 = 0;
+        int k1 = -1;
+        sync_hyp best_h;
+        for (int i = 0; i < nm; i++) { /* each distinct location, in context order */
+            int dup = 0;
+            for (int j = 0; j < i && !dup; j++) dup = cx[mem[j]].f0 == cx[mem[i]].f0 && cx[mem[j]].dt == cx[mem[i]].dt;
+            if (dup) continue;
+            candidate loc = {cx[mem[i]].f0, cx[mem[i]].dt, 0.0, 0};
+            int nh = fine_sync2(&bb, &loc, N_HYP, hyps);
+            if (nh <= 0) continue;
+            for (int h = 0; h < nh; h++) hp[h] = &hyps[h];
+            if (run_nn(c, hp, nh, llr, feat)) {
+                rc = -1;
+                goto out;
+            }
+            for (int h = 0; h < nh; h++) {
+                double l[174], sa = 0;
+                for (int j = 0; j < 174; j++) {
+                    l[j] = fmax(-REPEAT_CLIP, fmin(REPEAT_CLIP, llr[h * 174 + j]));
+                    sa += fabs(l[j]);
+                }
+                int b1 = 0, b2 = -1;
+                for (int a = 0; a < na; a++) {
+                    double s = 0;
+                    for (int j = 0; j < 174; j++) s += S[(size_t)a * 174 + j] * l[j];
+                    rho[a] = s / (sa + 1e-9);
+                }
+                for (int a = 1; a < na; a++)
+                    if (rho[a] > rho[b1]) b1 = a;
+                for (int a = 0; a < na; a++)
+                    if (a != b1 && (b2 < 0 || rho[a] > rho[b2])) b2 = a;
+                if (k1 < 0 || rho[b1] > r1) {
+                    r1 = rho[b1];
+                    r2 = b2 >= 0 ? rho[b2] : -1.0;
+                    k1 = b1;
+                    best_h = hyps[h];
+                }
+            }
+        }
+        if (k1 >= 0 && k1 < npri && r1 >= REPEAT_RHO && r1 - r2 >= REPEAT_MARGIN && rc < DEC_CAP) {
+            dec *d = &all[rc++];
+            d->final = 0;
+            memcpy(d->bits77, alt[k1], 77);
+            d->f0 = best_h.f0;
+            d->dt = best_h.dt;
+            d->method = FT8NN_REPEAT;
+            d->metric = 0;
+            d->pass = PASSES;
+            d->snr = estimate_snr(&best_h, alt[k1]);
+        }
+    }
+out:
+    if (bb_ready) baseband_free(&bb);
+    free(done);
+    free(alt);
+    free(S);
+    free(rho);
+    free(hyps);
+    free(feat);
+    return rc;
+}
+
 /* decoder._dt_shift: receiver DT offset from decoded (CRC-checked) DTs - their median, snapped to the lag grid.
  * Senders' clocks scatter by a few tenths of a second, so a median this far from 0 over this many decodes is the
  * receiver's own offset (a KiwiSDR stream that slips, or a sound card / clock that is off in an app). */
@@ -895,7 +1055,7 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
         /* report first: subtraction only prepares the next pass, and takes ~20 ms per decode */
         report(c, all, nall, nall + k, 0, p, cb, user, batch);
         double ts = tnow();
-        for (int q = nall; q < nall + k && p + 1 < PASSES; q++) {
+        for (int q = nall; q < nall + k && (p + 1 < PASSES || ncx > 0); q++) { /* + the repeat stage's residual */
             uint8_t cw[174];
             int tones[NN];
             encode77(all[q].bits77, cw, tones);
@@ -905,8 +1065,20 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
         nall += k;
         if (!k) break;
     }
+    if (ncx > 0) { /* x is now the residual */
+        int r = repeat_stage(c, x, n, all, nall, cx, ncx);
+        if (r < 0) {
+            free(x);
+            free(all);
+            free(cx);
+            free(tried);
+            free(batch);
+            return -1;
+        }
+        nall = r;
+    }
     nall = drop_ctx_dupes(all, 0, nall);
-    report(c, all, 0, nall, 1, -1, cb, user, batch); /* the context decodes that survived */
+    report(c, all, 0, nall, 1, -1, cb, user, batch); /* the context decodes that survived, and the repeat stage's */
     free(batch);
     free(cx);
     free(tried);
