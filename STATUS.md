@@ -2,8 +2,9 @@
 
 Last updated 2026-11-11 (**compared against JTDX and FT8TW on the unseen validation runs** (plan 11,
 `docs/decoder-comparison.md`): pooled over runs 2+3+4, `nn_v3` is +7.8% decodes / +6.8% slot-confirmed over JTDX
-2.2.x at its defaults, which is itself +8.3% over stock jt9; FT8TW publishes no decoder source, so ft8_lib stands
-in for it and finds half as much as we do. Before that **decoding runs on every performance core and streams within a pass**, plan 6 step (3):
+2.2.x at its defaults, which is itself +8.3% over stock jt9, and **+3.0% / +2.4% over JTDX at its ceiling**
+(`-w -c 3 -s 2`, now measured on all three runs: 44 unconfirmed against our 3); FT8TW publishes no decoder source, so
+ft8_lib stands in for it and finds half as much as we do. Before that **decoding runs on every performance core and streams within a pass**, plan 6 step (3):
 same decodes in every field, 0.3% more instructions; 40 busy run-1 `01_40m` slots through the sidecar on the M4 mini
 with other jobs running, median time to first decodes 5.20 -> 0.33 s, whole slot 13.0 -> 4.6 s, every decode within
 WSJT-X's 15 s. Before that **Windows CI added**: x64 MinGW-w64 build, C == Python 57/57 on
@@ -60,15 +61,18 @@ decodes verified identical to the main machine.
   86,247 / 63,934 / 62; **JTDX at its own defaults 93,392 / 69,159 / 11; `nn_v3` 100,630 / 73,876 / 3**, i.e. ours
   is +7.8% decodes and +6.8% slot-confirmed over JTDX while JTDX is +8.3% over jt9 — about half of our margin over
   WSJT-X is margin JTDX also finds. Per run, ours vs JTDX: run 2 +7.2%/+6.5%, run 3 +5.6%/+5.1%, run 4
-  +9.4%/+8.1%. **JTDX at its ceiling** (`-w -c 3 -s 2`: SWL mode, 9 subtraction passes, `lft8subpass`), measured on
-  runs 2 and 3 in full plus 13 of run 4's 15 receivers, buys **+4 to +5% decodes** over its own defaults for
-  6× the CPU (29.4 vs 4.9 s/slot/core, 132.5 and 122.6 min per run), and pays for it in false decodes: unconf
-  1→16 (run 2), 3→9 (run 3), 7→19 (run 4's 13). Pooled over the two complete runs, deep JTDX is
-  53,738 / 40,057 / **25** against its defaults' 51,572 / 38,560 / 4, stock jt9's 33 unconf on the same slots, and
-  `nn_v3`'s 54,886 / 40,806 / **1** — so ours is still +2.1% decodes / +1.9% slot-confirmed ahead of JTDX's
-  ceiling with a twenty-fifth of its false decodes. **Not finished:** run 4's last two receivers
-  (`13_15m_95-88-77-200`, `14_12m_82-64-206-44`) were never run, so there is no all-runs deep total; the user took
-  the sweep to another machine.
+  +9.4%/+8.1%. **JTDX at its ceiling** (`-w -c 3 -s 2`: SWL mode, 9 subtraction passes, `lft8subpass`), completed
+  on all three runs 2026-11-10 on the Mac mini (whole comparison re-run there: jt9, JTDX defaults, `nn_v3` and runs
+  2–3 deep all reproduced the first machine's numbers exactly), buys **+4.6% decodes / +4.3% slot-confirmed**
+  over its own defaults for 5× the CPU (20.5 vs 4.0 s/slot/core on the M4; 71.8 + 74.2 + 89.7 min), and pays for
+  it in false decodes: unconf 1→16 (run 2), 3→9 (run 3), 7→19 (run 4). Pooled: deep JTDX 97,711 / 72,160 / **44**,
+  defaults 93,392 / 69,159 / 11, jt9 86,247 / 63,934 / 62, `nn_v3` 100,630 / 73,876 / **3** — ours is **+3.0%
+  decodes / +2.4% slot-confirmed** ahead of JTDX's ceiling (run 2 +2.8%, run 3 +1.4%, run 4 +4.0%) with a
+  fifteenth of its false decodes. **Overlap** (slot, sending callsign), `tools/compare_decoders.py`: vs default
+  JTDX, both 87,232, JTDX-only 4,955 of which **3,069 slot-confirmed**, ours-only 11,413 (7,840 slot-confirmed);
+  vs deep JTDX, deep-only 6,035 (3,780 slot-confirmed, 38 unconf), ours-only 8,270 (5,577, 2 unconf). The
+  JTDX-only slot-confirmed decodes are real signals a classical decoder gets from the same audio and we miss —
+  the best list of recoverable misses we have (plan 7.1 territory).
   Two findings worth keeping: (a) over half of JTDX's output (`^`, 53.8%) comes from its `ft8sd1`/`ft8mf1`/
   `ft8mfcq` tone-matching stages, which bypass the LDPC CRC entirely, and PSK Reporter contradicted **none** of
   50,350 checkable ones — every false decode JTDX makes comes from its ordinary BP/OSD path; (b) JTDX misses 3,449
@@ -789,9 +793,11 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       (`2a0e2be`, 2022-03-01, the last public commit) into `third_party/jtdx` and builds decoder + driver with no
       Qt, hamlib or libusb; it parses the source lists out of JTDX's own CMakeLists so they track the revision,
       and patches two upstream files that modern toolchains reject (`lib/{char,int}.h` Reed-Solomon prototypes,
-      `lib/jplsubs.f`'s own `SPLIT` vs the F2023 intrinsic — neither on the FT8 path). `tools/jtdx_run.py` runs
+      `lib/jplsubs.f`'s own `SPLIT` vs the F2023 intrinsic — neither on the FT8 path). It needs gfortran, cmake,
+      pkg-config, FFTW and Boost headers (`brew install gcc cmake pkg-config fftw boost`). `tools/jtdx_run.py` runs
       one process per station with all its slots in chronological order, because JTDX keeps cross-slot state (an
-      even/odd message memory and a callsign hash table) and loses decodes without it.
+      even/odd message memory and a callsign hash table) and loses decodes without it. It passes absolute WAV paths (the decoder runs in
+      `data/jtdx-work`; relative ones failed to open before 2026-11-10).
     - **Keep JTDX's `HideFT8Dupes` on** (its own default). With duplicate suppression off it emits weak spurious
       copies of messages it just decoded at unrelated frequencies (+8% decode lines on a spot check), and
       `verify.py` scores those as slot-confirmed because they name a station that really is there.

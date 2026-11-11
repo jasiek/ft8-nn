@@ -23,7 +23,8 @@ statistics decoding, a last-resort algebraic decoder; **BP** is the belief-propa
 
 **Ours decodes 7.8% more than JTDX (6.8% more slot-confirmed), with 3 unconfirmed decodes against
 JTDX's 11.** JTDX in turn beats stock `jt9` by 8.3%, so roughly half of our margin over WSJT-X is
-margin JTDX also finds, and half is ours alone.
+margin JTDX also finds, and half is ours alone. Against JTDX at its most sensitive settings the
+margin is +3.0% / +2.4%, and JTDX then makes 44 unconfirmed decodes to our 3 (section below).
 
 Per run (decodes / slot-confirmed / unconf):
 
@@ -36,8 +37,7 @@ Per run (decodes / slot-confirmed / unconf):
 Our margin is largest on run 4, the busiest audio in the set (up to 45 decodes per slot), and
 smallest on run 3, the quietest.
 
-The JTDX column is its own defaults. Its ceiling is measured separately, below: runs 2 and 3 in full,
-and 13 of run 4's 15 receivers.
+The JTDX column is its own defaults. Its ceiling is measured separately, below.
 
 ## JTDX at its most sensitive settings
 
@@ -47,27 +47,32 @@ subtraction pass on top of the already-low sync thresholds) and SWL mode (51 hal
 instead of 49, and a sync threshold of 1.225 instead of 1.5). There is nothing more sensitive left
 to turn on, so this is JTDX's ceiling.
 
-Runs 2 and 3 completed; run 4 reached 13 of its 15 receivers before the machine was needed elsewhere,
-so its row is those 13 receivers on **both** sides and is not comparable to the 15-receiver numbers
-elsewhere in this document. Cells are decodes / slot-confirmed / unconf.
+All three runs in full (all 36 receivers; first measured with run 4 at 13 of 15 receivers, completed
+and re-measured end to end on 2026-11-10 — runs 2 and 3 reproduced the earlier numbers exactly). Cells
+are decodes / slot-confirmed / unconf.
 
 | run | JTDX defaults | JTDX `-w -c 3 -s 2` | `nn_v3` (ours) | deep vs default | ours vs deep |
 |---|---|---|---|---|---|
 | 2 (9 receivers) | 26,293 / 19,435 / 1 | 27,417 / 20,202 / **16** | 28,198 / 20,701 / 1 | +4.3% / +3.9% | +2.8% / +2.5% |
 | 3 (12 receivers) | 25,279 / 19,125 / 3 | 26,321 / 19,855 / **9** | 26,688 / 20,105 / 0 | +4.1% / +3.8% | +1.4% / +1.3% |
-| 4 (13 of 15) | 40,099 / 29,369 / 7 | 42,196 / 30,834 / **19** | – | +5.2% / +5.0% | – |
-| **2 + 3 pooled** | 51,572 / 38,560 / 4 | 53,738 / 40,057 / **25** | 54,886 / 40,806 / 1 | **+4.2% / +3.9%** | **+2.1% / +1.9%** |
+| 4 (15 receivers) | 41,820 / 30,599 / 7 | 43,973 / 32,103 / **19** | 45,744 / 33,070 / 2 | +5.1% / +4.9% | +4.0% / +3.0% |
+| **2 + 3 + 4 pooled** | 93,392 / 69,159 / 11 | 97,711 / 72,160 / **44** | 100,630 / 73,876 / 3 | **+4.6% / +4.3%** | **+3.0% / +2.4%** |
 
-The gain is consistent and modest: **+4 to +5% decodes** over JTDX's own defaults, for **6× the CPU**
-(29.4 s per slot per core against 4.9; run 2 took 132.5 min wall clock against 17.2, run 3 122.6 min
-against 17.2). It does close most of our margin — on the two complete runs we go from +7.8% / +6.8%
-ahead of default JTDX to **+2.1% / +1.9%** ahead of deep JTDX, and on run 3 only +1.4% / +1.3%.
+(The two run-4 receivers missing from the first measurement, `13_15m` and `14_12m`, are quiet ones:
+853 and 925 deep decodes, no unconfirmed.)
+
+The gain is consistent and modest: **+4 to +5% decodes** over JTDX's own defaults, for **5–6× the
+CPU** (on the Mac mini M4, 20.5 s per slot per core against 4.0, 235.7 min wall clock for the three
+runs against 46.4; on the 8-core M1 that took the first measurement, 29.4 against 4.9). It closes about
+60% of our margin: pooled over all three runs we go from +7.8% / +6.8% ahead of default JTDX to
+**+3.0% / +2.4%** ahead of deep JTDX — least on run 3, the quietest (+1.4% / +1.3%), most on run 4,
+the busiest (+4.0% / +3.0%).
 
 **But it is bought almost entirely out of the false-decode budget.** Unconfirmed decodes multiply on
-every run: 1 → 16, 3 → 9, 7 → 19. Pooled over the two complete runs, deep JTDX's **25** unconfirmed
-decodes are much closer to stock `jt9`'s 33 on the same slots than to its own defaults' 4 — while
-ours is **1**. Read the ceiling that way: JTDX can find about 4% more signals than its defaults do,
-and the price is a false-decode rate roughly six times its own and twenty-five times ours.
+every run: 1 → 16, 3 → 9, 7 → 19. Pooled, deep JTDX's **44** unconfirmed decodes are much closer to
+stock `jt9`'s 62 than to its own defaults' 11 — while ours is **3**. Read the ceiling that way: JTDX
+can find about 4.6% more signals than its defaults do, and the price is a false-decode rate four
+times its own and about fifteen times ours.
 
 ### Where the extra decodes and the new false decodes come from (run 2)
 
@@ -107,6 +112,29 @@ misses, i.e. it is very nearly a subset of JTDX.
 So JTDX is not a different kind of receiver from WSJT-X: it contains 96% of what jt9 hears and digs
 out about 13% more. The 228 strong decodes it misses are the same class of miss we have open as plan
 step 7.1 — worth a look, because they are strong signals that two independent decoders disagree on.
+
+## What ours and JTDX each hear that the other doesn't
+
+The same (slot, sending callsign) count, pooled over runs 2–4, with each side's exclusive pairs split
+by `verify.py` tier — slot-confirmed / active (spotted on the band in the session, not in that slot)
+/ repeat / unconf. Slot-confirmed exclusives are real signals the other decoder missed.
+`tools/compare_decoders.py` prints this.
+
+| | both | JTDX only | `nn_v3` only |
+|---|---|---|---|
+| `nn_v3` vs JTDX defaults | 87,232 | 4,955 (3,069 / 1,870 / 7 / 9) | 11,413 (7,840 / 3,567 / 4 / 2) |
+| `nn_v3` vs JTDX `-w -c 3 -s 2` | 90,375 | 6,035 (3,780 / 2,208 / 9 / 38) | 8,270 (5,577 / 2,687 / 4 / 2) |
+| JTDX defaults vs deep | 91,157 | 1,030 (741 / 283 / 0 / 6) defaults only | 5,253 (3,716 / 1,500 / 2 / 35) deep only |
+
+So this is not a superset relation either way. Even against default JTDX there are **3,069
+slot-confirmed signals JTDX decodes and we do not** (3.3% of what JTDX hears), against 7,840 the other
+way; against deep JTDX it is 3,780 against 5,577. Those JTDX-only confirmed decodes are the clearest
+list of recoverable misses this project has: real, externally corroborated signals that a classical
+decoder already gets out of the same audio. Of the false-decode budget, 38 of deep JTDX's 44
+unconfirmed decodes are ones we do not make, while 2 of our 3 are ones it does not.
+
+Deep JTDX also drops 1,030 pairs its own defaults find (741 slot-confirmed), the non-monotone effect
+seen in run 2 above: the extra subtraction passes remove signal that other candidates needed.
 
 ## Where JTDX's decodes come from
 
@@ -195,14 +223,8 @@ our decoder's ~4 s, which is the trade the app is making deliberately.
   process per slot (`collect/val.py`), so jt9 had no callsign-hash or message memory, while JTDX and
   our decoder (context AP) both carry information between slots. That is how both programs really
   run, but it is not a per-slot-identical comparison.
-- **The pooled 4,302-slot table is defaults-only**, so the +7.8% / +6.8% headline margin is against
-  default JTDX. The ceiling is measured on runs 2 and 3 in full and on 13 of run 4's 15 receivers;
-  run 4's last two receivers (`13_15m_95-88-77-200`, `14_12m_82-64-206-44`) were never run, so there
-  is no all-runs-pooled deep number and no deep-vs-`nn_v3` comparison for run 4 at all — the `nn_v3`
-  per-station files needed for a 13-receiver subset were not regenerated either.
-- **No per-decode overlap against `nn_v3`.** `data/val/*/decodes_nn_v3.txt` was not regenerated for
-  this comparison, so the ours-only / JTDX-only split is not computed; the `nn_v3` column comes from
-  the recorded totals in `STATUS.md` (same slots, same scorer).
+- **The +7.8% / +6.8% headline margin is against default JTDX**, which is how JTDX ships; against
+  its ceiling it is +3.0% / +2.4% (section above).
 - **`^` reliability is measured against PSK Reporter coverage**, which is what bounds every
   false-decode number in this project: an unconfirmed decode means no outside spot, not proof of
   error, and 0 unconfirmed means no contradiction was found.
@@ -242,9 +264,17 @@ for r in 2 3 4; do
 done
 ```
 
-`jtdx_run.py` writes each receiver's file when that receiver finishes and skips nothing, so to
-complete run 4 it is enough to re-run it with only the two missing receiver directories present, or
-to point `--recordings` at a directory holding just those two.
+On the Mac mini M4 with `--workers 8`, the whole comparison took 7 h: JTDX defaults 46.4 min (16.9 +
+15.1 + 14.4), `nn_v3` (`bench/run_real.py`, commands in `STATUS.md`) 2 h 11 min (37.8 + 40.4 + 53.0),
+deep JTDX 235.7 min (71.8 + 74.2 + 89.7). Every receiver's file is written when it finishes. Then, with
+`verify.py` run for each tag:
+
+```sh
+python3 tools/compare_decoders.py --tags jt9 jtdx jtdx_deep nn_v3   # totals per run + pairwise overlap
+```
+
+Building needs gfortran, cmake, pkg-config, FFTW3 and the Boost headers (`brew install gcc cmake
+pkg-config fftw boost`).
 
 JTDX source: `git://git.code.sf.net/p/jtdx/code` at `2a0e2be` (2022-03-01, JTDX 2.2.x — the last
 public commit of that tree).

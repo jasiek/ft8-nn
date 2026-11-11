@@ -76,6 +76,7 @@ def main():
 
     workdir = os.path.join(REPO, "data", "jtdx-work")   # JTDX writes ALLCALL7.TXT here
     os.makedirs(workdir, exist_ok=True)
+    a.recordings = os.path.abspath(a.recordings)   # the decoder runs in workdir
     stations = sorted(os.path.join(a.recordings, d)
                       for d in os.listdir(a.recordings)
                       if os.path.isdir(os.path.join(a.recordings, d, "slots")))

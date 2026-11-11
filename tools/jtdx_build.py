@@ -7,7 +7,8 @@ Clones JTDX if needed, then builds only what the decoder needs: the Fortran
 library (wsjt_FSRCS), the Reed-Solomon/CRC C and C++ (wsjt_CSRCS, ka9q_CSRCS,
 wsjt_CXXSRCS) and our driver.  jtdxjt9's own front end (lib/jt9.f90, jt9a.f90,
 ipcomm.cpp) is left out, which is why no Qt, hamlib or libusb is needed - only
-gfortran, a C/C++ compiler, cmake and FFTW3 single precision.
+gfortran, a C/C++ compiler, cmake, pkg-config, FFTW3 single precision and the
+Boost headers (lib/crc*.cpp use boost/crc.hpp).
 
 Source lists are parsed out of JTDX's CMakeLists.txt so they stay in step with
 whatever revision is checked out.  Two upstream files need help from a modern
