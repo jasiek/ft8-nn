@@ -14,6 +14,9 @@
  *     --garbage        send a junk line before each decode, to check it is ignored
  *     --nfa N --nfb N  the frequency range to decode (default 200..4000)
  *     --timeout S      how long to wait for "done" (default 120; WSJT-X waits 15)
+ *     --times FILE     write each reply's arrival time to FILE: "seq<TAB>seconds<TAB>message" per decode
+ *                      and "seq<TAB>seconds<TAB><done>", seconds since the request and its audio were
+ *                      written - the latency WSJT-X sees, since it shows each decode line on arrival
  *
  * Every reply is formatted into the jt9 output line WSJT-X would build from it
  * (Ft8Sidecar::format_jt9_line), and each request ends with the "<DecodeFinished>" line WSJT-X
@@ -104,8 +107,16 @@ struct Options
   bool early = false, live = false, redecode = false, garbage = false;
   int nfa = 200, nfb = 4000;
   double timeout = 120.;
+  std::string times;
   std::vector<std::string> files;
 };
+
+static double monotonic ()
+{
+  struct timespec t;
+  clock_gettime (CLOCK_MONOTONIC, &t);
+  return t.tv_sec + 1e-9 * t.tv_nsec;
+}
 
 int main (int argc, char ** argv)
 {
@@ -123,13 +134,14 @@ int main (int argc, char ** argv)
       else if (a == "--live") o.live = true;
       else if (a == "--redecode") o.redecode = true;
       else if (a == "--garbage") o.garbage = true;
+      else if (a == "--times") o.times = next ();
       else if (a == "--nfa") o.nfa = atoi (next ().c_str ());
       else if (a == "--nfb") o.nfb = atoi (next ().c_str ());
       else if (a == "--timeout") o.timeout = atof (next ().c_str ());
       else if (a == "-h" || a == "--help")
         {
           fputs ("fake_wsjtx [--decoder CMD] [--pass N] [--early] [--live] [--redecode] [--garbage]\n"
-                 "           [--nfa N] [--nfb N] [--timeout S] FILE.wav...\n", stdout);
+                 "           [--nfa N] [--nfb N] [--timeout S] [--times FILE] FILE.wav...\n", stdout);
           return 0;
         }
       else o.files.push_back (a);
@@ -176,6 +188,12 @@ int main (int argc, char ** argv)
     }
 
   int failures = 0;
+  FILE * times = o.times.empty () ? nullptr : fopen (o.times.c_str (), "w");
+  if (!o.times.empty () && !times)
+    {
+      fprintf (stderr, "fake_wsjtx: cannot write %s: %s\n", o.times.c_str (), strerror (errno));
+      return 2;
+    }
   long long seq = 0;
   for (auto const & path : o.files)
     {
@@ -252,6 +270,7 @@ int main (int argc, char ** argv)
             }
 
           /* Read the replies, as Ft8Sidecar::handle_line() does. */
+          double t_sent = monotonic ();
           int ndecoded = 0;
           bool finished = false;
           std::string line;
@@ -296,9 +315,15 @@ int main (int argc, char ** argv)
                   ++failures;
                   continue;
                 }
-              if (reply.flag ("done")) { finished = true; break; }
+              if (reply.flag ("done"))
+                {
+                  if (times) fprintf (times, "%lld\t%.3f\t<done>\n", seq, monotonic () - t_sent);
+                  finished = true;
+                  break;
+                }
               if (!reply.has ("msg")) continue;
               ++ndecoded;
+              if (times) fprintf (times, "%lld\t%.3f\t%s\n", seq, monotonic () - t_sent, reply.str ("msg").c_str ());
               puts (format_jt9_line (nutc, reply.integer ("snr"), reply.num ("dt"),
                                      (int) lround (reply.num ("freq")), reply.str ("msg"),
                                      reply.integer ("ap"), reply.flag ("lowconf")).c_str ());
@@ -332,5 +357,6 @@ done:
       }
     close (from_child[0]);
   }
+  if (times) fclose (times);
   return failures ? 1 : 0;
 }

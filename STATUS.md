@@ -1,6 +1,8 @@
 # Status and plan (resume here)
 
-Last updated 2026-11-11 (**remaining misses re-profiled, plan 7.1 item 1c**: 96-98% of jt9-only decodes are spot-confirmed real; the biggest fixable class is co-channel collisions, ~400 pooled, diagnosed but parked because the whole jt9-only pool is now ~1.3% of our decodes - **next is low-latency decoding, plan 6**. Before that **DT re-centring shipped**, `dt_recenter=0.8`, tag `nn_v3_dtc`, plan 7.1 item 1b: the
+Last updated 2026-11-11 (**decodes now stream to WSJT-X pass by pass**, plan 6 step (1): on 40 busy slots
+median time to first decodes 14.05 -> 5.26 s, and decodes shown within WSJT-X's 15 s timeout 79.5% -> 98.0% on
+this M1. Before that **remaining misses re-profiled, plan 7.1 item 1c**: 96-98% of jt9-only decodes are spot-confirmed real; the biggest fixable class is co-channel collisions, ~400 pooled, diagnosed but parked because the whole jt9-only pool is now ~1.3% of our decodes - **next is low-latency decoding, plan 6**. Before that **DT re-centring shipped**, `dt_recenter=0.8`, tag `nn_v3_dtc`, plan 7.1 item 1b: the
 candidate window follows the median DT of the decodes already in hand, so receivers whose clock or audio stream is
 off are decoded instead of half-missed - +504 decodes on run 4's `08_12m` and +305 on run 3's `03_20m`, pooled runs
 2+3+4 now +17.6% over jt9 with unconf still 3, and run 1 / training / AWGN bit-identical because the gate cannot arm
@@ -650,6 +652,27 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       1.3 s / 3, 0.4 s / 1. Plan: (1) hand out each pass's decodes as soon as it finishes (C API callback), (2) start an
       early pass before the slot ends (WSJT-X decodes at ~11.8 s on partial audio), (3) parallelise the per-hypothesis
       decoding across cores (today only ONNX Runtime uses threads: 2 threads 6.9 → 6.2 s).
+      **Step (1), decodes streamed per pass - DONE 2026-11-11.** `ft8nn_decode_stream()` (C API) calls back after
+      every subtraction pass with that pass's decodes, then once with `pass = -1` and the context a-priori decodes:
+      the only thing that ever removes an earlier pass's decode is the final `drop_ctx_dupes`, and it only drops
+      context decodes, so everything else is final when its pass ends (nothing ever has to be retracted - the
+      protocol cannot). `ft8nn_decode`/`ft8nn_decode_at` are unchanged; texts are now unpacked per pass (decoding
+      never reads the hash table, only `unpack77` does). `ft8nn_sidecar` sends each batch at once, by frequency
+      within a batch; **WSJT-X needed no change**: `Ft8Sidecar::handle_line` emits each decode line on arrival into
+      `readFromStdout()`, the path `jt9`'s own multi-pass output takes. `fake_wsjtx --times FILE` logs each
+      reply's arrival time. Checks: golden C vs Python under MallocScribble 764/764, 607/607, 733/733, AWGN
+      429/429 (as `nn_v3_dtc`); old vs new sidecar on 12 busy slots identical as sets (614 lines); all 8
+      `test_sidecar.sh` checks. **Measured** (this M1, idle, `fake_wsjtx --times`, run 1 `01_40m` first 40 slots,
+      1,944 decodes, identical as sets old vs new): median slot 14.05 s (slowest 15.67 s) both; **median time to
+      first decodes 14.05 -> 5.26 s, mean latency per decode 14.01 -> 7.85 s.** Per pass: pass 0 1,102 decodes
+      (56.7%) out at median 5.26 s, pass 1 576 (29.6%) at 10.22 s, pass 2 88 (4.5%) at 13.30 s, pass 3 13 (0.7%)
+      at 14.14 s, context 165 (8.5%) at the end, 14.05 s. **Side effect, bigger than expected on this M1:** 7 of
+      40 busy slots overran WSJT-X's 15 s request timeout, which drops every reply that comes later - the old
+      all-at-the-end sidecar lost those slots entirely. Decodes WSJT-X would have shown within 15 s: 1,546 of
+      1,944 (79.5%) -> 1,906 (98.0%). **Next:** (a) context decodes are 8.5% here and the most QSO-relevant ones
+      (a station answering), yet wait for the slot's end - first measure how often the final check actually
+      drops one, then decide whether sending them with their pass is worth that risk; (b) step (3),
+      parallelising pass 0, which carries 57% of the decodes; (c) passes 2-3 cost ~4 s for 5.2% of the decodes.
       **6a. Early pass: classical vs truncation-trained transformer.** At ~11.8 s the last ~9 of the 79 symbols are
       missing (for DT ≈ 0.5 s: the third Costas sync block, symbols 72–78, plus data symbols 70–71, i.e. ~6 of the 174
       code bits; more for a later DT). Compare (a) the classical nsym 1/2/3 LLRs with the missing bits at LLR 0,
