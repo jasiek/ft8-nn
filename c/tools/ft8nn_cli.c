@@ -16,7 +16,7 @@
 
 #include "../include/ft8nn.h"
 
-#ifdef _WIN32 /* native Windows (untested): MSVC names */
+#ifdef _WIN32 /* native Windows (MinGW-w64 in CI): the C runtime's names */
 #define timegm _mkgmtime
 static void mono_now(struct timespec *t) { timespec_get(t, TIME_UTC); }
 #else
@@ -112,8 +112,14 @@ int main(int argc, char **argv) {
             free(x);
             continue;
         }
-        const char *base = strrchr(argv[i], '/');
-        base = base ? base + 1 : argv[i];
+        /* slot name = file name without directory and extension; Windows paths may also use '\' and 'D:' */
+        const char *base = argv[i];
+        for (const char *p = argv[i]; *p; p++)
+#ifdef _WIN32
+            if (*p == '/' || *p == '\\' || *p == ':') base = p + 1;
+#else
+            if (*p == '/') base = p + 1;
+#endif
         char slot[256];
         snprintf(slot, sizeof slot, "%s", base);
         char *dot = strrchr(slot, '.');

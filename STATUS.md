@@ -1,6 +1,7 @@
 # Status and plan (resume here)
 
-Last updated 2026-11-11 (**decodes now stream to WSJT-X pass by pass**, plan 6 step (1): on 40 busy slots
+Last updated 2026-11-11 (**Windows CI added**: x64 MinGW-w64 build, C == Python 57/57 on
+synthetic slots, plan 3c. Before that **decodes now stream to WSJT-X pass by pass**, plan 6 step (1): on 40 busy slots
 median time to first decodes 14.05 -> 5.26 s, and decodes shown within WSJT-X's 15 s timeout 79.5% -> 98.0% on
 this M1. Before that **remaining misses re-profiled, plan 7.1 item 1c**: 96-98% of jt9-only decodes are spot-confirmed real; the biggest fixable class is co-channel collisions, ~400 pooled, diagnosed but parked because the whole jt9-only pool is now ~1.3% of our decodes - **next is low-latency decoding, plan 6**. Before that **DT re-centring shipped**, `dt_recenter=0.8`, tag `nn_v3_dtc`, plan 7.1 item 1b: the
 candidate window follows the median DT of the decodes already in hand, so receivers whose clock or audio stream is
@@ -557,8 +558,7 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       `-march=native` opt-in (`NATIVE=1`). Code: no variable-length arrays, no `__int128` (`unpack.c` free text by
       bit-serial long division, hex from 4-bit groups: identical to the old code on 2M random payloads, all i3/n3,
       with and without hash tables), `pthread_once`/`clock_gettime`/`timegm` behind small `_WIN32` shims, wide model
-      path for ORT on Windows. Clean with `-std=c11 -pedantic -Wvla`. Linux and Windows not built yet (no Docker or
-      Linux box here). Golden C vs Python with the official build: 756/756, 600/600, run 2 733/733, AWGN 430/430.
+      path for ORT on Windows. Clean with `-std=c11 -pedantic -Wvla`. Linux and Windows were built later in CI (below). Golden C vs Python with the official build: 756/756, 600/600, run 2 733/733, AWGN 430/430.
       Paired timing under load (fork's benchmarks running), 6 busy 01_40m slots, 1 thread: Homebrew 11.47 / 11.47 s,
       official 9.14 / 7.61 s per slot, same 280 decodes.
       **Clean timing (2026-11-07 22:31, idle, no power events), official ORT + reuse, same slots as 7.3/7.3b:**
@@ -573,6 +573,18 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       `data/` also hid `ft8nn/data/` (ldpc.npz, messages.json), so a fresh clone couldn't import `ft8nn`; now
       `/data/` and both files tracked. ft8code tests now skip when WSJT-X is missing. gcc: one
       -Wmaybe-uninitialized false positive in fft.c (buffer filled by the loop above).
+      **Windows CI (2026-11-11):** `.github/workflows/windows.yml`, `windows-2025` x64, 2 min 52 s. MSYS2 UCRT64
+      MinGW-w64 gcc (MSVC can't build libft8nn: C99 `double complex` arithmetic, `__builtin_ctzll`), official ORT
+      `onnxruntime-win-x64-1.31.1.zip` via `tools/get_onnxruntime.sh`, `make -C c CC=gcc`, then native Python:
+      17 tests pass + 16 skip (ft8code), `ci_smoke.py` with `models/v3` 57 decodes, C == Python 57/57 in every field.
+      `ft8nn_cli.exe` imports only KERNEL32, the UCRT `api-ms-win-crt-*` DLLs and `onnxruntime.dll` (checked in CI).
+      `c/Makefile` Windows branch: `build/ft8nn.dll` + import lib, `.exe`, `onnxruntime.dll` copied next to the
+      programs (no rpath on Windows), `-static-libgcc`, `-D_USE_MATH_DEFINES` (MinGW hides `M_PI` under `-std=c11`).
+      Fixes the first Windows build found: `<windows.h>` defines `near`/`far` empty and `decode.c` has `int near`
+      (`#undef`); `ft8nn_cli` named slots by the text after the last `/`, so Windows paths (`D:\...\x.wav`) gave the
+      full path as slot name - CI matched 0 of 57, and on real `yymmdd_HHMMSS.wav` slots context a-priori would have
+      been silently off. Not covered: the WSJT-X sidecar (`fake_wsjtx` uses `fork()` and POSIX pipes; it and
+      `ft8nn_sidecar.cpp` also split paths on `/` only, lines 216 and 161/507).
    3d. **Architecture study (2026-11-07, full log `docs/arch-study.md`; models `runs/{tf,conv,gru,tf_l2,tf_l2kd}_v{1,2}`,
       scripts and logs in gitignored `data/tmp/`, `data/logs/`):
       keep the transformer.** Same v1 → v2 recipe on the M4 (a full transformer training takes 74 min here, not 4 h).

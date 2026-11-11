@@ -12,10 +12,14 @@
 #include <string.h>
 #include <time.h>
 
-/* One-time init and a clock: POSIX here; the _WIN32 branch is for native Windows builds (MSVC has no pthreads) and is
- * not tested, as only macOS has been built so far. */
+/* One-time init and a clock: POSIX here; the _WIN32 branch is for native Windows builds without pthreads (built with
+ * MinGW-w64 gcc in CI, .github/workflows/windows.yml). */
 #ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <windows.h>
+#undef near /* 16-bit leftovers defined empty by <windows.h>; `near` is a variable name below */
+#undef far
 typedef INIT_ONCE once_t;
 #define ONCE_INIT INIT_ONCE_STATIC_INIT
 static BOOL CALLBACK once_cb(PINIT_ONCE o, PVOID fn, PVOID *ctx) {
