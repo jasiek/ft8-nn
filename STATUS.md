@@ -1,6 +1,6 @@
 # Status and plan (resume here)
 
-Last updated 2026-11-11 (**DT re-centring shipped**, `dt_recenter=0.8`, tag `nn_v3_dtc`, plan 7.1 item 1b: the
+Last updated 2026-11-11 (**remaining misses re-profiled, plan 7.1 item 1c**: 96-98% of jt9-only decodes are spot-confirmed real; the biggest fixable class is co-channel collisions, ~400 pooled, diagnosed but parked because the whole jt9-only pool is now ~1.3% of our decodes - **next is low-latency decoding, plan 6**. Before that **DT re-centring shipped**, `dt_recenter=0.8`, tag `nn_v3_dtc`, plan 7.1 item 1b: the
 candidate window follows the median DT of the decodes already in hand, so receivers whose clock or audio stream is
 off are decoded instead of half-missed - +504 decodes on run 4's `08_12m` and +305 on run 3's `03_20m`, pooled runs
 2+3+4 now +17.6% over jt9 with unconf still 3, and run 1 / training / AWGN bit-identical because the gate cannot arm
@@ -407,6 +407,41 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       resolve in a worktree ("No version is set for command uv"), and `set -euo pipefail` made that a silent abort.
       `.tool-versions` now pins `uv 0.13.7` alongside `python 3.12.14` (`uv lock --check` clean and
       `uv sync --dry-run` "would make no changes", so the pinned 0.13.7 leaves the locked environment untouched).
+   1c. **Co-channel collisions: the strong signal's subtraction destroys the weak one's sync - DIAGNOSED
+      2026-11-11, not implemented.** With 1b in, the remaining jt9-only decodes were re-profiled from scratch.
+      **They are real, not jt9 false decodes.** Re-emitting each station's jt9-only decodes as their own decode
+      file and running `collect/verify.py` over it: run 1 1,027 misses = 788 slot-confirmed / 199 active / 3
+      repeat / 14 unconf, run 2 583 = 419 / 126 / 0 / 16, run 4 727 = 493 / 174 / 0 / 29. So 96-98% are
+      genuine signals we miss. The suspect remainder (59 pooled) is jt9's own false-decode rate concentrated in
+      this subset - 1.4-4.2% here against ~0.05% over all jt9 decodes, a 30-90x enrichment, with the expected
+      look (`GE2EDD 5Y4KKW GP53` at +9, `SK5OCT R4MRJ R KI00` at +20, `CQ XO7FYG EA52`). **This retires the old
+      note that many strong jt9-only decodes are jt9 false decodes:** run 1's 128 strong (>= 0 dB) misses are
+      83 slot-confirmed + 43 active + 2 n/a and **0 unconfirmed**. They are ours to find.
+      **Stage breakdown** (`tools/diag_strong_miss.py models/v3/model.pt nn_v3_dtc 0 2000 --root $V/recordings
+      --out data/val/run1`, 99 slots, 90 s): 120 strong misses = **74 NOCAND, 44 FAIL, 2 OK**. Not a budget
+      problem: re-searching each NOCAND cell with `min_score=0.6, lag_excl=0, max_cand=4000` recovers only 5 of
+      74; for 66 the Costas score at the target cell is at noise level. The 44 FAILs are the known weak/faded
+      population (E 13-40: 22, E > 40: 16, plan 7.2).
+      **The mechanism, for the 18 NOCAND that have a decode of ours within 10 Hz / 0.4 s:** two stations in the
+      same slot within a few Hz at the same DT. Every FT8 signal carries the *same* three Costas arrays, so
+      theirs overlap coherently and the pair occupies one candidate cell (spectrogram bins are 3.125 Hz). We
+      take the cell, decode the stronger, subtract it - and because the amplitude was fitted to the *sum*, the
+      subtraction takes the weaker signal's sync with it. Its data symbols encode a different message, so those
+      survive. Worked example, `02_40m` 1700-1703 Hz, W1TC at +24/+25/+19 over AD8RW at +13/+14/+12, all at
+      DT +0.1: we get W1TC, jt9 gets both; in the residual no candidate exists within 6 Hz / 0.3 s at any
+      threshold. **Forcing a hypothesis at the cell we just subtracted from, with no sync score consulted** (a
+      df grid +-7 Hz / 0.5 Hz on the subtracted decode's own f0, dt +- 6 baseband samples, straight into the NN
+      + LDPC) recovers `EA3CCI AD8RW EN80` in all three slots at E = 18.6 / 3.4 / 9.5.
+      **Class size** (jt9-only miss with a decode of ours within 10 Hz / 0.4 s, all SNRs): run 1 179 of 1,027
+      (17.4%), run 2 112 of 583 (19.2%), run 4 111 of 727 (15.3%) - about 400 pooled, 90-96% spot-confirmed.
+      **Next: post-subtraction forced retry.** The decoder already knows every cell it subtracted from, so this
+      needs no new detector - only a gate, since forcing hypotheses is exactly where ghosts of the subtracted
+      signal live (`_is_ghost` already exists for that) and OSD on a forced hypothesis can fit CRC-valid
+      garbage. Cost is the open question: the +-7 Hz / 0.5 Hz grid used above is 377 hypotheses per subtracted
+      decode, ~50 decodes per busy slot, which is several times the whole current per-pass budget. Narrow it
+      first - a 1 Hz df step and dt +- 1 sample is 39, and the cell can be skipped unless residual energy at
+      that frequency is still above the local noise floor.
+
    2. **Deeper OSD for expected-error 13–40 FAILs: OSD on summed BP posteriors (`osd_bp`) — DONE as `nn_v2_og`.**
       WSJT-X's decode174_91 keeps the running sum of BP posteriors after the first iterations (zsave) and runs OSD on
       those too; we ran OSD on the NN LLRs only. Prototype (scratch script, 2026-11-05): on run 2, for every hypothesis
