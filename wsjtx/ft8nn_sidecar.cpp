@@ -184,12 +184,14 @@ static std::string find_model (Options const & o, char const * argv0)
 /* ---------------------------------------------------------------- decoding */
 
 /* The a-priori type WSJT-X shows after a decode: jt9 writes a1..a9 for its own hypotheses, and
- * ours are "the message starts with CQ" (a1) and "the calls of a message this station sent 30 or
- * 60 s ago" (a2, which jt9 has no equivalent of).  Everything else is a plain decode. */
+ * ours are "the message starts with CQ" (a1), "the calls of a message this station sent 30 or
+ * 60 s ago" (a2) and "exactly the message this station sent 30 or 60 s ago" (a3, the repeat
+ * stage); jt9 has no equivalent of a2 or a3.  Everything else is a plain decode. */
 static int ap_type (ft8nn_decode_t const & d)
 {
   if (d.method == FT8NN_BP_AP || d.method == FT8NN_OSD_AP) return 1;
   if (d.method == FT8NN_BP_CTX || d.method == FT8NN_OSD_CTX) return 2;
+  if (d.method == FT8NN_REPEAT) return 3;
   return 0;
 }
 

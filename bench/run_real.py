@@ -34,8 +34,8 @@ _CTX = True
 _RDF = 62.5
 
 
-def _init(model, also_classical, n_hyp, ckw=None, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, passes=4, context=True, reuse_df=62.5):
-    global _LLR, _NHYP, _CKW, _EG, _EOD, _OSN, _NP, _CTX, _RDF
+def _init(model, also_classical, n_hyp, ckw=None, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, passes=4, context=True, reuse_df=62.5, repeat=None):
+    global _LLR, _NHYP, _CKW, _EG, _EOD, _OSN, _NP, _CTX, _RDF, _RP
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     import torch
 
@@ -51,6 +51,7 @@ def _init(model, also_classical, n_hyp, ckw=None, erase_gate=15.0, erase_osd_dma
     _NP = passes
     _CTX = context
     _RDF = reuse_df
+    _RP = repeat
 
 
 def _slot_time(stem):
@@ -84,7 +85,7 @@ def _decode(path, context=()):
         x = x.mean(1)
     if len(x) < 180000:
         x = np.pad(x, (0, 180000 - len(x)))
-    ds = decoder.decode_slot(x[:180000] / (np.std(x) + 1e-9), llr_fn=_LLR, n_hyp=_NHYP, erase_gate=_EG, erase_osd_dmax=_EOD, osd_snaps=_OSN, passes=_NP, context=context, cand_kw=_CKW, reuse_df=_RDF)
+    ds = decoder.decode_slot(x[:180000] / (np.std(x) + 1e-9), llr_fn=_LLR, n_hyp=_NHYP, erase_gate=_EG, erase_osd_dmax=_EOD, osd_snaps=_OSN, passes=_NP, context=context, cand_kw=_CKW, reuse_df=_RDF, repeat=_RP)
     return Path(path).stem, [(d.bits77, d.f0, d.dt, d.method, d.info.get("metric"), d.snr) for d in ds]
 
 
@@ -160,6 +161,7 @@ def main():
     ap.add_argument("--passes", type=int, default=4, help="decode-subtract passes per slot")
     ap.add_argument("--reuse-df", type=float, default=62.5, help="skip candidates tried before with no subtraction within this many Hz (0 = off)")
     ap.add_argument("--no-context", action="store_true", help="no context a-priori (slots decoded independently)")
+    ap.add_argument("--repeat", default="0.4,0.15,2", help="repeat stage RHO,MARGIN,CLIP; 'off' to disable")
     ap.add_argument("--out", default="data/real", help="output root: <out>/<station>/decodes_<tag>.txt")
     ap.add_argument("--compare-only", action="store_true")
     ap.add_argument("--show", type=int, default=8, help="examples to print per category")
@@ -175,7 +177,7 @@ def main():
     outroot = Path(a.out)
 
     if not a.compare_only:
-        with ProcessPoolExecutor(a.workers, initializer=_init, initargs=(a.model, a.also_classical, a.n_hyp, dict(per_symbol=a.per_symbol, fmax=a.fmax, base=a.base), a.erase_gate, a.erase_osd_dmax, a.osd_snaps, a.passes, not a.no_context, a.reuse_df)) as ex:
+        with ProcessPoolExecutor(a.workers, initializer=_init, initargs=(a.model, a.also_classical, a.n_hyp, dict(per_symbol=a.per_symbol, fmax=a.fmax, base=a.base), a.erase_gate, a.erase_osd_dmax, a.osd_snaps, a.passes, not a.no_context, a.reuse_df, None if a.repeat == "off" else tuple(map(float, a.repeat.split(","))))) as ex:
             jobs = []  # (station index, chain): one chain per station and period, or one per file without context
             for si, st in enumerate(stations):
                 files = sorted(str(f) for f in (st / "slots").glob("*.wav"))
