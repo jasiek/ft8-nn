@@ -6,6 +6,8 @@
 real: decodes the first n slots of one station in time order (one context, so hash learning matches)
       and compares every output field with data/real/<station>/decodes_nn_v2.txt.
 awgn: compares decoded payload sets per file with data/bench/awgn/results_nn_v2.json.
+--threads N (default 4) runs the C decoder on N threads (results must not depend on it); --stream decodes through
+ft8nn_decode_stream, so the decodes handed out pass by pass are what is compared.
 """
 import argparse
 import json
@@ -18,10 +20,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / "c/build/ft8nn_cli"
 ONNX = ROOT / "models/v3/ft8nn.onnx"
+CLI_OPTS = ["--threads", "4"]
 
 
 def run_cli(files):
-    out = subprocess.run([str(CLI), "--threads", "1", str(ONNX), *map(str, files)], capture_output=True, text=True, check=True)
+    out = subprocess.run([str(CLI), *CLI_OPTS, str(ONNX), *map(str, files)], capture_output=True, text=True, check=True)
     return [l.split("\t") for l in out.stdout.splitlines() if l]
 
 
@@ -91,9 +94,12 @@ def main():
     ap.add_argument("--tag", default="nn_v3_dtc", help="Python result tag to compare against")
     ap.add_argument("--onnx", default=None, help="model for the C side (default models/v3/ft8nn.onnx)")
     ap.add_argument("--out", default="data/real", help="root of the Python decodes (real mode), e.g. data/val/run2")
+    ap.add_argument("--threads", type=int, default=4, help="C decode threads (0 = one per performance core)")
+    ap.add_argument("--stream", action="store_true", help="decode with ft8nn_decode_stream")
     a = ap.parse_args()
-    global ONNX
+    global ONNX, CLI_OPTS
     ONNX = Path(a.onnx) if a.onnx else ONNX
+    CLI_OPTS = ["--threads", str(a.threads)] + (["--stream"] if a.stream else [])
     ok = real(a) if a.mode == "real" else awgn(a)
     print("PASS" if ok else "DIFF")
     sys.exit(0 if ok else 1)

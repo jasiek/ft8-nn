@@ -1,6 +1,9 @@
 # Status and plan (resume here)
 
-Last updated 2026-11-11 (**Windows CI added**: x64 MinGW-w64 build, C == Python 57/57 on
+Last updated 2026-11-11 (**decoding runs on every performance core and streams within a pass**, plan 6 step (3):
+same decodes in every field, 0.3% more instructions; 40 busy run-1 `01_40m` slots through the sidecar on the M4 mini
+with other jobs running, median time to first decodes 5.20 -> 0.33 s, whole slot 13.0 -> 4.6 s, every decode within
+WSJT-X's 15 s. Before that **Windows CI added**: x64 MinGW-w64 build, C == Python 57/57 on
 synthetic slots, plan 3c. Before that **decodes now stream to WSJT-X pass by pass**, plan 6 step (1): on 40 busy slots
 median time to first decodes 14.05 -> 5.26 s, and decodes shown within WSJT-X's 15 s timeout 79.5% -> 98.0% on
 this M1. Before that **remaining misses re-profiled, plan 7.1 item 1c**: 96-98% of jt9-only decodes are spot-confirmed real; the biggest fixable class is co-channel collisions, ~400 pooled, diagnosed but parked because the whole jt9-only pool is now ~1.3% of our decodes - **next is low-latency decoding, plan 6**. Before that **DT re-centring shipped**, `dt_recenter=0.8`, tag `nn_v3_dtc`, plan 7.1 item 1b: the
@@ -70,8 +73,8 @@ decodes verified identical to the main machine.
   a non-JSON line, exit on `quit`, and a missing model. The first attempt, a `jt9` shared-memory shim (`jt9nn`,
   Qt 5 + the 46 MiB `dec_data` segment, so stock WSJT-X would work too), was dropped: the fork has the sidecar
   interface and stock WSJT-X is not a target.
-- Last commit: `wsjtx/ft8nn_sidecar`, the decoder as WSJT-X's external FT8 decoder (plan 9). Next: low-latency
-  decoding (plan 7.6, with 6a: early pass, classical vs truncation-trained transformer).
+- Last commit: multi-threaded decoding with decodes streamed within a pass (plan 6 step 3; merged into `main`
+  with the user's OK, 2026-11-11). Next: idle timing on the M1 Pro, then the early pass (plan 6a).
 - Architecture study finished 2026-11-07 (plan 7.3d): keep the transformer. Its code (`train.py --kind conv|gru`,
   `--teacher`, `model.build`) is merged; models in `runs/{tf,conv,gru,tf_l2,tf_l2kd}_v{1,2}`, scripts `data/tmp/` (gitignored).
 - Loop log (finished): `nn_v2_eh` pass, `nn_v2_ob` fail (1 ghost), `nn_v2_og` pass, `nn_v2_p4` pass → run 2
@@ -685,6 +688,54 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       (a station answering), yet wait for the slot's end - first measure how often the final check actually
       drops one, then decide whether sending them with their pass is worth that risk; (b) step (3),
       parallelising pass 0, which carries 57% of the decodes; (c) passes 2-3 cost ~4 s for 5.2% of the decodes.
+      **Step (3), every pass on all performance cores, decodes streamed within a pass - DONE 2026-11-11.**
+      Exact: the decodes are the same in every field for any thread count (checks below). How:
+      - `c/src/par.c`: a pool of worker threads per context (pthreads; Windows threads under `_WIN32`), idle on a
+        condition variable between decodes; `ft8nn_open(onnx, n_threads)` now means decode threads (0 = one per core,
+        on macOS one per performance core: an efficiency core would hold up the last work items), ONNX Runtime runs
+        1 intra-op thread per call and our threads call `Run` concurrently on the shared session. `ft8nn_threads()`.
+      - Per pass: candidate search (spectrogram frames and Costas lag rows in parallel, the same additions per
+        cell), fine sync per candidate in parallel, then chunks of 32 hypotheses (`NN_CHUNK`: NN batch, classical
+        metrics and every decoder stage) in parallel. Each hypothesis is decoded *speculatively*, i.e. even if the
+        serial loop would have skipped it, and a serial merge replays the old loop's choices in hypothesis order
+        (skip a candidate once decoded, skip a hypothesis within 3 Hz / 0.05 s of a decode of this pass, drop known
+        payloads). Wasted work: ~1.4% more BP runs. ONNX Runtime's CPU time per hypothesis is the same for batches
+        of 16, 32 and 128, and smaller batches keep all threads busy to the end of a pass.
+      - Streaming within a pass: the calling thread merges the finished prefix between its own chunks and hands
+        the merged decodes to `ft8nn_decode_stream`'s callback at once (several calls per pass now; the strongest
+        candidates come first), up to the first `osd_er`/`osd_bp` decode, which the end-of-pass ghost filter may
+        still drop - so texts are unpacked, and the hash table learns callsigns, in exactly the old order.
+      - A pass's decodes are reported *before* they are subtracted (subtraction only prepares the next pass), and
+        nothing is subtracted after the last pass. Subtraction stays serial (each fit sees the previous one's
+        residual), but its alignment search runs in parallel and its two 160,000-point FFTs use a parallel FFT
+        (`fft_forward_par`, the top recursion levels as independent sub-transforms, then butterflies in chunks:
+        bit-identical to `fft_forward` for 2-10 threads on all four sizes we use); 22 -> ~11 ms per decode
+        under load. `baseband_init`'s 192,000-point FFT uses it too.
+      - `ft8nn_cli --stream` (decode with `ft8nn_decode_stream`, a `batch` line per callback on stderr), and the
+        sidecar defaults to `--threads 0`. `tools/golden_c.py --threads N` (default 4) / `--stream`, so CI's smoke
+        test now covers the threaded path on Linux and Windows. `wsjtx/test_sidecar.sh` compares sorted lines,
+        because the order *within* a slot now depends on which thread finishes first (the set does not).
+      **Checks.** C before (HEAD `51b0971`) vs after, every output field, slots in time order (context a-priori,
+      hashes): training 00_40m and 08_80m, run-2 02_80m, run-1 01_40m (20 slots each), all 119 slots of the two
+      drifting receivers (run 3 `03_20m`, run 4 `08_12m`, so the DT re-centring and shifted windows are covered:
+      1,656 decodes at DT < -1.5 s) and 60 AWGN files - 4 threads streamed and 10 threads non-streamed, 0 lines
+      differ (764 / 607 / 733 / 942 / 644 / 4,147 / 429 decodes, the first three and the AWGN count equal to the
+      golden counts, the drifting two equal to `nn_v3_dtc`). Golden C vs Python run 2 02_80m 733/733 all fields
+      under MallocScribble, streamed and with `--threads 0`; `ci_smoke.py` 57/57; `test_sidecar.sh` all 8 checks.
+      Not yet run: the Windows build of `par.c` (CI will), `validate_full.sh` (its Python references for
+      `nn_v3_dtc` are not on the mini).
+      **Measured** (M4 mini, 4 performance cores, while another session's 8 Python workers kept the load average at
+      14-18 - so wall times are upper bounds, and CPU time is the fair comparison): `fake_wsjtx --times`, run 1
+      `01_40m` first 40 slots, 1,944 decodes, identical as sets; old sidecar (1 thread) vs new (4):
+      median time to first decodes **5.20 -> 0.33 s** (p90 6.34 -> 0.40), slot done 13.00 -> 4.61 s (max 16.89 ->
+      5.18), mean latency per decode 7.67 -> 1.76 s, decodes within WSJT-X's 15 s 97.1% -> 100%. Work: 6 busy
+      slots, instructions retired 623.5 G (old) vs 625.1 G (new, 1 thread) and 625.3 G (4 threads), +0.3%;
+      cycles +6% at 4 threads (shared caches and memory bandwidth on a loaded machine), and user CPU 477.7 ->
+      537.4 s in the sidecar run, which also catches more efficiency-core time when 4 threads compete with 8
+      other jobs. Peak RSS 497 -> 536 MB. Not yet measured on an idle machine or on the M1 Pro (8 performance
+      cores): there pass 0 should take well under a second.
+      **Next:** (a) context decodes (8.5% of a busy slot) still wait for the slot's end; (b) the early pass (6a) -
+      at ~5 s per busy slot an early request no longer blocks the final one, so `--early` is worth re-testing.
       **6a. Early pass: classical vs truncation-trained transformer.** At ~11.8 s the last ~9 of the 79 symbols are
       missing (for DT ≈ 0.5 s: the third Costas sync block, symbols 72–78, plus data symbols 70–71, i.e. ~6 of the 174
       code bits; more for a later DT). Compare (a) the classical nsym 1/2/3 LLRs with the missing bits at LLR 0,

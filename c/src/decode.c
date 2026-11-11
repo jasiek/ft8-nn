@@ -7,12 +7,13 @@
  */
 #include <math.h>
 #include <onnxruntime_c_api.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-/* One-time init and a clock: POSIX here; the _WIN32 branch is for native Windows builds without pthreads (built with
+/* One-time init and clocks: POSIX here; the _WIN32 branch is for native Windows builds without pthreads (built with
  * MinGW-w64 gcc in CI, .github/workflows/windows.yml). */
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -32,6 +33,18 @@ static double tnow(void) {
     timespec_get(&t, TIME_UTC);
     return t.tv_sec + 1e-9 * t.tv_nsec;
 }
+static double tcpu(void) { /* process CPU time, all threads */
+    FILETIME c, e, k, u;
+    GetProcessTimes(GetCurrentProcess(), &c, &e, &k, &u);
+    return 1e-7 * ((double)(((uint64_t)k.dwHighDateTime << 32) | k.dwLowDateTime) +
+                   (double)(((uint64_t)u.dwHighDateTime << 32) | u.dwLowDateTime));
+}
+static double tthr(void) { /* this thread's CPU time */
+    FILETIME c, e, k, u;
+    GetThreadTimes(GetCurrentThread(), &c, &e, &k, &u);
+    return 1e-7 * ((double)(((uint64_t)k.dwHighDateTime << 32) | k.dwLowDateTime) +
+                   (double)(((uint64_t)u.dwHighDateTime << 32) | u.dwLowDateTime));
+}
 #else
 #include <pthread.h>
 typedef pthread_once_t once_t;
@@ -40,6 +53,16 @@ static void run_once(once_t *o, void (*fn)(void)) { pthread_once(o, fn); }
 static double tnow(void) {
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
+    return t.tv_sec + 1e-9 * t.tv_nsec;
+}
+static double tcpu(void) { /* process CPU time, all threads */
+    struct timespec t;
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t);
+    return t.tv_sec + 1e-9 * t.tv_nsec;
+}
+static double tthr(void) { /* this thread's CPU time */
+    struct timespec t;
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t);
     return t.tv_sec + 1e-9 * t.tv_nsec;
 }
 #endif
@@ -104,6 +127,7 @@ struct ft8nn_ctx {
     OrtEnv *env;
     OrtSession *sess;
     OrtMemoryInfo *mem;
+    par *pool; /* decode threads (ft8nn_open n_threads) */
     hash_table *ht;
     struct {
         int64_t t; /* slot start, s; INT64_MIN = empty */
@@ -144,8 +168,8 @@ ft8nn_ctx *ft8nn_open(const char *onnx_path, int n_threads) {
 #endif
     if (ort_check(api, api->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "ft8nn", &c->env)) ||
         ort_check(api, api->CreateSessionOptions(&so)) ||
-        (n_threads > 0 && ort_check(api, api->SetIntraOpNumThreads(so, n_threads))) ||
-        (n_threads > 0 && ort_check(api, api->SetInterOpNumThreads(so, 1))) ||
+        /* one ONNX Runtime thread per Run: our own threads call Run concurrently on chunks of hypotheses */
+        ort_check(api, api->SetIntraOpNumThreads(so, 1)) || ort_check(api, api->SetInterOpNumThreads(so, 1)) ||
         ort_check(api, api->SetSessionGraphOptimizationLevel(so, ORT_ENABLE_ALL)) ||
         ort_check(api, api->CreateSession(c->env, model, so, &c->sess)) ||
         ort_check(api, api->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &c->mem))) {
@@ -154,6 +178,7 @@ ft8nn_ctx *ft8nn_open(const char *onnx_path, int n_threads) {
         return NULL;
     }
     api->ReleaseSessionOptions(so);
+    c->pool = par_new(n_threads);
     c->ht = ht_new();
     for (int i = 0; i < CTX_HIST; i++) {
         c->hist[i].t = INT64_MIN;
@@ -167,6 +192,7 @@ void ft8nn_close(ft8nn_ctx *c) {
     const OrtApi *api = c->api;
     if (c->mem) api->ReleaseMemoryInfo(c->mem);
     if (c->sess) api->ReleaseSession(c->sess);
+    par_free(c->pool);
     if (c->env) api->ReleaseEnv(c->env);
     ht_free(c->ht);
     for (int i = 0; i < CTX_HIST; i++) free(c->hist[i].d);
@@ -175,15 +201,17 @@ void ft8nn_close(ft8nn_ctx *c) {
 
 void ft8nn_reset_hashes(ft8nn_ctx *c) { ht_clear(c->ht); }
 
-/* NN LLRs for nh hypotheses -> llr[h*174 ...] */
-static int run_nn(ft8nn_ctx *c, const sync_hyp *hyps, int nh, double *llr) {
+int ft8nn_threads(const ft8nn_ctx *c) { return par_threads(c->pool); }
+
+/* NN LLRs for nh hypotheses -> llr[h*174 ...]; feat holds NN_BATCH feature rows. Safe to call from several threads
+ * at once (ONNX Runtime sessions allow concurrent Run). */
+static int run_nn(ft8nn_ctx *c, sync_hyp *const *hyps, int nh, double *llr, float *feat) {
     const OrtApi *api = c->api;
-    float *feat = malloc(sizeof(float) * NN_BATCH * NN * NFEAT);
     const char *in_names[] = {"features"}, *out_names[] = {"llr"};
     int rc = 0;
     for (int i0 = 0; i0 < nh && !rc; i0 += NN_BATCH) {
         int b = nh - i0 < NN_BATCH ? nh - i0 : NN_BATCH;
-        for (int i = 0; i < b; i++) nn_features(hyps[i0 + i].y, hyps[i0 + i].start, feat + (size_t)i * NN * NFEAT);
+        for (int i = 0; i < b; i++) nn_features(hyps[i0 + i]->y, hyps[i0 + i]->start, feat + (size_t)i * NN * NFEAT);
         int64_t shape[3] = {b, NN, NFEAT};
         OrtValue *in = NULL, *out = NULL;
         if (ort_check(api, api->CreateTensorWithDataAsOrtValue(c->mem, feat, sizeof(float) * b * NN * NFEAT, shape, 3,
@@ -199,7 +227,6 @@ static int run_nn(ft8nn_ctx *c, const sync_hyp *hyps, int nh, double *llr) {
         if (in) api->ReleaseValue(in);
         if (out) api->ReleaseValue(out);
     }
-    free(feat);
     return rc;
 }
 
@@ -422,7 +449,6 @@ static int any_bits(const uint8_t *b, int n) {
     return 0;
 }
 
-/* One pass. Appends new decodes (payload not in all[0..nall)) to all; returns count added, -1 on error. */
 /* decoder._plausible: method if the payload could be a real transmission (callsign-block test only for OSD-family
  * methods), else -1 */
 static int plausible(int method, const uint8_t *a91) {
@@ -448,19 +474,229 @@ static int reuse_skip(const candidate *cd, const signed char *tried, const dec *
     return 1;
 }
 
+/* What the decoder stages make of one hypothesis on their own: the soft metrics in turn (NN, then classical nsym
+ * 1..3), each through BP, OSD, OSD on BP sums, context and CQ a-priori, erasures, until one gives a plausible message.
+ * It depends on nothing else in the pass, so the hypotheses of a pass are worked out in parallel and merged in order
+ * afterwards (decode_pass). */
+typedef struct {
+    int8_t status; /* 0: no decode; 1: decoded (k, method, a91, snr); 2: all-zero payload (classic false decode) */
+    int8_t k, method;
+    uint8_t a91[91];
+    double snr;
+    int n_bp, n_osd;
+} hyp_res;
+
+static void decode_hyp(const sync_hyp *hy, const double *L, int early, const dec *cx, int ncx, hyp_res *r) {
+    r->status = 0;
+    r->n_bp = r->n_osd = 0;
+    for (int k = 0; k < NMET; k++) {
+        const double *l = L + (size_t)k * 174;
+        double exp_err = 0;
+        for (int i = 0; i < 174; i++) exp_err += 1.0 / (1.0 + exp(fabs(l[i])));
+        uint8_t bits[174], a91[91];
+        int nhard, method = -1;
+        double dist;
+        r->n_bp++;
+        /* early-DT candidates have weaker sync evidence: no OSD on BP sums or under a-priori bits, no erasure stages */
+        /* every stage's result must be a plausible message (decoder._plausible); if not, the next stage tries */
+        if (bp_decode(l, 30, bits, &nhard) && crc_ok(bits)) {
+            memcpy(a91, bits, 91);
+            method = plausible(FT8NN_BP, a91);
+        }
+        if (method < 0 && k < 1 && exp_err < OSD_GATE && ++r->n_osd) {
+            if (osd_decode(l, OSD_ORDER, bits, &dist, &nhard) && nhard <= OSD_MAX_HARD) {
+                memcpy(a91, bits, 91);
+                method = plausible(FT8NN_OSD, a91);
+            }
+            if (method < 0 && OSD_SNAPS > 0 && !early) method = plausible(try_osd_bp(l, a91), a91);
+        }
+        if (method < 0 && k == 0 && ncx > 0 && !early && exp_err < CTX_GATE)
+            method = plausible(try_ctx(l, cx, ncx, hy->f0, hy->dt, a91), a91);
+        if (method < 0 && k == 0 && exp_err < AP_GATE) method = plausible(try_ap(l, a91, early ? -1 : OSD_ORDER), a91);
+        if (method < 0 && k == 0 && exp_err < ERASE_GATE && !early) method = plausible(try_erase(l, a91), a91);
+        if (method < 0) continue;
+        if (!any_bits(a91, 77)) {
+            r->status = 2;
+            return;
+        }
+        r->status = 1;
+        r->k = (int8_t)k;
+        r->method = (int8_t)method;
+        memcpy(r->a91, a91, 91);
+        r->snr = estimate_snr(hy, a91);
+        return;
+    }
+}
+
+/* per-thread CPU seconds of the stages, summed over threads for FT8NN_PROFILE */
+enum { ST_SYNC, ST_NN, ST_CL, ST_DEC, N_ST };
+
+typedef struct {
+    const baseband *bb;
+    const candidate *cands;
+    const int *sel; /* candidates to sync, indices into cands */
+    int ns;
+    sync_hyp *hyps; /* N_HYP slots per selected candidate */
+    int *nk;        /* hypotheses written per selected candidate */
+    atomic_int next;
+    double st[PAR_MAX_THREADS][N_ST];
+} sync_job;
+
+static void sync_worker(void *arg, int w) {
+    sync_job *j = arg;
+    double t0 = tthr();
+    for (;;) {
+        int i = atomic_fetch_add(&j->next, 1);
+        if (i >= j->ns) break;
+        j->nk[i] = fine_sync2(j->bb, &j->cands[j->sel[i]], N_HYP, j->hyps + (size_t)i * N_HYP);
+    }
+    j->st[w][ST_SYNC] += tthr() - t0;
+}
+
+/* hypotheses per work item (NN batch, classical metrics, decoding): small enough to keep all threads busy to the end
+ * of a pass; ONNX Runtime's CPU time per hypothesis is the same for batches of 16, 32 and 128 */
+#define NN_CHUNK 32
+
+typedef struct {
+    ft8nn_ctx *c;
+    sync_hyp **hp;
+    const uint8_t *early;
+    int nh;
+    const dec *cx;
+    int ncx;
+    hyp_res *res;
+    atomic_int next, err;
+    atomic_uchar *cdone;           /* per chunk: results written */
+    void (*between)(void *, int);  /* run by the calling thread after each of its chunks, with the next chunk index */
+    void *between_arg;
+    double st[PAR_MAX_THREADS][N_ST];
+} hyp_job;
+
+static void hyp_worker(void *arg, int w) {
+    hyp_job *j = arg;
+    float *feat = malloc(sizeof(float) * NN_BATCH * NN * NFEAT);
+    double *nnl = malloc(sizeof(double) * NN_CHUNK * 174), L[NMET * 174];
+    for (;;) {
+        int i0 = atomic_fetch_add(&j->next, NN_CHUNK);
+        if (i0 >= j->nh || atomic_load(&j->err)) break;
+        int b = j->nh - i0 < NN_CHUNK ? j->nh - i0 : NN_CHUNK;
+        double t0 = tthr();
+        if (run_nn(j->c, j->hp + i0, b, nnl, feat)) {
+            atomic_store(&j->err, 1);
+            break;
+        }
+        double t1 = tthr();
+        j->st[w][ST_NN] += t1 - t0;
+        for (int i = 0; i < b; i++) {
+            const sync_hyp *hy = j->hp[i0 + i];
+            t0 = tthr();
+            memcpy(L, nnl + (size_t)i * 174, sizeof(double) * 174);
+            cplx cs[NN][8];
+            symbol_spectra8(hy->y, hy->start, cs);
+            for (int k = 1; k < NMET; k++) coherent_llr(cs, k, L + k * 174);
+            t1 = tthr();
+            j->st[w][ST_CL] += t1 - t0;
+            decode_hyp(hy, L, j->early[i0 + i], j->cx, j->ncx, &j->res[i0 + i]);
+            j->st[w][ST_DEC] += tthr() - t1;
+        }
+        atomic_store_explicit(&j->cdone[i0 / NN_CHUNK], 1, memory_order_release);
+        if (w == 0 && j->between) j->between(j->between_arg, (int)((j->nh + NN_CHUNK - 1) / NN_CHUNK));
+    }
+    free(feat);
+    free(nnl);
+}
+
+static void report(ft8nn_ctx *c, dec *all, int from, int n, int ctx_too, int pass, ft8nn_pass_cb cb, void *user,
+                   ft8nn_decode_t *batch);
+
+/* The in-order merge of a pass's hypothesis results, run by the calling thread as chunks complete. */
+typedef struct {
+    ft8nn_ctx *c;
+    hyp_job *j;
+    sync_hyp **hp;
+    const int *owner;
+    uint8_t *done_cand;
+    dec *all;
+    int nall, cap, pass, added, h; /* next hypothesis to merge */
+    int sent;                      /* all[nall .. nall + sent) handed to cb */
+    long n_bp, n_osd, s_bp, s_osd;
+    ft8nn_pass_cb cb;
+    void *user;
+    ft8nn_decode_t *batch;
+} merger;
+
+/* merge hypotheses h .. upto: skip a candidate once decoded and a hypothesis next to a decode of this pass, drop
+ * payloads already known - exactly the serial decoder's choices */
+static void merge_to(merger *m, int upto) {
+    dec *all = m->all;
+    int nall = m->nall;
+    for (; m->h < upto; m->h++) {
+        int h = m->h, ci = m->owner[h];
+        const hyp_res *r = &m->j->res[h];
+        m->s_bp += r->n_bp;
+        m->s_osd += r->n_osd;
+        if (m->done_cand[ci]) continue;
+        int near = 0;
+        for (int q = nall; q < nall + m->added; q++)
+            if (fabs(m->hp[h]->f0 - all[q].f0) < 3 && fabs(m->hp[h]->dt - all[q].dt) < 0.05) near = 1;
+        if (near) {
+            m->done_cand[ci] = 1;
+            continue;
+        }
+        m->n_bp += r->n_bp;
+        m->n_osd += r->n_osd;
+        if (r->status != 1) continue;
+        int known = 0;
+        for (int q = 0; q < nall + m->added; q++)
+            if (same_payload(all[q].bits77, r->a91)) known = 1;
+        if (!known && nall + m->added < m->cap) {
+            dec *d = &all[nall + m->added++];
+            d->final = 0;
+            memcpy(d->bits77, r->a91, 77);
+            d->f0 = m->hp[h]->f0;
+            d->dt = m->hp[h]->dt;
+            d->method = r->method;
+            d->metric = r->k;
+            d->pass = m->pass;
+            d->snr = r->snr;
+        }
+        m->done_cand[ci] = 1;
+    }
+}
+
+/* Between chunks: merge what has completed in order, and hand the merged decodes to cb up to the first that the end
+ * of the pass may still drop (an osd_er / osd_bp ghost). That keeps texts unpacked in the serial order, so the hash
+ * table learns callsigns in the same order. Context decodes are passed over, as report() does. */
+static void merge_between(void *arg, int nchunks) {
+    merger *m = arg;
+    int ch = m->h / NN_CHUNK;
+    while (ch < nchunks && atomic_load_explicit(&m->j->cdone[ch], memory_order_acquire)) ch++;
+    int upto = ch * NN_CHUNK < m->j->nh ? ch * NN_CHUNK : m->j->nh;
+    if (upto <= m->h) return;
+    merge_to(m, upto);
+    if (!m->cb) return;
+    int q = m->sent;
+    while (q < m->added && !ghost_prone(m->all[m->nall + q].method)) q++;
+    if (q == m->sent) return;
+    int any = 0;
+    for (int i = m->sent; i < q; i++) any |= !is_ctx(m->all[m->nall + i].method);
+    if (any) report(m->c, m->all, m->nall + m->sent, m->nall + q, 0, m->pass, m->cb, m->user, m->batch);
+    m->sent = q;
+}
+
+/* One pass. Appends new decodes (payload not in all[0..nall)) to all; returns count added, -1 on error. Decodes that
+ * are final before the pass ends go to cb already (report: pass, then marked final). */
 static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall, int cap, int pass, const dec *cx, int ncx,
-                       signed char *tried, double dt_shift) {
+                       signed char *tried, double dt_shift, ft8nn_pass_cb cb, void *user, ft8nn_decode_t *batch) {
     if (prof < 0) prof = getenv("FT8NN_PROFILE") != NULL;
-    double t0 = tnow(), t1, t2, t3, t4, t5;
-    long n_bp = 0, n_osd = 0;
+    double t0 = tnow(), c0 = tcpu(), t1, t2, t3;
+    long n_bp = 0, n_osd = 0, s_bp = 0, s_osd = 0;
+    double st[N_ST] = {0};
     candidate *cands = malloc(sizeof(candidate) * (MAX_CAND + (int)(FMAX / 3.125) + 1));
-    int nc = find_candidates(x, n, 150.0, FMAX, MAX_CAND, 1.3, BASE_MEDIAN, EARLY_DT, EARLY_MIN, dt_shift, cands);
+    int nc = find_candidates(x, n, 150.0, FMAX, MAX_CAND, 1.3, BASE_MEDIAN, EARLY_DT, EARLY_MIN, dt_shift, cands, c->pool);
     t1 = tnow();
-    baseband bb;
-    baseband_init(&bb, x, n);
-    sync_hyp *hyps = malloc(sizeof(sync_hyp) * (size_t)(nc * N_HYP + 1));
-    int *owner = malloc(sizeof(int) * (size_t)(nc * N_HYP + 1));
-    int nh = 0, nskip = 0;
+    /* candidates to try, in order; the tried table is updated as the serial loop always did */
+    int *sel = malloc(sizeof(int) * (size_t)(nc + 1)), ns = 0, nskip = 0;
     for (int ci = 0; ci < nc; ci++) {
         if (REUSE_DF > 0 && pass > 0 && reuse_skip(&cands[ci], tried, all, nall)) {
             nskip++;
@@ -468,91 +704,65 @@ static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall,
         }
         int ti = tried_idx(&cands[ci]);
         if (ti >= 0) tried[ti] = (signed char)pass;
-        int k = fine_sync2(&bb, &cands[ci], N_HYP, hyps + nh);
-        for (int q = 0; q < k; q++) owner[nh + q] = ci;
-        nh += k;
+        sel[ns++] = ci;
+    }
+    baseband bb;
+    baseband_init(&bb, x, n, c->pool);
+    sync_hyp *hyps = malloc(sizeof(sync_hyp) * (size_t)(ns * N_HYP + 1));
+    int *nk = malloc(sizeof(int) * (size_t)(ns + 1));
+    {
+        sync_job *sj = calloc(1, sizeof *sj);
+        *sj = (sync_job){.bb = &bb, .cands = cands, .sel = sel, .ns = ns, .hyps = hyps, .nk = nk};
+        atomic_init(&sj->next, 0);
+        par_run(c->pool, sync_worker, sj);
+        for (int w = 0; w < PAR_MAX_THREADS; w++) st[ST_SYNC] += sj->st[w][ST_SYNC];
+        free(sj);
     }
     baseband_free(&bb);
+    /* hypotheses in candidate order, as the serial loop produced them */
+    sync_hyp **hp = malloc(sizeof(sync_hyp *) * (size_t)(ns * N_HYP + 1));
+    int *owner = malloc(sizeof(int) * (size_t)(ns * N_HYP + 1)), nh = 0;
+    uint8_t *early = malloc((size_t)(ns * N_HYP + 1));
+    for (int i = 0; i < ns; i++)
+        for (int q = 0; q < nk[i]; q++) {
+            hp[nh] = hyps + (size_t)i * N_HYP + q;
+            owner[nh] = i;
+            early[nh++] = (uint8_t)(cands[sel[i]].early != 0);
+        }
     t2 = tnow();
-    t3 = t4 = t5 = t2;
+    t3 = t2;
     int added = 0;
     if (nh == 0) goto done;
-    double *L = malloc(sizeof(double) * (size_t)nh * NMET * 174);
-    double *nnl = malloc(sizeof(double) * (size_t)nh * 174);
-    int nn_rc = run_nn(c, hyps, nh, nnl);
+    hyp_res *res = malloc(sizeof(hyp_res) * (size_t)nh);
+    int nchunk = (nh + NN_CHUNK - 1) / NN_CHUNK;
+    atomic_uchar *cdone = malloc(sizeof(atomic_uchar) * (size_t)nchunk);
+    for (int i = 0; i < nchunk; i++) atomic_init(&cdone[i], 0);
+    uint8_t *done_cand = calloc((size_t)ns + 1, 1);
+    hyp_job *hj = calloc(1, sizeof *hj);
+    merger m = {.c = c, .j = hj, .hp = hp, .owner = owner, .done_cand = done_cand, .all = all, .nall = nall, .cap = cap,
+                .pass = pass, .cb = cb, .user = user, .batch = batch};
+    *hj = (hyp_job){.c = c, .hp = hp, .early = early, .nh = nh, .cx = cx, .ncx = ncx, .res = res, .cdone = cdone,
+                    .between = merge_between, .between_arg = &m};
+    atomic_init(&hj->next, 0);
+    atomic_init(&hj->err, 0);
+    par_run(c->pool, hyp_worker, hj);
+    int err = atomic_load(&hj->err);
+    for (int w = 0; w < PAR_MAX_THREADS; w++)
+        for (int s = ST_NN; s < N_ST; s++) st[s] += hj->st[w][s];
     t3 = tnow();
-    if (nn_rc) {
-        free(L);
-        free(nnl);
+    if (!err) merge_to(&m, nh);
+    added = m.added;
+    n_bp = m.n_bp;
+    n_osd = m.n_osd;
+    s_bp = m.s_bp;
+    s_osd = m.s_osd;
+    free(hj);
+    free(cdone);
+    free(done_cand);
+    free(res);
+    if (err) {
         added = -1;
         goto done;
-    }
-    for (int h = 0; h < nh; h++) {
-        double *row = L + (size_t)h * NMET * 174;
-        memcpy(row, nnl + (size_t)h * 174, sizeof(double) * 174);
-        cplx cs[NN][8];
-        symbol_spectra8(hyps[h].y, hyps[h].start, cs);
-        for (int k = 1; k < NMET; k++) coherent_llr(cs, k, row + k * 174);
-    }
-    free(nnl);
-    t4 = tnow();
-    uint8_t *done_cand = calloc(nc, 1);
-    int pass_start = nall;
-    for (int h = 0; h < nh; h++) {
-        int ci = owner[h];
-        if (done_cand[ci]) continue;
-        int near = 0;
-        for (int q = pass_start; q < nall + added; q++)
-            if (fabs(hyps[h].f0 - all[q].f0) < 3 && fabs(hyps[h].dt - all[q].dt) < 0.05) near = 1;
-        if (near) {
-            done_cand[ci] = 1;
-            continue;
-        }
-        for (int k = 0; k < NMET; k++) {
-            const double *l = L + ((size_t)h * NMET + k) * 174;
-            double exp_err = 0;
-            for (int i = 0; i < 174; i++) exp_err += 1.0 / (1.0 + exp(fabs(l[i])));
-            uint8_t bits[174], a91[91];
-            int nhard, method = -1;
-            double dist;
-            n_bp++;
-            /* early-DT candidates have weaker sync evidence: no OSD on BP sums or under a-priori bits, no erasure stages */
-            int early = cands[ci].early;
-            /* every stage's result must be a plausible message (decoder._plausible); if not, the next stage tries */
-            if (bp_decode(l, 30, bits, &nhard) && crc_ok(bits)) {
-                memcpy(a91, bits, 91);
-                method = plausible(FT8NN_BP, a91);
-            }
-            if (method < 0 && k < 1 && exp_err < OSD_GATE && ++n_osd) {
-                if (osd_decode(l, OSD_ORDER, bits, &dist, &nhard) && nhard <= OSD_MAX_HARD) {
-                    memcpy(a91, bits, 91);
-                    method = plausible(FT8NN_OSD, a91);
-                }
-                if (method < 0 && OSD_SNAPS > 0 && !early) method = plausible(try_osd_bp(l, a91), a91);
-            }
-            if (method < 0 && k == 0 && ncx > 0 && !early && exp_err < CTX_GATE)
-                method = plausible(try_ctx(l, cx, ncx, hyps[h].f0, hyps[h].dt, a91), a91);
-            if (method < 0 && k == 0 && exp_err < AP_GATE) method = plausible(try_ap(l, a91, early ? -1 : OSD_ORDER), a91);
-            if (method < 0 && k == 0 && exp_err < ERASE_GATE && !early) method = plausible(try_erase(l, a91), a91);
-            if (method < 0) continue;
-            if (!any_bits(a91, 77)) break; /* all-zero payload: classic false decode */
-            int known = 0;
-            for (int q = 0; q < nall + added; q++)
-                if (same_payload(all[q].bits77, a91)) known = 1;
-            if (!known && nall + added < cap) {
-                dec *d = &all[nall + added++];
-                d->final = 0;
-                memcpy(d->bits77, a91, 77);
-                d->f0 = hyps[h].f0;
-                d->dt = hyps[h].dt;
-                d->method = method;
-                d->metric = k;
-                d->pass = pass;
-                d->snr = estimate_snr(&hyps[h], a91);
-            }
-            done_cand[ci] = 1;
-            break;
-        }
     }
     /* drop osd_er / osd_bp ghosts of another decode (earlier pass, or this pass and not ghost-prone), as
      * decoder._decode_pass (GHOST_PRONE) */
@@ -572,16 +782,20 @@ static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall,
         added = w;
     }
     added = drop_ctx_dupes(all, nall, nall + added) - nall;
-    free(done_cand);
-    free(L);
-    t5 = tnow();
 done:
     if (prof)
-        fprintf(stderr, "pass %d: cand %d skip %d hyp %d | cand %.2fs sync %.2fs nn %.2fs classical %.2fs bp/osd %.2fs (bp %ld osd %ld) -> %d\n",
-                pass, nc, nskip, nh, t1 - t0, t2 - t1, t3 - t2, t4 - t3, t5 - t4, n_bp, n_osd, added);
+        fprintf(stderr,
+                "pass %d: cand %d skip %d hyp %d | wall cand %.2fs sync %.2fs decode %.2fs merge %.2fs = %.2fs, cpu %.2fs"
+                " (sync %.2f nn %.2f classical %.2f bp/osd %.2f) | bp %ld osd %ld (+%ld/%ld speculative) -> %d\n",
+                pass, nc, nskip, nh, t1 - t0, t2 - t1, t3 - t2, tnow() - t3, tnow() - t0, tcpu() - c0, st[ST_SYNC],
+                st[ST_NN], st[ST_CL], st[ST_DEC], n_bp, n_osd, s_bp - n_bp, s_osd - n_osd, added);
     free(cands); /* candidate flags (early) are read in the decode loop */
+    free(sel);
     free(hyps);
+    free(nk);
+    free(hp);
     free(owner);
+    free(early);
     return added;
 }
 
@@ -669,7 +883,7 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
     }
     for (int p = 0; p < PASSES; p++) {
         double shift = DT_RECENTER > 0 ? dt_recenter_shift(all, nall, cx, ncx) : 0.0;
-        int k = decode_pass(c, x, n, all, nall, DEC_CAP, p, cx, ncx, tried, shift);
+        int k = decode_pass(c, x, n, all, nall, DEC_CAP, p, cx, ncx, tried, shift, cb, user, batch);
         if (k < 0) {
             free(x);
             free(all);
@@ -678,13 +892,16 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
             free(batch);
             return -1;
         }
-        for (int q = nall; q < nall + k; q++) {
+        /* report first: subtraction only prepares the next pass, and takes ~20 ms per decode */
+        report(c, all, nall, nall + k, 0, p, cb, user, batch);
+        double ts = tnow();
+        for (int q = nall; q < nall + k && p + 1 < PASSES; q++) {
             uint8_t cw[174];
             int tones[NN];
             encode77(all[q].bits77, cw, tones);
-            subtract_signal(x, n, tones, all[q].f0, all[q].dt);
+            subtract_signal(x, n, tones, all[q].f0, all[q].dt, c->pool);
         }
-        report(c, all, nall, nall + k, 0, p, cb, user, batch);
+        if (prof && k) fprintf(stderr, "subtract %d: %.2fs\n", k, tnow() - ts);
         nall += k;
         if (!k) break;
     }

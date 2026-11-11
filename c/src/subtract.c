@@ -20,12 +20,12 @@ static cplx *win_f;    /* FFT of the window, zero padded to NCONV */
 static double *refpow_lp; /* max(LPF{|ref|^2}, 1e-3), 'same' alignment */
 
 /* 'same' convolution with the window: out[i] = full[i + (NFILT-1)/2] */
-static void conv_same(const cplx *in, int n, cplx *out, cplx *buf1, cplx *buf2) {
+static void conv_same(const cplx *in, int n, cplx *out, cplx *buf1, cplx *buf2, par *pool) {
     memset(buf1, 0, sizeof(cplx) * NCONV);
     memcpy(buf1, in, sizeof(cplx) * n);
-    fft_forward(conv_plan, buf1, buf2);
+    fft_forward_par(conv_plan, buf1, buf2, pool);
     for (int k = 0; k < NCONV; k++) buf2[k] *= win_f[k];
-    fft_inverse(conv_plan, buf2, buf1);
+    fft_inverse_par(conv_plan, buf2, buf1, pool);
     for (int i = 0; i < n; i++) out[i] = buf1[i + (NFILT - 1) / 2] / NCONV;
 }
 
@@ -52,7 +52,7 @@ void subtract_init(void) {
         else if (i >= NREF - nr) env = 0.5 * (1 - cos(M_PI * (NREF - 1 - i) / nr));
         rp[i] = env * env;
     }
-    conv_same(rp, NREF, lp, b1, b2);
+    conv_same(rp, NREF, lp, b1, b2, NULL);
     refpow_lp = malloc(sizeof(double) * NREF);
     for (int i = 0; i < NREF; i++) refpow_lp[i] = fmax(creal(lp[i]), 1e-3);
     free(w);
@@ -77,29 +77,43 @@ static double block_energy(const double *x, int n, const cplx *ref, int k0) {
     return e;
 }
 
-void subtract_signal(double *x, int n, const int *tones, double f0, double dt) {
+/* block energies at offsets d0, d0 + step, ... (independent sums: worked out in parallel) */
+typedef struct {
+    const double *x;
+    int n, k0, d0, step;
+    const cplx *ref;
+    double *e;
+} align_job;
+static void align_item(void *a, int i) {
+    align_job *j = a;
+    j->e[i] = block_energy(j->x, j->n, j->ref, j->k0 + j->d0 + i * j->step);
+}
+
+void subtract_signal(double *x, int n, const int *tones, double f0, double dt, par *pool) {
     cplx *ref = malloc(sizeof(cplx) * NREF);
     complex_wave(tones, f0, ref);
     int k0 = (int)nearbyint((NOMINAL_START + dt) * FS);
     /* refine alignment: coarse +-48 in steps of 4, then +-3 around the best (first max wins) */
+    double e[25];
+    align_job aj = {x, n, k0, -48, 4, ref, e};
+    par_for(pool, 25, align_item, &aj);
     int coarse = -48;
     double best = -1;
-    for (int d = -48; d <= 48; d += 4) {
-        double e = block_energy(x, n, ref, k0 + d);
-        if (e > best) {
-            best = e;
-            coarse = d;
+    for (int i = 0; i < 25; i++)
+        if (e[i] > best) {
+            best = e[i];
+            coarse = -48 + 4 * i;
         }
-    }
+    aj.d0 = coarse - 3;
+    aj.step = 1;
+    par_for(pool, 7, align_item, &aj);
     int fine = coarse - 3;
     best = -1;
-    for (int d = coarse - 3; d <= coarse + 3; d++) {
-        double e = block_energy(x, n, ref, k0 + d);
-        if (e > best) {
-            best = e;
-            fine = d;
+    for (int i = 0; i < 7; i++)
+        if (e[i] > best) {
+            best = e[i];
+            fine = coarse - 3 + i;
         }
-    }
     k0 += fine;
     cplx *seg = malloc(sizeof(cplx) * NREF), *a = malloc(sizeof(cplx) * NREF);
     cplx *b1 = malloc(sizeof(cplx) * NCONV), *b2 = malloc(sizeof(cplx) * NCONV);
@@ -107,7 +121,7 @@ void subtract_signal(double *x, int n, const int *tones, double f0, double dt) {
         int j = k0 + i;
         seg[i] = (j >= 0 && j < n) ? x[j] * conj(ref[i]) : 0;
     }
-    conv_same(seg, NREF, a, b1, b2);
+    conv_same(seg, NREF, a, b1, b2, pool);
     int lo = k0 > 0 ? k0 : 0, hi = k0 + NREF < n ? k0 + NREF : n;
     for (int j = lo; j < hi; j++) {
         int i = j - k0;

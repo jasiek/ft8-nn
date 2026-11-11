@@ -1,12 +1,15 @@
 /* ft8nn_cli: decode 15 s WAV slots with libft8nn.
  *
- *   ft8nn_cli [--threads N] [--time] model.onnx slot1.wav [slot2.wav ...]
+ *   ft8nn_cli [--threads N] [--time] [--stream] model.onnx slot1.wav [slot2.wav ...]
  *
  * One context for all files, so callsign hashes carry over in the order given (pass slots in
  * time order). Files named yymmdd_HHMMSS.wav are decoded with ft8nn_decode_at (context a-priori from the
  * slots 30 and 60 s earlier); other names with ft8nn_decode. Output, one line per decode, same format as bench/run_real.py decodes_<tag>.txt:
  *   <slot>\t<f0 %.1f>\t<dt %.2f>\t<method><metric>\t<text>\t<77 bits as 20 hex digits>\t<snr %.1f>
+ * --threads N: decode threads (default 1; 0 = one per performance core).
  * --time also writes "time\t<slot>\t<decode wall s %.3f>\t<decodes>" per slot to stderr.
+ * --stream decodes with ft8nn_decode_stream and prints the decodes in the order they are handed out, writing
+ * "batch\t<slot>\t<pass>\t<s since the decode started %.3f>\t<decodes>" to stderr for every callback.
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -72,6 +75,38 @@ static const char *method_name(int m) {
     return m >= 0 && m < 9 ? names[m] : "?";
 }
 
+static void print_decode(const char *slot, const ft8nn_decode_t *d) {
+    /* 77-bit payload as a 20-digit hex number (Python: f"{int(bits, 2):020x}"): 4-bit groups from the
+     * least significant end, the top digit holding the first bit */
+    char hx[21];
+    for (int q = 19, e = 77; q >= 0; q--, e -= 4) {
+        int v = 0;
+        for (int b = e - 4 < 0 ? 0 : e - 4; b < e; b++) v = 2 * v + ((d->bits77[b / 8] >> (7 - b % 8)) & 1);
+        hx[q] = "0123456789abcdef"[v];
+    }
+    hx[20] = 0;
+    printf("%s\t%.1f\t%.2f\t%s%d\t%s\t%s\t%.1f\n", slot, d->f0, d->dt, method_name(d->method), d->metric, d->text, hx,
+           d->snr);
+}
+
+static double secs(const struct timespec *a, const struct timespec *b) {
+    return b->tv_sec - a->tv_sec + 1e-9 * (b->tv_nsec - a->tv_nsec);
+}
+
+typedef struct {
+    const char *slot;
+    struct timespec t0;
+} stream_st;
+
+static void on_batch(const ft8nn_decode_t *d, int n, int pass, void *user) {
+    stream_st *s = user;
+    struct timespec t;
+    mono_now(&t);
+    fprintf(stderr, "batch\t%s\t%d\t%.3f\t%d\n", s->slot, pass, secs(&s->t0, &t), n);
+    for (int k = 0; k < n; k++) print_decode(s->slot, &d[k]);
+    fflush(stdout);
+}
+
 /* slot start from a yymmdd_HHMMSS name on a 15 s boundary, s since 1970 (UTC); INT64_MIN otherwise (e.g. the
  * numbered synthetic test files) */
 static int64_t slot_time(const char *slot) {
@@ -86,7 +121,7 @@ static int64_t slot_time(const char *slot) {
 }
 
 int main(int argc, char **argv) {
-    int threads = 1, timing = 0, a = 1;
+    int threads = 1, timing = 0, stream = 0, a = 1;
     for (;;) {
         if (a + 1 < argc && !strcmp(argv[a], "--threads")) {
             threads = atoi(argv[a + 1]);
@@ -94,11 +129,14 @@ int main(int argc, char **argv) {
         } else if (a < argc && !strcmp(argv[a], "--time")) {
             timing = 1;
             a++;
+        } else if (a < argc && !strcmp(argv[a], "--stream")) {
+            stream = 1;
+            a++;
         } else
             break;
     }
     if (argc - a < 2) {
-        fprintf(stderr, "usage: %s [--threads N] [--time] model.onnx slot.wav...\n", argv[0]);
+        fprintf(stderr, "usage: %s [--threads N] [--time] [--stream] model.onnx slot.wav...\n", argv[0]);
         return 2;
     }
     ft8nn_ctx *ctx = ft8nn_open(argv[a], threads);
@@ -127,29 +165,18 @@ int main(int argc, char **argv) {
         int64_t t = slot_time(slot);
         struct timespec t0, t1;
         mono_now(&t0);
-        int nd = t == INT64_MIN ? ft8nn_decode(ctx, x, n, out, 256) : ft8nn_decode_at(ctx, x, n, t, out, 256);
+        stream_st st = {slot, t0};
+        int nd = stream ? ft8nn_decode_stream(ctx, x, n, t, on_batch, &st, NULL, 0)
+                 : t == INT64_MIN ? ft8nn_decode(ctx, x, n, out, 256)
+                                  : ft8nn_decode_at(ctx, x, n, t, out, 256);
         mono_now(&t1);
-        if (timing)
-            fprintf(stderr, "time\t%s\t%.3f\t%d\n", slot, t1.tv_sec - t0.tv_sec + 1e-9 * (t1.tv_nsec - t0.tv_nsec), nd);
+        if (timing) fprintf(stderr, "time\t%s\t%.3f\t%d\n", slot, secs(&t0, &t1), nd);
         free(x);
         if (nd < 0) {
             fprintf(stderr, "%s: decode failed\n", argv[i]);
             continue;
         }
-        for (int k = 0; k < nd && k < 256; k++) {
-            const ft8nn_decode_t *d = &out[k];
-            /* 77-bit payload as a 20-digit hex number (Python: f"{int(bits, 2):020x}"): 4-bit groups from the
-             * least significant end, the top digit holding the first bit */
-            char hx[21];
-            for (int q = 19, e = 77; q >= 0; q--, e -= 4) {
-                int v = 0;
-                for (int b = e - 4 < 0 ? 0 : e - 4; b < e; b++) v = 2 * v + ((d->bits77[b / 8] >> (7 - b % 8)) & 1);
-                hx[q] = "0123456789abcdef"[v];
-            }
-            hx[20] = 0;
-            printf("%s\t%.1f\t%.2f\t%s%d\t%s\t%s\t%.1f\n", slot, d->f0, d->dt, method_name(d->method), d->metric, d->text, hx,
-                   d->snr);
-        }
+        for (int k = 0; !stream && k < nd && k < 256; k++) print_decode(slot, &out[k]);
         fflush(stdout);
     }
     ft8nn_close(ctx);

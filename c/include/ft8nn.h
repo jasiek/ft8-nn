@@ -32,9 +32,13 @@ typedef struct {
     int pass;           /* subtraction pass, 0-based */
 } ft8nn_decode_t;
 
-/* onnx_path: model exported by tools/export_onnx.py. n_threads: ONNX Runtime intra-op threads
- * (0 = runtime default). Returns NULL on failure (message on stderr). */
+/* onnx_path: model exported by tools/export_onnx.py. n_threads: threads a decode runs on (0 = one per core; on
+ * Apple silicon one per performance core). The context keeps them, idle between decodes; the decodes do not depend
+ * on the number. Returns NULL on failure (message on stderr). */
 ft8nn_ctx *ft8nn_open(const char *onnx_path, int n_threads);
+
+/* The number of threads the context decodes on. */
+int ft8nn_threads(const ft8nn_ctx *ctx);
 
 /* Decode one 15 s slot of 12 kHz mono audio (any scale; the slot starts at audio12k[0]).
  * Uses at most the first 180000 samples. Writes up to max_out decodes, returns the number of
@@ -50,13 +54,14 @@ int ft8nn_decode_at(ft8nn_ctx *ctx, const float *audio12k, int n, int64_t slot_t
 /* Passed as slot_time when the slot's start time is not known: no context a-priori decoding. */
 #define FT8NN_NO_SLOT_TIME INT64_MIN
 
-/* Called by ft8nn_decode_stream as decodes become final, so a caller can show them before the slot is done
- * (the first pass finds most of them in a fraction of the total time). After each subtraction pass, with
- * pass = 0, 1, ... and that pass's decodes; then exactly once with pass = -1 and the context a-priori decodes
+/* Called by ft8nn_decode_stream as decodes become final, so a caller can show them before the slot is done.
+ * During a subtraction pass, with pass = 0, 1, ... and the decodes that pass has made final so far (the strongest
+ * candidates are tried first, so the first call comes after a fraction of the pass), and once more when the pass
+ * ends, with the rest of it (n may be 0); then exactly once with pass = -1 and the context a-priori decodes
  * (FT8NN_BP_CTX / FT8NN_OSD_CTX), which wait for the end because a later pass may decode the same sender's
- * real message and drop them. Every decode is reported exactly once, n may be 0, and the decodes together
- * equal what ft8nn_decode_at returns. The array is only valid during the call (NULL when n is 0). If the decode
- * fails (returns -1) the pass = -1 call is not made. */
+ * real message and drop them. Every decode is reported exactly once, and the decodes together equal what
+ * ft8nn_decode_at returns. Calls come from the thread that called ft8nn_decode_stream. The array is only valid
+ * during the call (NULL when n is 0). If the decode fails (returns -1) the pass = -1 call is not made. */
 typedef void (*ft8nn_pass_cb)(const ft8nn_decode_t *decodes, int n, int pass, void *user);
 
 /* As ft8nn_decode_at (or ft8nn_decode with slot_time = FT8NN_NO_SLOT_TIME), reporting decodes through cb as

@@ -16,9 +16,9 @@
  *     {"seq":N,"snr":-12,"dt":0.3,"freq":1234,"msg":"CQ K1ABC FN42"[,"ap":1][,"lowconf":true]}
  *     {"seq":N,"done":true}                                  exactly one per request, always
  *
- *   Decodes go out as the decoder finalises them, a batch per subtraction pass, not all at the end:
- *   WSJT-X shows each line as it arrives (and auto-sequencing acts on it), and the first pass finds
- *   most of a slot's decodes in a fraction of the total time.
+ *   Decodes go out as the decoder finalises them, in batches during each subtraction pass, not all
+ *   at the end: WSJT-X shows each line as it arrives (and auto-sequencing acts on it), and the
+ *   strongest signals come out first, a fraction of a second into the decode.
  *
  *   stderr is free-form text; WSJT-X copies it into its log.
  *
@@ -93,7 +93,7 @@ static double monotonic ()
 struct Options
 {
   std::string model;                    // --model, else $FT8NN_MODEL, else searched (find_model)
-  int threads = 1;                      // --threads: ONNX Runtime intra-op threads
+  int threads = 0;                      // --threads: decode threads, 0 = one per performance core
   int max_decodes = 200;                // --max-decodes per pass
   bool early = false;                   // --early: decode WSJT-X's early passes too
   bool range = true;                    // --no-range: keep decodes outside [nfa, nfb]
@@ -110,7 +110,7 @@ static char const * const usage_text =
   "Options:\n"
   "  --model PATH      ft8nn.onnx (default: $FT8NN_MODEL, then ft8nn.onnx next to this\n"
   "                    binary, in $WSJTX_DATA_DIR / $WSJTX_SHARE_DIR, or ../models/v3)\n"
-  "  --threads N       ONNX Runtime threads for the neural metric (default 1)\n"
+  "  --threads N       decode threads (default 0: one per performance core)\n"
   "  --early           also decode WSJT-X's early passes (default: answer them at once with\n"
   "                    no decodes, see README: a slow early pass costs the full one)\n"
   "  --max-decodes N   report at most N decodes per WSJT-X pass (default 200)\n"
@@ -133,7 +133,7 @@ static bool parse_args (int argc, char ** argv, Options & o)
         return argv[++i];
       };
       if (a == "--model") o.model = next ();
-      else if (a == "--threads") o.threads = std::max (1, atoi (next ().c_str ()));
+      else if (a == "--threads") o.threads = std::max (0, atoi (next ().c_str ()));
       else if (a == "--max-decodes") o.max_decodes = std::max (1, atoi (next ().c_str ()));
       else if (a == "--early") o.early = true;
       else if (a == "--no-range") o.range = false;
@@ -216,14 +216,15 @@ struct Decoder
         say ("ft8nn_open failed for %s", model.c_str ());
         return false;
       }
-    say ("model %s, %d ONNX thread(s)", model.c_str (), o.threads);
+    say ("model %s, %d decode thread(s)", model.c_str (), ft8nn_threads (ctx));
     audio.resize ((size_t) SLOT_SAMPLES);
     return true;
   }
 
   /* Decode n samples of audio and hand the decodes to sink(batch, pass) as the decoder finalises
-   * them (ft8nn_decode_stream): once per subtraction pass, pass = 0, 1, ..., then once with pass = -1
-   * and the context a-priori decodes, which have to wait for the last pass. Each batch keeps what
+   * them (ft8nn_decode_stream): batches during and at the end of each subtraction pass, pass = 0, 1,
+   * ..., then once with pass = -1 and the context a-priori decodes, which have to wait for the last
+   * pass. Each batch keeps what
    * [nfa, nfb] allows, in frequency order like a jt9 pass; at most --max-decodes in all, counted in
    * the order the decoder finds them. slot_time is the period's start as epoch seconds, which the
    * decoder needs for its context a-priori decoding (it looks at this station's own decodes 30 and

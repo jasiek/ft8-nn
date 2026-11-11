@@ -29,6 +29,18 @@ extern const int GRAY_INV[8];
 extern const int DATA_POS[ND];
 extern const int SYNC_SYMS[21];
 
+/* ---- par.c: a pool of worker threads (one per context; a context is used by one thread at a time) */
+#define PAR_MAX_THREADS 64
+typedef struct par par;
+par *par_new(int nthreads); /* nthreads <= 0: one per (performance) core */
+void par_free(par *p);
+int par_threads(const par *p); /* threads including the caller; 1 for p == NULL */
+/* fn(arg, w) on every thread of the pool at once, w = 0 .. par_threads - 1 (0 is the caller); returns when all are
+ * done. Not reentrant: fn must not call par_run / par_for on the same pool. p == NULL runs fn(arg, 0). */
+void par_run(par *p, void (*fn)(void *, int), void *arg);
+/* body(arg, i) for every i in [0, n), on the pool's threads in any order */
+void par_for(par *p, int n, void (*body)(void *, int), void *arg);
+
 /* ---- fft.c: complex FFT for sizes with factors 2, 3, 5 */
 typedef struct fft_plan fft_plan;
 fft_plan *fft_plan_new(int n);
@@ -38,6 +50,9 @@ int fft_size(const fft_plan *p);
 void fft_forward(const fft_plan *p, const cplx *in, cplx *out);
 /* out = unnormalised inverse DFT (sign +). in != out. */
 void fft_inverse(const fft_plan *p, const cplx *in, cplx *out);
+/* the same on a thread pool (bit-identical results; pool may be NULL) */
+void fft_forward_par(const fft_plan *p, const cplx *in, cplx *out, par *pool);
+void fft_inverse_par(const fft_plan *p, const cplx *in, cplx *out, par *pool);
 
 /* ---- ft8.c */
 void ft8_init(void);
@@ -64,7 +79,7 @@ typedef struct {
 } candidate;
 /* out must hold max_cand + (fmax - fmin) / 3.125 entries: up to max_cand main candidates, then the early-DT track */
 int find_candidates(const double *x, int n, double fmin, double fmax, int max_cand, double min_score, int base_median,
-                    double early_dt, double early_min, double dt_shift, candidate *out);
+                    double early_dt, double early_min, double dt_shift, candidate *out, par *pool);
 
 typedef struct {
     fft_plan *full, *bb;
@@ -72,7 +87,7 @@ typedef struct {
     double noise_psd;
     cplx *tmp; /* scratch NFFT_FULL */
 } baseband;
-void baseband_init(baseband *b, const double *x, int n);
+void baseband_init(baseband *b, const double *x, int n, par *pool);
 void baseband_free(baseband *b);
 void baseband_downsample(const baseband *b, double f0, cplx *y);
 
@@ -92,7 +107,7 @@ void coherent_llr(cplx cs[NN][8], int nsym, double *llr174);
 
 /* ---- subtract.c */
 void subtract_init(void);
-void subtract_signal(double *x, int n, const int *tones, double f0, double dt);
+void subtract_signal(double *x, int n, const int *tones, double f0, double dt, par *pool);
 
 /* ---- unpack.c */
 typedef struct hash_table hash_table;

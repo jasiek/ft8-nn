@@ -34,7 +34,7 @@ SHFLAGS = -shared
 endif
 endif
 
-SRC = src/fft.c src/ft8.c src/ldpc.c src/frontend.c src/subtract.c src/unpack.c src/decode.c
+SRC = src/par.c src/fft.c src/ft8.c src/ldpc.c src/frontend.c src/subtract.c src/unpack.c src/decode.c
 OBJ = $(SRC:src/%.c=build/%.o)
 
 all: build/libft8nn.a $(SHLIB) build/ft8nn_cli$(EXE) $(RUNTIME)

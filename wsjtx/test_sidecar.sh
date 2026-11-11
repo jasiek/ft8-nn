@@ -39,12 +39,15 @@ trap 'rm -rf "$tmp"' EXIT
 first=$(echo "$wavs" | head -1)
 
 # 1. a plain decode of the files, and the same audio through the protocol. --no-range turns off the
-#    [nfa, nfb] filter, which check 3 exercises on its own.
+#    [nfa, nfb] filter, which check 3 exercises on its own. Decodes go out in batches as the decoder's
+#    threads finish them, so the order within a slot can differ from run to run; the comparisons
+#    here and in checks 3 and 5 are of sorted lines (each line carries its slot's hhmmss).
 # shellcheck disable=SC2086
 "$sidecar" --model "$model" $wavs > "$tmp/file.txt"
 # shellcheck disable=SC2086
 "$fake" --decoder "$sidecar --model $model --no-range" $wavs > "$tmp/side.txt"
-if ! diff -u "$tmp/file.txt" "$tmp/side.txt" > "$tmp/diff.txt"; then
+LC_ALL=C sort "$tmp/file.txt" > "$tmp/file.sorted"; LC_ALL=C sort "$tmp/side.txt" > "$tmp/side.sorted"
+if ! diff -u "$tmp/file.sorted" "$tmp/side.sorted" > "$tmp/diff.txt"; then
   echo "FAIL: the sidecar path and a plain decode of the same audio differ"; cat "$tmp/diff.txt"; exit 1
 fi
 ndec=$(grep -vc "<DecodeFinished>" "$tmp/side.txt" || true)
@@ -81,7 +84,8 @@ echo "ok: all $ndec lines have jt9's FT8 column layout"
 awk '/<DecodeFinished>/ {print; next} {f=substr($0,16,5)+0; if (f>=200 && f<=4000) print}' \
     "$tmp/file.txt" | sed 's/<DecodeFinished>.*//' > "$tmp/want.txt"
 sed 's/<DecodeFinished>.*//' "$tmp/range.txt" > "$tmp/got.txt"
-if ! diff -u "$tmp/want.txt" "$tmp/got.txt" > "$tmp/diff2.txt"; then
+LC_ALL=C sort "$tmp/want.txt" > "$tmp/want.sorted"; LC_ALL=C sort "$tmp/got.txt" > "$tmp/got.sorted"
+if ! diff -u "$tmp/want.sorted" "$tmp/got.sorted" > "$tmp/diff2.txt"; then
   echo "FAIL: the [nfa, nfb] filter did not keep exactly the decodes in 200..4000 Hz"
   head -20 "$tmp/diff2.txt"; exit 1
 fi
@@ -105,7 +109,8 @@ echo "ok: early pass skipped by default ($nearly decodes with --early)"
 nfin2=$(grep -c "<DecodeFinished>" "$tmp/redecode.txt" || true)
 [ "$nfin2" -eq 2 ] || { echo "FAIL: expected two answers, got $nfin2"; exit 1; }
 awk 'BEGIN {n=0} /<DecodeFinished>/ {n++; next} {print > ("'"$tmp"'/pass" n ".txt")}' "$tmp/redecode.txt"
-if ! diff -u "$tmp/pass0.txt" "$tmp/pass1.txt" > "$tmp/diff3.txt"; then
+LC_ALL=C sort "$tmp/pass0.txt" > "$tmp/pass0.sorted"; LC_ALL=C sort "$tmp/pass1.txt" > "$tmp/pass1.sorted"
+if ! diff -u "$tmp/pass0.sorted" "$tmp/pass1.sorted" > "$tmp/diff3.txt"; then
   echo "FAIL: the re-decode did not reproduce the first pass"; head -20 "$tmp/diff3.txt"; exit 1
 fi
 echo "ok: a re-decode (samples=0) decoded the same audio again ($(wc -l < "$tmp/pass0.txt" | tr -d ' ') decodes)"

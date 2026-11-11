@@ -74,7 +74,7 @@ binary, in `$WSJTX_DATA_DIR` or `$WSJTX_SHARE_DIR` (WSJT-X exports both), or in 
 source tree. If no model can be opened the process exits at once: WSJT-X logs that, says so in the
 status bar and falls back to its own `jt9`, which is more useful than a session that decodes nothing.
 
-To see what it is doing, watch the WSJT-X log: `[ft8nn] model …/ft8nn.onnx, 1 ONNX thread(s)` and
+To see what it is doing, watch the WSJT-X log: `[ft8nn] model …/ft8nn.onnx, 8 decode thread(s)` and
 `[ft8nn] hello from WSJT-X 3.0.0` appear at startup, and `-v` adds a line per decoder pass and one
 per WSJT-X pass (`seq 7:   decoder pass 0: 28 decode(s) sent at 2.41 s` …
 `seq 7: utc 123015 pass 50 (172800 samples) -> 37 decode(s) in 2.8 s`).
@@ -87,19 +87,21 @@ per WSJT-X pass (`seq 7:   decoder pass 0: 28 decode(s) sent at 2.41 s` …
   `final: false` is answered at once with no decodes; the full pass finds those signals anyway.
   `--early` decodes them too (use it with `--threads` on a fast machine).
 - **Decode speed matters.** WSJT-X gives up on a request after 15 s for FT8, and the next period's
-  request arrives at the same time. The main `README.md` has the measurements: 2.8 s per slot on
-  average on the M4 mini, 6.9–8.0 s on the busiest receiver tested (40 m, about 48 decodes per
-  slot). A plain M1 under light other load takes 9–12 s on those same busy slots, which leaves
-  little headroom, so prefer the faster machine for a live station, keep early passes off, and watch
-  the `-v` timings — a pass that overran is reported on stderr, and so in the WSJT-X log.
+  request arrives at the same time. A decode uses every performance core: on the busiest receiver
+  tested (40 m, about 48 decodes per slot, 40 slots) the first decodes reach WSJT-X a median 0.33 s
+  after the request and the whole slot is done in 4.6 s, on the M4 mini's 4 performance cores while
+  other jobs kept it busy (one thread: 5.2 s and 13.0 s). Watch the `-v` timings — a pass that
+  overran is reported on stderr, and so in the WSJT-X log.
 - **Re-decodes are honoured.** When the user clicks Decode, WSJT-X sends `samples: 0`, meaning "the
   audio you were sent last, again"; we keep the last period's samples for that.
-- **Decodes stream out as the decoder finds them.** The decoder works in subtraction passes, and
-  each pass's decodes are sent the moment that pass ends; WSJT-X shows a decode line (and
-  auto-sequencing acts on it) as soon as it arrives, exactly as with `jt9`'s own multi-pass output.
-  The first pass has most of a busy slot's decodes after a fraction of the total time. Context
-  a-priori decodes (`a2`) come last, because a later pass can still decode that station's real
-  message and rule them out. Within each batch the order is by frequency.
+- **Decodes stream out as the decoder finds them.** The decoder works in subtraction passes; within
+  a pass the strongest candidates are tried first, and decodes are sent in batches while the pass
+  is still running and when it ends. WSJT-X shows a decode line (and auto-sequencing acts on it) as
+  soon as it arrives, exactly as with `jt9`'s own multi-pass output. Context a-priori decodes
+  (`a2`) come last, because a later pass can still decode that station's real message and rule
+  them out. Within each batch the order is by frequency.
+- **All performance cores by default.** A decode runs on one thread per performance core
+  (`--threads N` to change that); the decodes are the same for any number of threads.
 - **`[nfa, nfb]` is honoured** — decodes outside the frequency range of WSJT-X's waterfall settings
   are dropped (`--no-range` keeps them).
 - **A-priori annotations:** `"ap":1` marks our CQ a-priori decodes and `"ap":2` the context ones

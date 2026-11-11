@@ -51,8 +51,55 @@ static int cmp_cand(const void *a, const void *b) { /* descending by (score, f, 
     return y->j - x->j;
 }
 
+/* spectrogram frame t -> S[t*nb ..] */
+typedef struct {
+    const double *x;
+    const fft_plan *fp;
+    float *S;
+    int nb;
+} spec_job;
+static void spec_item(void *a, int t) {
+    spec_job *j = a;
+    cplx *in = calloc(NFFT_SPEC, sizeof(cplx)), *X = malloc(sizeof(cplx) * NFFT_SPEC);
+    for (int i = 0; i < NSPS; i++) in[i] = j->x[t * HOP + i];
+    fft_forward(j->fp, in, X);
+    for (int b = 0; b < j->nb; b++) {
+        double re = creal(X[b]), im = cimag(X[b]);
+        j->S[t * j->nb + b] = (float)(re * re + im * im);
+    }
+    free(in);
+    free(X);
+}
+
+/* Costas score sums of lag row li: per cell, the same additions in the same order (array o, then symbol k) */
+typedef struct {
+    const float *S;
+    int T, nb, b0, nf, lag0, lmin;
+    double *num, *den;
+} score_job;
+static void score_item(void *a, int li) {
+    static const int offs[3] = {0, 36, 72};
+    score_job *j = a;
+    double *nu = j->num + (size_t)li * j->nf, *de = j->den + (size_t)li * j->nf;
+    for (int o = 0; o < 3; o++)
+        for (int k = 0; k < 7; k++) {
+            int c = COSTAS[k];
+            int fr = j->lag0 + j->lmin + li + SYM_FRAMES * (offs[o] + k);
+            if (fr < 0 || fr >= j->T) continue;
+            const float *row = j->S + (size_t)fr * j->nb + j->b0;
+            for (int f = 0; f < j->nf; f++) {
+                float oth[7];
+                int q = 0;
+                for (int tn = 0; tn < 8; tn++)
+                    if (tn != c) oth[q++] = row[f + 2 * tn];
+                nu[f] += row[f + 2 * c];
+                de[f] += median7(oth);
+            }
+        }
+}
+
 int find_candidates(const double *x, int n, double fmin, double fmax, int max_cand, double min_score, int base_median,
-                    double early_dt, double early_min, double dt_shift, candidate *out) {
+                    double early_dt, double early_min, double dt_shift, candidate *out, par *pool) {
     const double dtmin = -1.5, dtmax = 2.5, typ_lo = -0.6, typ_hi = 1.2;
     const int lag_excl = 10;
     /* dt_shift (frontend.find_candidates dt_shift) moves the whole window - main range, typical-DT track and
@@ -66,17 +113,8 @@ int find_candidates(const double *x, int n, double fmin, double fmax, int max_ca
     if (nb > NFFT_SPEC / 2 + 1) return 0;
     float *S = malloc(sizeof(float) * T * nb);
     fft_plan *fp = fft_plan_new(NFFT_SPEC);
-    cplx *in = calloc(NFFT_SPEC, sizeof(cplx)), *X = malloc(sizeof(cplx) * NFFT_SPEC);
-    for (int t = 0; t < T; t++) {
-        for (int i = 0; i < NSPS; i++) in[i] = x[t * HOP + i];
-        fft_forward(fp, in, X);
-        for (int b = 0; b < nb; b++) {
-            double re = creal(X[b]), im = cimag(X[b]);
-            S[t * nb + b] = (float)(re * re + im * im);
-        }
-    }
-    free(in);
-    free(X);
+    spec_job sj = {x, fp, S, nb};
+    par_for(pool, T, spec_item, &sj);
     fft_plan_free(fp);
 
     int lag0 = (int)rnd(NOMINAL_START * FPS);
@@ -88,25 +126,8 @@ int find_candidates(const double *x, int n, double fmin, double fmax, int max_ca
     lmin -= n_early;
     nl += n_early;
     double *num = calloc((size_t)nl * nf, sizeof(double)), *den = calloc((size_t)nl * nf, sizeof(double));
-    static const int offs[3] = {0, 36, 72};
-    for (int o = 0; o < 3; o++)
-        for (int k = 0; k < 7; k++) {
-            int c = COSTAS[k];
-            for (int li = 0; li < nl; li++) {
-                int fr = lag0 + lmin + li + SYM_FRAMES * (offs[o] + k);
-                if (fr < 0 || fr >= T) continue;
-                const float *row = S + (size_t)fr * nb + b0;
-                double *nu = num + (size_t)li * nf, *de = den + (size_t)li * nf;
-                for (int f = 0; f < nf; f++) {
-                    float oth[7];
-                    int q = 0;
-                    for (int tn = 0; tn < 8; tn++)
-                        if (tn != c) oth[q++] = row[f + 2 * tn];
-                    nu[f] += row[f + 2 * c];
-                    de[f] += median7(oth);
-                }
-            }
-        }
+    score_job scj = {S, T, nb, b0, nf, lag0, lmin, num, den};
+    par_for(pool, nl, score_item, &scj);
     free(S);
     double *score_all = num; /* in place */
     for (size_t i = 0; i < (size_t)nl * nf; i++) score_all[i] = num[i] / fmax_d(den[i], 1e-12);
@@ -240,14 +261,14 @@ int find_candidates(const double *x, int n, double fmin, double fmax, int max_ca
 #define BB_HI 850    /*  round(8.5 * 6.25 / DF_FULL) */
 #define TAPER_N 101
 
-void baseband_init(baseband *b, const double *x, int n) {
+void baseband_init(baseband *b, const double *x, int n, par *pool) {
     b->full = fft_plan_new(NFFT_FULL);
     b->bb = fft_plan_new(NBB);
     cplx *in = calloc(NFFT_FULL, sizeof(cplx));
     b->tmp = malloc(sizeof(cplx) * NFFT_FULL);
     int m = n < NFFT_FULL ? n : NFFT_FULL;
     for (int i = 0; i < m; i++) in[i] = x[i];
-    fft_forward(b->full, in, b->tmp);
+    fft_forward_par(b->full, in, b->tmp, pool);
     free(in);
     int nx = NFFT_FULL / 2 + 1;
     b->X = malloc(sizeof(cplx) * nx);
