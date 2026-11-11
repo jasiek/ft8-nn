@@ -1,6 +1,7 @@
 # Status and plan (resume here)
 
-Last updated 2026-11-11 (**rebased onto `main` and measured together with DT re-centring**: tag `nn_v3_dtcrp`, runs
+Last updated 2026-11-11 (**README gains a JTDX section**: per-run tables of jt9 / JTDX defaults / JTDX deep / `nn_v3` /
+`nn_v3_dtcrp` and ft8nn's margin over JTDX. Before that **rebased onto `main` and measured together with DT re-centring**: tag `nn_v3_dtcrp`, runs
 2–4 pooled **106,074 / 78,022 / 4** (+23.0% / +22.0% over jt9; +13.6% over JTDX's defaults, +8.6% over its ceiling),
 run 1 / training / AWGN identical to `nn_v3_rpf`, golden PASS on the threaded C (1 thread and 4 threads streaming).
 Before that **repeat stage shipped** (plan 12, tag `nn_v3_rpf`, Python + C, golden PASS): a context

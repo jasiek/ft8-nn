@@ -75,6 +75,39 @@ What this says:
   count was last measured, with `nn_v3`), and surprisingly many of them are strong signals rather than marginal ones — 59 of
   run 4's at ≥ 0 dB. Diagnosing the remainder is open work — see `STATUS.md`.
 
+### Against JTDX: +13.6% over its defaults, +8.6% over its most sensitive settings
+
+JTDX 2.2.x (built from `git://git.code.sf.net/p/jtdx/code` by `tools/jtdx_build.py`) is the WSJT-X fork tuned for
+weak-signal FT8, so it is the stronger classical baseline. Same unseen runs, same audio, same scorer as above;
+"JTDX deep" is JTDX at its most sensitive settings (`-w -c 3 -s 2`: SWL mode, 9 subtraction passes, extra
+low-threshold pass), which costs it 5× the CPU of its defaults. `nn_v3` is our decoder before the repeat stage and DT re-centring, for reference.
+Decodes / slot-confirmed / unconf:
+
+| run | `jt9` | JTDX defaults | JTDX deep | `nn_v3` | **ft8nn (`nn_v3_dtcrp`)** |
+|---|---|---|---|---|---|
+| 2 | 24,291 / 17,993 / 16 | 26,293 / 19,435 / 1 | 27,417 / 20,202 / 16 | 28,198 / 20,701 / 1 | **29,435 / 21,646 / 1** |
+| 3 | 23,524 / 17,888 / 17 | 25,279 / 19,125 / 3 | 26,321 / 19,855 / 9 | 26,688 / 20,105 / 0 | **28,206 / 21,266 / 1** |
+| 4 | 38,432 / 28,053 / 29 | 41,820 / 30,599 / 7 | 43,973 / 32,103 / 19 | 45,744 / 33,070 / 2 | **48,433 / 35,110 / 2** |
+| **runs 2 + 3 + 4** | 86,247 / 63,934 / 62 | 93,392 / 69,159 / 11 | 97,711 / 72,160 / 44 | 100,630 / 73,876 / 3 | **106,074 / 78,022 / 4** |
+
+ft8nn's margin over JTDX, decodes / slot-confirmed:
+
+| run | `nn_v3` vs JTDX defaults | **ft8nn vs JTDX defaults** | `nn_v3` vs JTDX deep | **ft8nn vs JTDX deep** |
+|---|---|---|---|---|
+| 2 | +7.2% / +6.5% | **+11.9% / +11.4%** | +2.8% / +2.5% | **+7.4% / +7.1%** |
+| 3 | +5.6% / +5.1% | **+11.6% / +11.2%** | +1.4% / +1.3% | **+7.2% / +7.1%** |
+| 4 | +9.4% / +8.1% | **+15.8% / +14.7%** | +4.0% / +3.0% | **+10.1% / +9.4%** |
+| **runs 2 + 3 + 4** | +7.8% / +6.8% | **+13.6% / +12.8%** | +3.0% / +2.4% | **+8.6% / +8.1%** |
+
+- Pooled, that is 12,682 more decodes than JTDX at its defaults (8,863 more slot-confirmed) and 8,363 more than
+  JTDX at its ceiling (5,862 more slot-confirmed).
+- JTDX's extra sensitivity costs it false decodes: its deep settings raise unconf from 11 to 44, toward `jt9`'s 62;
+  ft8nn has 4.
+- Most of the jump from `nn_v3` comes from the repeat stage (a station's message from 30/60 s earlier tested whole
+  against the audio — the idea behind JTDX's own `^` stage, which this comparison found was most of what JTDX
+  decoded and we missed), about 1 point from DT re-centring. Details, the JTDX build and the FT8TW / ft8_lib
+  comparison: `docs/decoder-comparison.md`.
+
 `STATUS.md` has the per-decoder-version history behind these tables and the commands that produce them.
 
 ## System requirements
