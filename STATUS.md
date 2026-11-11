@@ -1,6 +1,7 @@
 # Status and plan (resume here)
 
-Last updated 2026-11-11 (**repeat stage shipped** (plan 12, tag `nn_v3_rpf`, Python + C, golden PASS): a context
+Last updated 2026-11-11 (**merged with `main`'s DT re-centring, streaming and Windows CI**; the combined decoder
+(DT re-centring + repeat stage) is tag `nn_v3_dtcrp`, measurement in plan 12. Before that **repeat stage shipped** (plan 12, tag `nn_v3_rpf`, Python + C, golden PASS): a context
 message from 30/60 s earlier is tested as a whole known codeword on the residual; runs 2–4 pooled 100,630 → **105,154
 decodes (+4.5%)**, slot-confirmed 73,876 → **77,369 (+4.7%)**, unconf 3 → 4 (the new one an ordinary `osd0`, not
 the stage); now +21.9% over jt9, +12.6% over JTDX's defaults and +7.6% over JTDX's ceiling. Before that **where the
@@ -9,7 +10,15 @@ context AP misses. Before that **compared against JTDX and FT8TW on the unseen v
 `docs/decoder-comparison.md`): pooled over runs 2+3+4, `nn_v3` is +7.8% decodes / +6.8% slot-confirmed over JTDX
 2.2.x at its defaults, which is itself +8.3% over stock jt9, and **+3.0% / +2.4% over JTDX at its ceiling**
 (`-w -c 3 -s 2`, now measured on all three runs: 44 unconfirmed against our 3); FT8TW publishes no decoder source, so
-ft8_lib stands in for it and finds half as much as we do. Before that **the two fading sets re-measured with `models/v3`**: moderate −20.12, disturbed −20.16,
+ft8_lib stands in for it and finds half as much as we do. Before that, on `main`: **Windows CI added**: x64 MinGW-w64 build, C == Python 57/57 on
+synthetic slots, plan 3c. Before that **decodes now stream to WSJT-X pass by pass**, plan 6 step (1): on 40 busy slots
+median time to first decodes 14.05 -> 5.26 s, and decodes shown within WSJT-X's 15 s timeout 79.5% -> 98.0% on
+this M1. Before that **remaining misses re-profiled, plan 7.1 item 1c**: 96-98% of jt9-only decodes are spot-confirmed real; the biggest fixable class is co-channel collisions, ~400 pooled, diagnosed but parked because the whole jt9-only pool is now ~1.3% of our decodes - **next is low-latency decoding, plan 6**. Before that **DT re-centring shipped**, `dt_recenter=0.8`, tag `nn_v3_dtc`, plan 7.1 item 1b: the
+candidate window follows the median DT of the decodes already in hand, so receivers whose clock or audio stream is
+off are decoded instead of half-missed - +504 decodes on run 4's `08_12m` and +305 on run 3's `03_20m`, pooled runs
+2+3+4 now +17.6% over jt9 with unconf still 3, and run 1 / training / AWGN bit-identical because the gate cannot arm
+there. The user authorised this one commit and the fast-forward merge into `main` conditional on `validate_full`
+passing, which it did; asking resumes for every commit after it. Before that **the two fading sets re-measured with `models/v3`**: moderate −20.12, disturbed −20.16,
 so 0.72 and 0.97 dB over jt9, and the README table is now all current measurements. Before that **validation run 4
 scored with `nn_v3`**: 45,744 decodes vs jt9's 38,432, +19.0%, 2
 unconfirmed; the results vs stock jt9 are now summarised in `README.md`. Before that **`wsjtx/ft8nn_sidecar`**:
@@ -192,13 +201,21 @@ Scores (vs jt9 baseline, checkable = sender call is spotted-checkable):
 | 2 | nn_v2_rs | 27,929 (+15.0%) | 20,504 (+14.0%) | 1 | | |
 | 2 | nn_v2_pl | 27,928 (+15.0%) | 20,504 (+14.0%) | 0 | | |
 | 2 | **nn_v3** | **28,198 (+16.1%)** | **20,701 (+15.1%)** | **1** | | |
+| 2 | **nn_v3_dtc** | **28,198 (+16.1%)** | **20,701 (+15.1%)** | **1** | | identical to `nn_v3`: the gate never arms here |
 | 3 (unseen sites, other day) | jt9 | 23,524 | 17,888 | 17 | – | – |
 | 3 | nn_v2_pl | 26,535 (+12.8%) | 19,982 (+11.7%) | 1 | | |
 | 3 | **nn_v3** | **26,688 (+13.5%)** | **20,105 (+12.4%)** | **0** | | |
+| 3 | **nn_v3_dtc** † | **26,993 (+14.7%)** | **20,342 (+13.7%)** | **0** | | |
 | 4 (unseen sites, high bands, afternoon) | jt9 | 38,432 | 28,053 | 29 | – | – |
 | 4 | **nn_v3** | **45,744 (+19.0%)** | **33,070 (+17.9%)** | **2** | 948 | 8,259 |
+| 4 | **nn_v3_dtc** † | **46,248 (+20.3%)** | **33,397 (+19.0%)** | **2** | 727 | 8,542 |
 | **2 + 3 + 4 pooled (unseen)** | jt9 | 86,247 | 63,934 | 62 | – | – |
 | **2 + 3 + 4 pooled (unseen)** | **nn_v3** | **100,630 (+16.7%)** | **73,876 (+15.6%)** | **3** | | |
+| **2 + 3 + 4 pooled (unseen)** | **nn_v3_dtc** † | **101,439 (+17.6%)** | **74,440 (+16.4%)** | **3** | | |
+
+† `nn_v3_dtc` on runs 3 and 4 = the re-measured drifting receiver (`03_20m`, `08_12m`) plus the other
+stations' unchanged `nn_v3` decodes; the gate provably cannot fire on those (replaying it over their
+decoded DTs never comes within 0.2 s of the 0.8 s threshold). Run 2 was re-run in full.
 
 The gain is larger on unseen receivers than on training sites, and it holds up against outside spots:
 false decodes are below jt9's. **Caveat for `nn_v2_cy`:** a context decode's sender is by construction a station
@@ -372,6 +389,96 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
         golden test lost 2–6 `osd_ap0` decodes (non-deterministically). Fixed; `validate_full.sh` now runs the golden
         tests with `MallocScribble=1 MallocPreScribble=1`, which makes such reads fail reliably.
         Some jt9-only "strong" decodes look like jt9 false decodes (`HYZDB82E2JV <...> RR73`, `GE2EDD 5Y4KKW GP53`).
+   1b. **DT re-centring for receivers whose clock or stream is off (`dt_recenter`) - DONE 2026-11-10 as `nn_v3_dtc`.**
+      Miss profile of validation run 4 with `nn_v3` (948 jt9-only decodes, scratch `miss_profile.py`): **214 sit at
+      DT < -1.5 s and 203 of those come from one receiver**, `08_12m` (n9azz), whose KiwiSDR stream slips about
+      2.3 s over the 30 min recording - its per-slot median DT walks from +0.2 (first slot) to -2.1 (last), while the
+      spread *within* a slot stays ~0.3 s. 37% of that station's jt9 decodes are below -1.5 s, where our main search
+      does not go: the window is DT [-1.5, 2.5] plus the restricted early-DT track (plain BP/OSD only, score >= 3.0,
+      must beat every main lag). Run 3's `03_20m` is the same pathology (42% of its decodes below -1.5 s, slot median
+      down to -2.6); no other receiver in runs 1-4 or the training set drifts (per-slot median |DT| <= 0.5 s).
+      This is a candidate-*search* problem, not a metric one: `fine_sync2` cuts the NN's input window relative to each
+      candidate's own (f0, dt), so a signal at DT -2.1 s looks identical to one at +0.2 s once the search finds its lag.
+      Change: `decoder.decode_slot(dt_recenter=0.8)` takes the median DT of the decodes already in hand - this slot's
+      plus the context's from 30/60 s earlier, >= `DT_RECENTER_MIN` 6 of them, clamped to `DT_RECENTER_MAX` 2.5 s and
+      snapped to the 40 ms lag grid - and, when it is 0.8 s or more from 0, shifts the whole candidate window by it
+      (`frontend.find_candidates(dt_shift=)`: main range, typical-DT track and early band move together, in whole
+      spectrogram frames, so with `dt_shift=0` the code is bit-identical to before). The estimate comes from
+      CRC-checked decodes, not from the sync score, because senders' own clocks scatter only a few tenths of a second
+      while the receiver's offset is common to every signal in the slot. (Score-based estimators were tried first and
+      abandoned: a max over ~180 lags inflates noise, and row-normalised lag profiles pick edge lags, where fewer
+      Costas terms are in the slot - they put the run-4 station at +2.16 s when the truth was -2.10 s.)
+      C: `DT_RECENTER*` and `dt_recenter_shift` in `c/src/decode.c`, `dt_shift` in `find_candidates`
+      (`c/src/frontend.c`); the tried table grew to lags -160..159 frames so candidate reuse still applies when the
+      window is shifted. Bench flag `--dt-recenter` (0 = off). Tests: `tests/test_recenter.py` (gate/clamp/snap, early
+      candidate becomes an ordinary one, and a slot at DT -2.9 s that the window does not reach at all: 0 of 4 decoded
+      before, 4 with).
+      **Inert where it is not needed:** replaying the gate over every station of runs 1-3 (jt9's own DTs) and over
+      run 4's saved `nn_v3` decodes, it fires only on those two receivers (23 of 36 scorable run-3 slots, 81 of 119
+      run-4 slots) and on no other station - run 1 and run 2 never come within 0.2 s of it. Synthetic sets: 1 slot of
+      300 reaches |median| 0.82 s, and every synthetic signal (DT in [-0.4, 1.0]) stays inside the shifted window.
+      Noise-only slots have no decodes, so the gate cannot fire there.
+      **Results (2026-11-10), the two drifting receivers, 119 slots each, scored against PSK Reporter spots:**
+      run 4 `08_12m` 3,643 -> **4,147** decodes (jt9 3,359; ours/jt9 1.085 -> **1.235**), slot-confirmed 2,428 -> 2,755,
+      active-only 1,138 -> 1,315, unconf 0 -> 0, jt9-only 283 -> **62**; run 3 `03_20m` 339 -> **644** (jt9 318;
+      1.066 -> **2.025**), slot-confirmed 235 -> 472, active 101 -> 169, unconf 0 -> 0, jt9-only 38 -> **18**, and the
+      slot-confirmed share of checkable decodes rises 69.9% -> 73.6%. Run totals: run 3 26,688 -> 26,993 decodes
+      (+13.5% -> **+14.7%** vs jt9), slot-confirmed 20,105 -> 20,342; run 4 45,744 -> 46,248 (+19.0% -> **+20.3%**),
+      slot-confirmed 33,070 -> 33,397, jt9-only 948 -> **727**. Note `run_real.py`'s `corrob.` column *falls* on run 3
+      (97% -> 89%): it only asks whether jt9 heard the same callsign on the same receiver, so it understates a decoder
+      that finds stations jt9 misses entirely - the spot tiers (100.0% confirmed, 0 unconf) are the real check.
+      **`tools/ab_run2.sh nn_v3_dtc`:** run 2 28,198 decodes / 20,701 slot-confirmed / 1 unconf - *identical* to
+      `nn_v3`, because none of run 2's nine receivers has a clock far enough off to arm the gate; noise 0 false / 998.
+      The written A/B rule (run-2 decodes and slot-confirmed must rise) cannot be met by a change that is inert on
+      run 2, so it stands here as a no-regression check and the gain is carried by runs 3-4.
+      **`tools/validate_full.sh nn_v3_dtc` (23:15-01:34, 2 h 19 min): PASS, and bit-identical to `nn_v3`
+      everywhere the gate cannot arm** - which is every set in this suite, so it is a pure no-regression result.
+      Validation run 1: 32,244 decodes / 24,660 slot-confirmed / 1 unconf (`CQ KR9ZUC/R AO63`, the same one as
+      `nn_v3`), 100.0% confirmed on all nine receivers, every figure unchanged. Training recordings: 17,706
+      decodes, jt9-only 305 - unchanged. AWGN: identical row by row, 50% -22.49 dB, 90% -21.24 dB, 0 false
+      decodes at every SNR. Golden C vs Python under `MallocScribble=1 MallocPreScribble=1`: 00_40m 764/764
+      all fields equal, 08_80m 607/607, run2 02_80m 733/733, awgn 429/429 - four PASS (the one place the port
+      had to be checked hard, since it threads `dt_shift` through `find_candidates` and doubles the `tried`
+      table). `pmset -g log`: no Sleep, no DarkWake; `caffeinate` held the machine awake for the full run.
+      Tooling, found on the way: `ab_run2.sh` and `validate_full.sh` call bare `uv`, which the asdf shim could not
+      resolve in a worktree ("No version is set for command uv"), and `set -euo pipefail` made that a silent abort.
+      `.tool-versions` now pins `uv 0.13.7` alongside `python 3.12.14` (`uv lock --check` clean and
+      `uv sync --dry-run` "would make no changes", so the pinned 0.13.7 leaves the locked environment untouched).
+   1c. **Co-channel collisions: the strong signal's subtraction destroys the weak one's sync - DIAGNOSED
+      2026-11-11, not implemented.** With 1b in, the remaining jt9-only decodes were re-profiled from scratch.
+      **They are real, not jt9 false decodes.** Re-emitting each station's jt9-only decodes as their own decode
+      file and running `collect/verify.py` over it: run 1 1,027 misses = 788 slot-confirmed / 199 active / 3
+      repeat / 14 unconf, run 2 583 = 419 / 126 / 0 / 16, run 4 727 = 493 / 174 / 0 / 29. So 96-98% are
+      genuine signals we miss. The suspect remainder (59 pooled) is jt9's own false-decode rate concentrated in
+      this subset - 1.4-4.2% here against ~0.05% over all jt9 decodes, a 30-90x enrichment, with the expected
+      look (`GE2EDD 5Y4KKW GP53` at +9, `SK5OCT R4MRJ R KI00` at +20, `CQ XO7FYG EA52`). **This retires the old
+      note that many strong jt9-only decodes are jt9 false decodes:** run 1's 128 strong (>= 0 dB) misses are
+      83 slot-confirmed + 43 active + 2 n/a and **0 unconfirmed**. They are ours to find.
+      **Stage breakdown** (`tools/diag_strong_miss.py models/v3/model.pt nn_v3_dtc 0 2000 --root $V/recordings
+      --out data/val/run1`, 99 slots, 90 s): 120 strong misses = **74 NOCAND, 44 FAIL, 2 OK**. Not a budget
+      problem: re-searching each NOCAND cell with `min_score=0.6, lag_excl=0, max_cand=4000` recovers only 5 of
+      74; for 66 the Costas score at the target cell is at noise level. The 44 FAILs are the known weak/faded
+      population (E 13-40: 22, E > 40: 16, plan 7.2).
+      **The mechanism, for the 18 NOCAND that have a decode of ours within 10 Hz / 0.4 s:** two stations in the
+      same slot within a few Hz at the same DT. Every FT8 signal carries the *same* three Costas arrays, so
+      theirs overlap coherently and the pair occupies one candidate cell (spectrogram bins are 3.125 Hz). We
+      take the cell, decode the stronger, subtract it - and because the amplitude was fitted to the *sum*, the
+      subtraction takes the weaker signal's sync with it. Its data symbols encode a different message, so those
+      survive. Worked example, `02_40m` 1700-1703 Hz, W1TC at +24/+25/+19 over AD8RW at +13/+14/+12, all at
+      DT +0.1: we get W1TC, jt9 gets both; in the residual no candidate exists within 6 Hz / 0.3 s at any
+      threshold. **Forcing a hypothesis at the cell we just subtracted from, with no sync score consulted** (a
+      df grid +-7 Hz / 0.5 Hz on the subtracted decode's own f0, dt +- 6 baseband samples, straight into the NN
+      + LDPC) recovers `EA3CCI AD8RW EN80` in all three slots at E = 18.6 / 3.4 / 9.5.
+      **Class size** (jt9-only miss with a decode of ours within 10 Hz / 0.4 s, all SNRs): run 1 179 of 1,027
+      (17.4%), run 2 112 of 583 (19.2%), run 4 111 of 727 (15.3%) - about 400 pooled, 90-96% spot-confirmed.
+      **Next: post-subtraction forced retry.** The decoder already knows every cell it subtracted from, so this
+      needs no new detector - only a gate, since forcing hypotheses is exactly where ghosts of the subtracted
+      signal live (`_is_ghost` already exists for that) and OSD on a forced hypothesis can fit CRC-valid
+      garbage. Cost is the open question: the +-7 Hz / 0.5 Hz grid used above is 377 hypotheses per subtracted
+      decode, ~50 decodes per busy slot, which is several times the whole current per-pass budget. Narrow it
+      first - a 1 Hz df step and dt +- 1 sample is 39, and the cell can be skipped unless residual energy at
+      that frequency is still above the local noise floor.
+
    2. **Deeper OSD for expected-error 13–40 FAILs: OSD on summed BP posteriors (`osd_bp`) — DONE as `nn_v2_og`.**
       WSJT-X's decode174_91 keeps the running sum of BP posteriors after the first iterations (zsave) and runs OSD on
       those too; we ran OSD on the NN LLRs only. Prototype (scratch script, 2026-11-05): on run 2, for every hypothesis
@@ -485,8 +592,7 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       `-march=native` opt-in (`NATIVE=1`). Code: no variable-length arrays, no `__int128` (`unpack.c` free text by
       bit-serial long division, hex from 4-bit groups: identical to the old code on 2M random payloads, all i3/n3,
       with and without hash tables), `pthread_once`/`clock_gettime`/`timegm` behind small `_WIN32` shims, wide model
-      path for ORT on Windows. Clean with `-std=c11 -pedantic -Wvla`. Linux and Windows not built yet (no Docker or
-      Linux box here). Golden C vs Python with the official build: 756/756, 600/600, run 2 733/733, AWGN 430/430.
+      path for ORT on Windows. Clean with `-std=c11 -pedantic -Wvla`. Linux and Windows were built later in CI (below). Golden C vs Python with the official build: 756/756, 600/600, run 2 733/733, AWGN 430/430.
       Paired timing under load (fork's benchmarks running), 6 busy 01_40m slots, 1 thread: Homebrew 11.47 / 11.47 s,
       official 9.14 / 7.61 s per slot, same 280 decodes.
       **Clean timing (2026-11-07 22:31, idle, no power events), official ORT + reuse, same slots as 7.3/7.3b:**
@@ -501,6 +607,18 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       `data/` also hid `ft8nn/data/` (ldpc.npz, messages.json), so a fresh clone couldn't import `ft8nn`; now
       `/data/` and both files tracked. ft8code tests now skip when WSJT-X is missing. gcc: one
       -Wmaybe-uninitialized false positive in fft.c (buffer filled by the loop above).
+      **Windows CI (2026-11-11):** `.github/workflows/windows.yml`, `windows-2025` x64, 2 min 52 s. MSYS2 UCRT64
+      MinGW-w64 gcc (MSVC can't build libft8nn: C99 `double complex` arithmetic, `__builtin_ctzll`), official ORT
+      `onnxruntime-win-x64-1.31.1.zip` via `tools/get_onnxruntime.sh`, `make -C c CC=gcc`, then native Python:
+      17 tests pass + 16 skip (ft8code), `ci_smoke.py` with `models/v3` 57 decodes, C == Python 57/57 in every field.
+      `ft8nn_cli.exe` imports only KERNEL32, the UCRT `api-ms-win-crt-*` DLLs and `onnxruntime.dll` (checked in CI).
+      `c/Makefile` Windows branch: `build/ft8nn.dll` + import lib, `.exe`, `onnxruntime.dll` copied next to the
+      programs (no rpath on Windows), `-static-libgcc`, `-D_USE_MATH_DEFINES` (MinGW hides `M_PI` under `-std=c11`).
+      Fixes the first Windows build found: `<windows.h>` defines `near`/`far` empty and `decode.c` has `int near`
+      (`#undef`); `ft8nn_cli` named slots by the text after the last `/`, so Windows paths (`D:\...\x.wav`) gave the
+      full path as slot name - CI matched 0 of 57, and on real `yymmdd_HHMMSS.wav` slots context a-priori would have
+      been silently off. Not covered: the WSJT-X sidecar (`fake_wsjtx` uses `fork()` and POSIX pipes; it and
+      `ft8nn_sidecar.cpp` also split paths on `/` only, lines 216 and 161/507).
    3d. **Architecture study (2026-11-07, full log `docs/arch-study.md`; models `runs/{tf,conv,gru,tf_l2,tf_l2kd}_v{1,2}`,
       scripts and logs in gitignored `data/tmp/`, `data/logs/`):
       keep the transformer.** Same v1 → v2 recipe on the M4 (a full transformer training takes 74 min here, not 4 h).
@@ -580,6 +698,27 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       1.3 s / 3, 0.4 s / 1. Plan: (1) hand out each pass's decodes as soon as it finishes (C API callback), (2) start an
       early pass before the slot ends (WSJT-X decodes at ~11.8 s on partial audio), (3) parallelise the per-hypothesis
       decoding across cores (today only ONNX Runtime uses threads: 2 threads 6.9 → 6.2 s).
+      **Step (1), decodes streamed per pass - DONE 2026-11-11.** `ft8nn_decode_stream()` (C API) calls back after
+      every subtraction pass with that pass's decodes, then once with `pass = -1` and the context a-priori decodes:
+      the only thing that ever removes an earlier pass's decode is the final `drop_ctx_dupes`, and it only drops
+      context decodes, so everything else is final when its pass ends (nothing ever has to be retracted - the
+      protocol cannot). `ft8nn_decode`/`ft8nn_decode_at` are unchanged; texts are now unpacked per pass (decoding
+      never reads the hash table, only `unpack77` does). `ft8nn_sidecar` sends each batch at once, by frequency
+      within a batch; **WSJT-X needed no change**: `Ft8Sidecar::handle_line` emits each decode line on arrival into
+      `readFromStdout()`, the path `jt9`'s own multi-pass output takes. `fake_wsjtx --times FILE` logs each
+      reply's arrival time. Checks: golden C vs Python under MallocScribble 764/764, 607/607, 733/733, AWGN
+      429/429 (as `nn_v3_dtc`); old vs new sidecar on 12 busy slots identical as sets (614 lines); all 8
+      `test_sidecar.sh` checks. **Measured** (this M1, idle, `fake_wsjtx --times`, run 1 `01_40m` first 40 slots,
+      1,944 decodes, identical as sets old vs new): median slot 14.05 s (slowest 15.67 s) both; **median time to
+      first decodes 14.05 -> 5.26 s, mean latency per decode 14.01 -> 7.85 s.** Per pass: pass 0 1,102 decodes
+      (56.7%) out at median 5.26 s, pass 1 576 (29.6%) at 10.22 s, pass 2 88 (4.5%) at 13.30 s, pass 3 13 (0.7%)
+      at 14.14 s, context 165 (8.5%) at the end, 14.05 s. **Side effect, bigger than expected on this M1:** 7 of
+      40 busy slots overran WSJT-X's 15 s request timeout, which drops every reply that comes later - the old
+      all-at-the-end sidecar lost those slots entirely. Decodes WSJT-X would have shown within 15 s: 1,546 of
+      1,944 (79.5%) -> 1,906 (98.0%). **Next:** (a) context decodes are 8.5% here and the most QSO-relevant ones
+      (a station answering), yet wait for the slot's end - first measure how often the final check actually
+      drops one, then decide whether sending them with their pass is worth that risk; (b) step (3),
+      parallelising pass 0, which carries 57% of the decodes; (c) passes 2-3 cost ~4 s for 5.2% of the decodes.
       **6a. Early pass: classical vs truncation-trained transformer.** At ~11.8 s the last ~9 of the 79 symbols are
       missing (for DT ≈ 0.5 s: the third Costas sync block, symbols 72–78, plus data symbols 70–71, i.e. ~6 of the 174
       code bits; more for a later DT). Compare (a) the classical nsym 1/2/3 LLRs with the missing bits at LLR 0,

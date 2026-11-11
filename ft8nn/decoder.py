@@ -91,7 +91,7 @@ def classical_metrics(hyps):
     return out
 
 
-def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=4, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, context=(), ctx_gate=48.0, cand_kw=None, reuse_df=62.5, repeat=REPEAT):
+def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=4, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, context=(), ctx_gate=48.0, cand_kw=None, reuse_df=62.5, dt_recenter=0.8, repeat=REPEAT):
     """Decode one 15 s slot (real audio @12 kHz, any scale), with multi-pass subtraction.
 
     llr_fn(hyps) -> per-hypothesis list of LLR vectors to try in order (first success wins).
@@ -115,6 +115,10 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
     audio near the subtracted signal, so its hypotheses would get (nearly) the same LLRs and fail again. 62.5 Hz
     covers the candidate's baseband window (-1.5..8.5 tones), fine-sync range and the subtracted signal's width.
     A/B nn_v2_rs: run 2 -1 decode of 27,930, 1/3 less time; 30 Hz lost 2 of 330 on 8 busy slots. 0: off.
+    dt_recenter: when the median DT of the decodes already in hand (this slot's, plus the context's from 30/60 s
+    earlier) is at least this many seconds from 0, the receiver's own clock or audio stream is off by that much
+    and every signal sits at the same wrong DT; later passes then search a window shifted by that median
+    (find_candidates(dt_shift=)). 0 disables.
     repeat: (rho_min, margin, clip) for the repeat stage (_repeat_stage) after the last pass, which tests each context
     message whose sender has no decode in the slot as a whole known message (needs context); None: off.
     """
@@ -126,7 +130,12 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
         if reuse_df and p:
             skip = lambda c: (q := tried.get(_cand_key(c))) is not None and not any(
                 ps >= q and abs(fs - c.f0) < reuse_df for fs, ps in subs)
-        new = _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, cand_kw or {}, skip, tried, p)
+        ckw = dict(cand_kw or {})
+        if dt_recenter and "dt_shift" not in ckw:
+            sh = _dt_shift([d.dt for d in found.values()] + [c[1] for c in context], dt_recenter)
+            if sh:
+                ckw["dt_shift"] = sh
+        new = _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, ckw, skip, tried, p)
         for d in new:
             d.info["pass"] = p
             found[d.key] = d
@@ -245,6 +254,22 @@ class _Loc:
 
 def _cand_key(c):
     return round(c.f0 / 3.125), round(c.dt * fe.FPS), c.early
+
+
+DT_RECENTER_MIN = 6  # decodes needed before their median DT is trusted as the receiver's offset
+DT_RECENTER_MAX = 2.5  # s, largest shift applied (jt9's own search floor), so the window cannot walk away
+
+
+def _dt_shift(dts, gate):
+    """Receiver DT offset from decoded (CRC-checked) DTs: their median, snapped to the lag grid.
+
+    Senders' clocks scatter by a few tenths of a second, so a median this far from 0 over this many decodes is
+    the receiver's own offset (a KiwiSDR stream that slips, or a sound card / clock that is off in an app)."""
+    if len(dts) < DT_RECENTER_MIN:
+        return 0.0
+    med = float(np.median(dts))
+    med = min(max(med, -DT_RECENTER_MAX), DT_RECENTER_MAX)
+    return 0.0 if abs(med) < gate else round(med * fe.FPS) / fe.FPS
 
 
 def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, cand_kw, skip=None, tried=None, p=0):

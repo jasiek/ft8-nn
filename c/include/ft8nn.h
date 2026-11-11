@@ -49,6 +49,23 @@ int ft8nn_decode(ft8nn_ctx *ctx, const float *audio12k, int n, ft8nn_decode_t *o
  * Call it for every slot in time order. */
 int ft8nn_decode_at(ft8nn_ctx *ctx, const float *audio12k, int n, int64_t slot_time, ft8nn_decode_t *out, int max_out);
 
+/* Passed as slot_time when the slot's start time is not known: no context a-priori decoding. */
+#define FT8NN_NO_SLOT_TIME INT64_MIN
+
+/* Called by ft8nn_decode_stream as decodes become final, so a caller can show them before the slot is done
+ * (the first pass finds most of them in a fraction of the total time). After each subtraction pass, with
+ * pass = 0, 1, ... and that pass's decodes; then exactly once with pass = -1 and the context a-priori decodes
+ * (FT8NN_BP_CTX / FT8NN_OSD_CTX), which wait for the end because a later pass may decode the same sender's
+ * real message and drop them, plus the repeat stage's (FT8NN_REPEAT), which runs after the last pass. Every decode is reported exactly once, n may be 0, and the decodes together
+ * equal what ft8nn_decode_at returns. The array is only valid during the call (NULL when n is 0). If the decode
+ * fails (returns -1) the pass = -1 call is not made. */
+typedef void (*ft8nn_pass_cb)(const ft8nn_decode_t *decodes, int n, int pass, void *user);
+
+/* As ft8nn_decode_at (or ft8nn_decode with slot_time = FT8NN_NO_SLOT_TIME), reporting decodes through cb as
+ * they become final; out and max_out as there (out may be NULL with max_out 0). */
+int ft8nn_decode_stream(ft8nn_ctx *ctx, const float *audio12k, int n, int64_t slot_time, ft8nn_pass_cb cb,
+                        void *user, ft8nn_decode_t *out, int max_out);
+
 /* Forget all learned callsign hashes. */
 void ft8nn_reset_hashes(ft8nn_ctx *ctx);
 

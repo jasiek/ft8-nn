@@ -1,0 +1,54 @@
+# Windows build + tests (x64), the same checks as linux.yml minus the WSJT-X sidecar (wsjtx/fake_wsjtx uses fork()
+# and POSIX pipes, not ported yet) and minus ft8code (no WSJT-X install here, so those tests skip).
+#
+# Toolchain: MinGW-w64 gcc in MSYS2 (UCRT64). MSVC can't build libft8nn as it is: the code uses C99 `double complex`
+# and __builtin_ctzll. The C build runs in the MSYS2 shell; Python runs natively (uv, pwsh) and calls
+# c/build/ft8nn_cli.exe, which needs only Windows' DLLs and the onnxruntime.dll copied next to it.
+name: windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-test:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      # keep LF line endings: the shell scripts break on CRLF, and the tests compare text files byte for byte
+      - name: No CRLF conversion
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: make unzip mingw-w64-ucrt-x86_64-gcc
+
+      - name: ONNX Runtime (official release)
+        shell: msys2 {0}
+        run: tools/get_onnxruntime.sh
+
+      - name: Build libft8nn
+        shell: msys2 {0}
+        run: make -C c CC=gcc
+
+      - name: DLLs the CLI needs (only Windows' own and onnxruntime.dll)
+        shell: msys2 {0}
+        run: |
+          objdump -p c/build/ft8nn_cli.exe | grep 'DLL Name'
+          ! objdump -p c/build/ft8nn_cli.exe | grep -iE 'DLL Name: (libgcc|libwinpthread|libstdc)'
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Python tests
+        run: uv run pytest -q -rs
+
+      - name: C vs Python on synthetic slots
+        run: uv run python tools/ci_smoke.py

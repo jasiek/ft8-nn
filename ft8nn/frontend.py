@@ -44,10 +44,15 @@ def spectrogram(x):
 BASE_MEDIAN_CAL = 1.77  # pct40(max over lags) / median(all cells) on noise-only and synthetic slots
 
 
-def find_candidates(x, fmin=150.0, fmax=3100.0, dtmin=-1.5, dtmax=2.5, max_cand=600, min_score=1.3, lag_excl=10, typ_dt=(-0.6, 1.2), per_symbol=False, base="median", early_dt=-2.5, early_min=3.0):
+def find_candidates(x, fmin=150.0, fmax=3100.0, dtmin=-1.5, dtmax=2.5, max_cand=600, min_score=1.3, lag_excl=10, typ_dt=(-0.6, 1.2), per_symbol=False, base="median", early_dt=-2.5, early_min=3.0, dt_shift=0.0):
     """Costas-sync candidates, WSJT-X style: per frequency bin the best and second-best lag
     (second at least lag_excl frames away), peak-picked along frequency only. 2-D local maxima
-    let the sidelobes of strong signals exhaust the candidate budget on busy bands."""
+    let the sidelobes of strong signals exhaust the candidate budget on busy bands.
+
+    dt_shift moves the whole search window (main range, typical-DT track and early band) by that many
+    seconds: a receiver whose clock or audio stream is off puts every signal at the same wrong DT, and the
+    window is only 4 s wide (decoder.decode_slot estimates the shift from decodes it has already made)."""
+    sh = int(round(dt_shift * FPS))  # whole spectrogram frames, so the lag grid itself does not move
     S = spectrogram(x)
     T, F = S.shape
     b0, b1 = int(fmin / 3.125), int(fmax / 3.125)
@@ -59,9 +64,9 @@ def find_candidates(x, fmin=150.0, fmax=3100.0, dtmin=-1.5, dtmax=2.5, max_cand=
     # feeds a separate track (stations with clocks ~2 s early; jt9 searches to -2.5 s). It is kept out of the
     # baseline and the main tracks, whose edge lags would otherwise outrank true lags (A/B 2026-11-05: plain
     # dtmin=-2.5 lost 44 decodes on validation run 2).
-    l_lo = int(np.floor(dtmin * FPS))
-    n_early = max(0, l_lo - int(np.floor(early_dt * FPS))) if early_dt is not None else 0
-    lags = np.arange(l_lo - n_early, int(np.ceil(dtmax * FPS)) + 1)
+    l_lo = int(np.floor(dtmin * FPS)) + sh
+    n_early = max(0, l_lo - sh - int(np.floor(early_dt * FPS))) if early_dt is not None else 0
+    lags = np.arange(l_lo - n_early, int(np.ceil(dtmax * FPS)) + 1 + sh)
     num = np.zeros((len(lags), nf))
     den = np.zeros((len(lags), nf))
     for off in (0, 36, 72):
@@ -107,7 +112,7 @@ def find_candidates(x, fmin=150.0, fmax=3100.0, dtmin=-1.5, dtmax=2.5, max_cand=
     # third track: best lag within the typical DT window. Lags near the ends of the search range
     # have Costas arrays outside the slot, so their scores average fewer terms and spike spuriously,
     # which can outrank a real signal's true lag in the global tracks (cf. WSJT-X's narrow search).
-    typ = (lags / FPS >= typ_dt[0]) & (lags / FPS <= typ_dt[1])
+    typ = ((lags - sh) / FPS >= typ_dt[0]) & ((lags - sh) / FPS <= typ_dt[1])
     sub = np.where(typ[:, None], score, -np.inf)
     j3 = sub.argmax(0)
     s3 = sub[j3, fidx]

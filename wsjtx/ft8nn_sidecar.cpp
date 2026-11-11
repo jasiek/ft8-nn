@@ -16,6 +16,10 @@
  *     {"seq":N,"snr":-12,"dt":0.3,"freq":1234,"msg":"CQ K1ABC FN42"[,"ap":1][,"lowconf":true]}
  *     {"seq":N,"done":true}                                  exactly one per request, always
  *
+ *   Decodes go out as the decoder finalises them, a batch per subtraction pass, not all at the end:
+ *   WSJT-X shows each line as it arrives (and auto-sequencing acts on it), and the first pass finds
+ *   most of a slot's decodes in a fraction of the total time.
+ *
  *   stderr is free-form text; WSJT-X copies it into its log.
  *
  * WSJT-X formats our decodes into jt9's FT8 output lines itself and feeds them through the same
@@ -109,7 +113,7 @@ static char const * const usage_text =
   "  --threads N       ONNX Runtime threads for the neural metric (default 1)\n"
   "  --early           also decode WSJT-X's early passes (default: answer them at once with\n"
   "                    no decodes, see README: a slow early pass costs the full one)\n"
-  "  --max-decodes N   report at most N decodes per pass (default 200)\n"
+  "  --max-decodes N   report at most N decodes per WSJT-X pass (default 200)\n"
   "  --no-range        report decodes outside WSJT-X's [nfa, nfb] too\n"
   "  -v, --verbose     log every pass to stderr (WSJT-X copies it into its log)\n"
   "\n"
@@ -198,7 +202,6 @@ static int ap_type (ft8nn_decode_t const & d)
 struct Decoder
 {
   ft8nn_ctx * ctx = nullptr;
-  std::vector<ft8nn_decode_t> out;
   std::vector<float> audio;
 
   bool open (Options const & o, char const * argv0)
@@ -216,36 +219,47 @@ struct Decoder
         return false;
       }
     say ("model %s, %d ONNX thread(s)", model.c_str (), o.threads);
-    out.resize ((size_t) std::max (1, o.max_decodes));
     audio.resize ((size_t) SLOT_SAMPLES);
     return true;
   }
 
-  /* Decode n samples of audio, keep what [nfa, nfb] allows, in frequency order.  slot_time is the
-   * period's start as epoch seconds, which the decoder needs for its context a-priori decoding (it
-   * looks at this station's own decodes 30 and 60 s earlier); INT64_MIN if it is not known. */
-  std::vector<ft8nn_decode_t *> run (Options const & o, int n, int64_t slot_time, int nfa, int nfb)
+  /* Decode n samples of audio and hand the decodes to sink(batch, pass) as the decoder finalises
+   * them (ft8nn_decode_stream): once per subtraction pass, pass = 0, 1, ..., then once with pass = -1
+   * and the context a-priori decodes, which have to wait for the last pass. Each batch keeps what
+   * [nfa, nfb] allows, in frequency order like a jt9 pass; at most --max-decodes in all, counted in
+   * the order the decoder finds them. slot_time is the period's start as epoch seconds, which the
+   * decoder needs for its context a-priori decoding (it looks at this station's own decodes 30 and
+   * 60 s earlier); INT64_MIN if it is not known. Returns the number reported, -1 if decoding failed. */
+  template <class Sink>
+  int run (Options const & o, int n, int64_t slot_time, int nfa, int nfb, Sink && sink)
   {
-    std::vector<ft8nn_decode_t *> keep;
-    int k = slot_time == INT64_MIN
-      ? ft8nn_decode (ctx, audio.data (), n, out.data (), (int) out.size ())
-      : ft8nn_decode_at (ctx, audio.data (), n, slot_time, out.data (), (int) out.size ());
-    if (k < 0)
+    struct State
+    {
+      Options const * o;
+      int nfa, nfb, seen, reported;
+      Sink * sink;
+      std::vector<ft8nn_decode_t const *> keep;
+    } st {&o, nfa, nfb, 0, 0, &sink, {}};
+    ft8nn_pass_cb cb = [] (ft8nn_decode_t const * d, int nd, int pass, void * user) {
+      auto & s = *static_cast<State *> (user);
+      s.keep.clear ();
+      for (int i = 0; i < nd && s.seen < s.o->max_decodes; ++i, ++s.seen)
+        {
+          if (s.o->range && s.nfb > s.nfa && s.nfa >= 0 && (d[i].f0 < s.nfa || d[i].f0 > s.nfb)) continue;
+          s.keep.push_back (&d[i]);
+        }
+      std::sort (s.keep.begin (), s.keep.end (),
+                 [] (ft8nn_decode_t const * a, ft8nn_decode_t const * b) { return a->f0 < b->f0; });
+      s.reported += (int) s.keep.size ();
+      (*s.sink) (s.keep, pass);
+    };
+    /* INT64_MIN is FT8NN_NO_SLOT_TIME: no context decoding, as ft8nn_decode */
+    if (ft8nn_decode_stream (ctx, audio.data (), n, slot_time, cb, &st, nullptr, 0) < 0)
       {
         say ("decode failed");
-        return keep;
+        return -1;
       }
-    k = std::min (k, (int) out.size ());
-    keep.reserve ((size_t) k);
-    for (int i = 0; i < k; ++i)
-      {
-        if (o.range && nfb > nfa && nfa >= 0 && (out[i].f0 < nfa || out[i].f0 > nfb)) continue;
-        keep.push_back (&out[i]);
-      }
-    /* By frequency, like a jt9 pass, rather than in the order the decoder's passes found them. */
-    std::sort (keep.begin (), keep.end (),
-               [] (ft8nn_decode_t * a, ft8nn_decode_t * b) { return a->f0 < b->f0; });
-    return keep;
+    return st.reported;
   }
 
   ~Decoder () { if (ctx) ft8nn_close (ctx); }
@@ -445,12 +459,16 @@ static int sidecar_mode (Options const & o, char const * argv0)
         }
 
       double t0 = monotonic ();
-      auto keep = dec.run (o, have, have_slot, nfa, nfb);
-      for (auto * d : keep) send_decode (seq, *d);
+      int k = dec.run (o, have, have_slot, nfa, nfb, [&] (auto const & keep, int p) {
+          for (auto * d : keep) send_decode (seq, *d);
+          fflush (stdout);
+          if (p >= 0) vsay ("seq %lld:   decoder pass %d: %d decode(s) sent at %.2f s", seq, p, (int) keep.size (), monotonic () - t0);
+          else vsay ("seq %lld:   context decodes: %d sent at %.2f s", seq, (int) keep.size (), monotonic () - t0);
+        });
       send_done (seq);
       double took = monotonic () - t0;
       vsay ("seq %lld: utc %06d pass %d (%d samples) -> %d decode(s) in %.1f s",
-            seq, req.integer ("utc", 0) % 1000000, pass, have, (int) keep.size (), took);
+            seq, req.integer ("utc", 0) % 1000000, pass, have, std::max (k, 0), took);
       if (took > budget)
         say ("seq %lld: %.1f s is longer than WSJT-X waits (%.0f s), so this pass was dropped;"
              " see wsjtx/README.md on decode speed", seq, took, budget);
@@ -502,11 +520,12 @@ static int file_mode (Options const & o, char const * argv0)
       n = std::min (n, SLOT_SAMPLES);
       std::copy (x, x + n, dec.audio.begin ());
       free (x);
-      auto keep = dec.run (o, n, t, 0, 0);
-      for (auto * d : keep) print_jt9_line (nutc, *d);
+      int k = dec.run (o, n, t, 0, 0, [&] (auto const & keep, int) {
+          for (auto * d : keep) print_jt9_line (nutc, *d);
+        });
       /* '<DecodeFinished>', 2i4, i9 (lib/decoder.f90 format 1010): WSJT-X writes this itself when
        * our "done" arrives, so file mode prints it only to look like a jt9 pass. */
-      printf ("<DecodeFinished>%4d%4d%9d\n", 0, (int) keep.size (), 0);
+      printf ("<DecodeFinished>%4d%4d%9d\n", 0, std::max (k, 0), 0);
       fflush (stdout);
     }
   return 0;

@@ -12,10 +12,14 @@
 #include <string.h>
 #include <time.h>
 
-/* One-time init and a clock: POSIX here; the _WIN32 branch is for native Windows builds (MSVC has no pthreads) and is
- * not tested, as only macOS has been built so far. */
+/* One-time init and a clock: POSIX here; the _WIN32 branch is for native Windows builds without pthreads (built with
+ * MinGW-w64 gcc in CI, .github/workflows/windows.yml). */
 #ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <windows.h>
+#undef near /* 16-bit leftovers defined empty by <windows.h>; `near` is a variable name below */
+#undef far
 typedef INIT_ONCE once_t;
 #define ONCE_INIT INIT_ONCE_STATIC_INIT
 static BOOL CALLBACK once_cb(PINIT_ONCE o, PVOID fn, PVOID *ctx) {
@@ -80,8 +84,14 @@ static int prof = -1;
 /* later passes skip a candidate (same bin, lag, track) tried in an earlier pass when no decode subtracted since lies
  * within REUSE_DF Hz (decoder.decode_slot reuse_df); 0 = off */
 #define REUSE_DF 62.5
-#define TRIED_LAG0 80 /* lag offset in the tried table: lags -80..79 frames (early track starts at -2.5 s = -63) */
-#define TRIED_NL 160
+/* decoder.decode_slot dt_recenter: when the median DT of the decodes in hand (this slot's plus the context's from
+ * 30/60 s earlier) is at least DT_RECENTER s from 0, the receiver's own clock or audio stream is off by that much
+ * and every signal sits at the same wrong DT; later passes then search a window shifted by that median */
+#define DT_RECENTER 0.8
+#define DT_RECENTER_MIN 6   /* decodes needed before their median is trusted (decoder.DT_RECENTER_MIN) */
+#define DT_RECENTER_MAX 2.5 /* largest shift applied, so the window cannot walk away (decoder.DT_RECENTER_MAX) */
+#define TRIED_LAG0 160 /* lag offset in the tried table: lags -160..159 frames (early track -63, shift up to -62) */
+#define TRIED_NL 320
 #define TRIED_NB ((int)(FMAX / 3.125) + 1)
 #define NOISE_BIN (3200.0 / 1000.0)
 #define SNR_OFFSET 0.23
@@ -90,6 +100,8 @@ typedef struct {
     uint8_t bits77[77];
     double f0, dt, snr;
     int method, metric, pass;
+    char text[48]; /* unpacked once the decode is final (ft8nn_decode_stream reports it then) */
+    uint8_t final;
 } dec;
 
 struct ft8nn_ctx {
@@ -442,12 +454,12 @@ static int reuse_skip(const candidate *cd, const signed char *tried, const dec *
 }
 
 static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall, int cap, int pass, const dec *cx, int ncx,
-                       signed char *tried) {
+                       signed char *tried, double dt_shift) {
     if (prof < 0) prof = getenv("FT8NN_PROFILE") != NULL;
     double t0 = tnow(), t1, t2, t3, t4, t5;
     long n_bp = 0, n_osd = 0;
     candidate *cands = malloc(sizeof(candidate) * (MAX_CAND + (int)(FMAX / 3.125) + 1));
-    int nc = find_candidates(x, n, 150.0, FMAX, MAX_CAND, 1.3, BASE_MEDIAN, EARLY_DT, EARLY_MIN, cands);
+    int nc = find_candidates(x, n, 150.0, FMAX, MAX_CAND, 1.3, BASE_MEDIAN, EARLY_DT, EARLY_MIN, dt_shift, cands);
     t1 = tnow();
     baseband bb;
     baseband_init(&bb, x, n);
@@ -534,6 +546,7 @@ static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall,
                 if (same_payload(all[q].bits77, a91)) known = 1;
             if (!known && nall + added < cap) {
                 dec *d = &all[nall + added++];
+                d->final = 0;
                 memcpy(d->bits77, a91, 77);
                 d->f0 = hyps[h].f0;
                 d->dt = hyps[h].dt;
@@ -709,6 +722,7 @@ static int repeat_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int nall
         }
         if (k1 >= 0 && k1 < npri && r1 >= REPEAT_RHO && r1 - r2 >= REPEAT_MARGIN && rc < DEC_CAP) {
             dec *d = &all[rc++];
+            d->final = 0;
             memcpy(d->bits77, alt[k1], 77);
             d->f0 = best_h.f0;
             d->dt = best_h.dt;
@@ -728,13 +742,67 @@ out:
     return rc;
 }
 
+/* decoder._dt_shift: receiver DT offset from decoded (CRC-checked) DTs - their median, snapped to the lag grid.
+ * Senders' clocks scatter by a few tenths of a second, so a median this far from 0 over this many decodes is the
+ * receiver's own offset (a KiwiSDR stream that slips, or a sound card / clock that is off in an app). */
+static int cmp_dbl(const void *a, const void *b) {
+    double x = *(const double *)a, y = *(const double *)b;
+    return x < y ? -1 : x > y ? 1 : 0;
+}
+
+static double dt_recenter_shift(const dec *all, int nall, const dec *cx, int ncx) {
+    int n = nall + ncx;
+    if (n < DT_RECENTER_MIN) return 0.0;
+    double *d = malloc(sizeof(double) * (size_t)n);
+    for (int i = 0; i < nall; i++) d[i] = all[i].dt;
+    for (int i = 0; i < ncx; i++) d[nall + i] = cx[i].dt;
+    qsort(d, (size_t)n, sizeof(double), cmp_dbl);
+    double med = n % 2 ? d[n / 2] : (d[n / 2 - 1] + d[n / 2]) / 2;
+    free(d);
+    if (med > DT_RECENTER_MAX) med = DT_RECENTER_MAX;
+    if (med < -DT_RECENTER_MAX) med = -DT_RECENTER_MAX;
+    return fabs(med) < DT_RECENTER ? 0.0 : nearbyint(med * 25.0) / 25.0; /* snap to the lag grid (25 frames/s) */
+}
+
 static once_t ap_once = ONCE_INIT, erase_once = ONCE_INIT;
 
-static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_decode_t *out, int max_out) {
+static void to_public(const dec *d, ft8nn_decode_t *o) {
+    memset(o, 0, sizeof *o);
+    memcpy(o->text, d->text, sizeof o->text);
+    o->f0 = d->f0;
+    o->dt = d->dt;
+    o->snr = d->snr;
+    for (int i = 0; i < 77; i++) o->bits77[i / 8] |= d->bits77[i] << (7 - i % 8);
+    o->method = d->method;
+    o->metric = d->metric;
+    o->pass = d->pass;
+}
+
+/* Unpack the decodes in all[from..n) that are final - every one if ctx_too, else all but context decodes, which a
+ * later pass can still drop (drop_ctx_dupes) - in order, so the hash table learns them, and hand them to cb.
+ * Only the final drop_ctx_dupes removes decodes from earlier passes, and only context ones, so everything else
+ * is final when its pass ends. */
+static void report(ft8nn_ctx *c, dec *all, int from, int n, int ctx_too, int pass, ft8nn_pass_cb cb, void *user,
+                   ft8nn_decode_t *batch) {
+    int nb = 0;
+    for (int q = from; q < n; q++) {
+        if (all[q].final || (!ctx_too && is_ctx(all[q].method))) continue;
+        unpack77(all[q].bits77, c->ht, all[q].text, sizeof all[q].text);
+        all[q].final = 1;
+        if (cb) to_public(&all[q], &batch[nb++]);
+    }
+    if (cb) cb(batch, nb, pass, user);
+}
+
+static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_decode_t *out, int max_out,
+                  ft8nn_pass_cb cb, void *user) {
     run_once(&ap_once, ap_init);
     run_once(&erase_once, erase_init);
     if (n > SLOT_N) n = SLOT_N;
-    if (n < NSPS) return 0;
+    if (n < NSPS) {
+        if (cb) cb(NULL, 0, -1, user);
+        return 0;
+    }
     double *x = malloc(sizeof(double) * n);
     double m = 0, v = 0;
     for (int i = 0; i < n; i++) m += audio[i];
@@ -745,6 +813,7 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
     dec *all = malloc(sizeof(dec) * DEC_CAP), *cx = NULL;
     signed char *tried = malloc((size_t)TRIED_NB * TRIED_NL * 2); /* candidate -> pass last tried, -1 = never */
     memset(tried, -1, (size_t)TRIED_NB * TRIED_NL * 2);
+    ft8nn_decode_t *batch = cb ? malloc(sizeof(ft8nn_decode_t) * DEC_CAP) : NULL;
     int nall = 0, ncx = 0;
     if (t != INT64_MIN) { /* context: this context's decodes 30 then 60 s earlier */
         cx = malloc(sizeof(dec) * 2 * DEC_CAP);
@@ -756,12 +825,14 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
                 }
     }
     for (int p = 0; p < PASSES; p++) {
-        int k = decode_pass(c, x, n, all, nall, DEC_CAP, p, cx, ncx, tried);
+        double shift = DT_RECENTER > 0 ? dt_recenter_shift(all, nall, cx, ncx) : 0.0;
+        int k = decode_pass(c, x, n, all, nall, DEC_CAP, p, cx, ncx, tried, shift);
         if (k < 0) {
             free(x);
             free(all);
             free(cx);
             free(tried);
+            free(batch);
             return -1;
         }
         for (int q = nall; q < nall + k; q++) {
@@ -770,6 +841,7 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
             encode77(all[q].bits77, cw, tones);
             subtract_signal(x, n, tones, all[q].f0, all[q].dt);
         }
+        report(c, all, nall, nall + k, 0, p, cb, user, batch);
         nall += k;
         if (!k) break;
     }
@@ -780,11 +852,14 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
             free(all);
             free(cx);
             free(tried);
+            free(batch);
             return -1;
         }
         nall = r;
     }
     nall = drop_ctx_dupes(all, 0, nall);
+    report(c, all, 0, nall, 1, -1, cb, user, batch); /* the context decodes that survived, and the repeat stage's */
+    free(batch);
     free(cx);
     free(tried);
     if (t != INT64_MIN) { /* remember: replace this slot's entry or the oldest */
@@ -795,30 +870,21 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
         c->hist[w].n = nall;
         memcpy(c->hist[w].d, all, sizeof(dec) * nall);
     }
-    for (int q = 0; q < nall; q++) {
-        char text[48];
-        unpack77(all[q].bits77, c->ht, text, sizeof text); /* always, so the hash table learns */
-        if (q >= max_out) continue;
-        ft8nn_decode_t *o = &out[q];
-        memset(o, 0, sizeof *o);
-        memcpy(o->text, text, sizeof text);
-        o->f0 = all[q].f0;
-        o->dt = all[q].dt;
-        o->snr = all[q].snr;
-        for (int i = 0; i < 77; i++) o->bits77[i / 8] |= all[q].bits77[i] << (7 - i % 8);
-        o->method = all[q].method;
-        o->metric = all[q].metric;
-        o->pass = all[q].pass;
-    }
+    for (int q = 0; q < nall && q < max_out; q++) to_public(&all[q], &out[q]);
     free(x);
     free(all);
     return nall;
 }
 
 int ft8nn_decode(ft8nn_ctx *c, const float *audio, int n, ft8nn_decode_t *out, int max_out) {
-    return decode(c, audio, n, INT64_MIN, out, max_out);
+    return decode(c, audio, n, INT64_MIN, out, max_out, NULL, NULL);
 }
 
 int ft8nn_decode_at(ft8nn_ctx *c, const float *audio, int n, int64_t slot_time, ft8nn_decode_t *out, int max_out) {
-    return decode(c, audio, n, slot_time, out, max_out);
+    return decode(c, audio, n, slot_time, out, max_out, NULL, NULL);
+}
+
+int ft8nn_decode_stream(ft8nn_ctx *c, const float *audio, int n, int64_t slot_time, ft8nn_pass_cb cb, void *user,
+                        ft8nn_decode_t *out, int max_out) {
+    return decode(c, audio, n, slot_time, out, max_out, cb, user);
 }

@@ -17,7 +17,7 @@ One compact JSON object per line, plus the audio as raw bytes:
 | | |
 |---|---|
 | WSJT-X → us, stdin | `{"type":"hello","v":1,…}` once at startup; `{"type":"decode",…}` per pass, **immediately followed by `samples` × 2 bytes** of mono signed-16-bit little-endian 12 kHz audio (sample 0 = start of the T/R period); `{"type":"quit","v":1}` at shutdown |
-| us → WSJT-X, stdout | one `{"seq":N,"snr":…,"dt":…,"freq":…,"msg":"…"}` per decode, then exactly one `{"seq":N,"done":true}`, flushed line by line |
+| us → WSJT-X, stdout | one `{"seq":N,"snr":…,"dt":…,"freq":…,"msg":"…"}` per decode, sent as soon as the decoder has it (below), then exactly one `{"seq":N,"done":true}`, flushed line by line |
 | stderr | free-form text, copied into the WSJT-X log |
 
 A request carries `utc` (`hhmmss`), `pass` (`nzhsym`, how much audio was captured), `final` (the
@@ -75,8 +75,9 @@ source tree. If no model can be opened the process exits at once: WSJT-X logs th
 status bar and falls back to its own `jt9`, which is more useful than a session that decodes nothing.
 
 To see what it is doing, watch the WSJT-X log: `[ft8nn] model …/ft8nn.onnx, 1 ONNX thread(s)` and
-`[ft8nn] hello from WSJT-X 3.0.0` appear at startup, and `-v` adds a line per pass
-(`seq 7: utc 123015 pass 50 (172800 samples) -> 37 decode(s) in 2.8 s`).
+`[ft8nn] hello from WSJT-X 3.0.0` appear at startup, and `-v` adds a line per decoder pass and one
+per WSJT-X pass (`seq 7:   decoder pass 0: 28 decode(s) sent at 2.41 s` …
+`seq 7: utc 123015 pass 50 (172800 samples) -> 37 decode(s) in 2.8 s`).
 
 ## What it does and does not do
 
@@ -93,8 +94,14 @@ To see what it is doing, watch the WSJT-X log: `[ft8nn] model …/ft8nn.onnx, 1 
   the `-v` timings — a pass that overran is reported on stderr, and so in the WSJT-X log.
 - **Re-decodes are honoured.** When the user clicks Decode, WSJT-X sends `samples: 0`, meaning "the
   audio you were sent last, again"; we keep the last period's samples for that.
+- **Decodes stream out as the decoder finds them.** The decoder works in subtraction passes, and
+  each pass's decodes are sent the moment that pass ends; WSJT-X shows a decode line (and
+  auto-sequencing acts on it) as soon as it arrives, exactly as with `jt9`'s own multi-pass output.
+  The first pass has most of a busy slot's decodes after a fraction of the total time. Context
+  a-priori decodes (`a2`) come last, because a later pass can still decode that station's real
+  message and rule them out. Within each batch the order is by frequency.
 - **`[nfa, nfb]` is honoured** — decodes outside the frequency range of WSJT-X's waterfall settings
-  are dropped (`--no-range` keeps them). Decodes are reported in frequency order.
+  are dropped (`--no-range` keeps them).
 - **A-priori annotations:** `"ap":1` marks our CQ a-priori decodes, `"ap":2` the context ones
   (the calls of a message the same station sent 30 or 60 s earlier) and `"ap":3` the repeat stage's
   (exactly the message that station sent 30 or 60 s earlier, tested whole against the audio) — `jt9`
@@ -132,6 +139,9 @@ with their audio, reads the replies, formats each one into the `jt9` line WSJT-X
 6. a line that is not JSON is logged and skipped instead of breaking the stream,
 7. `quit` makes the decoder exit within 1 s (`fake_wsjtx` kills it, and fails, if it does not),
 8. a missing model is a clean non-zero exit, so WSJT-X falls back to its own `jt9`.
+
+`fake_wsjtx --times FILE` also writes each reply's arrival time (seconds after the request and its
+audio were written), which is how the streaming latency is measured.
 
 Every run also checks that each reply echoes its request's `seq`: `fake_wsjtx` fails on a reply
 whose `seq` is missing or belongs to another request, which is what WSJT-X would drop.
