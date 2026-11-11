@@ -11,9 +11,10 @@ Baseline everywhere below: WSJT-X's own FT8 decoder run as `jt9 -8 -d 3`, i.e. d
 search (`bench/run_jt9.py`; the real-recording baselines were made with WSJT-X Improved 3.0.2, see
 `docs/data-collection.md`).
 Ours: the shipped default, `models/v3` + the decoder defaults (4 passes with subtraction, OSD, CQ and context
-a-priori decoding, and the repeat stage that tests a station's message from 30/60 s earlier as a whole known
-codeword), tag `nn_v3_rpf`. The AWGN and fading rows are unaffected by the repeat stage (no slot times, so no
-context) and were measured with `nn_v3`.
+a-priori decoding, DT re-centring for receivers whose clock drifts, and the repeat stage that tests a station's
+message from 30/60 s earlier as a whole known codeword), tag `nn_v3_dtcrp`. The AWGN and fading rows are
+unaffected by both (no slot times, so no context, and the re-centring gate never arms) and were measured with
+`nn_v3`.
 
 ### Sensitivity: about 1.2 dB on AWGN
 
@@ -36,7 +37,7 @@ AWGN 50% and 90% thresholds came out identical to the earlier run on different h
 they do. 1.2 dB is roughly the difference between hearing a station and not: on FT8's exponential-ish SNR
 distribution it is what produces the double-digit decode gains below.
 
-### Extra decodes on real air: +22% over `jt9`, on receivers we never trained on
+### Extra decodes on real air: +23% over `jt9`, on receivers we never trained on
 
 The validation set (`datasets/ft8-validation-set`) is KiwiSDR recordings of 120 consecutive 15 s slots per receiver,
 together with every FT8 spot that PSK Reporter logged worldwide in those same slots. That outside spot list is the
@@ -49,27 +50,27 @@ Both decoders are scored the same way on the same audio.
 |---|---|---|---|---|---|---|
 | 1 — 9 training-site Kiwis, other bands and times | 1086 | 27,730 | 34,295 | **+6,565 (+23.7%)** | 21,492 → 26,299 (+22.4%) | 13 → 1 |
 | 2 — 9 unseen Kiwis, Wed 22:30 UTC, 160–10 m | 1086 | 24,291 | 29,435 | **+5,144 (+21.2%)** | 17,993 → 21,646 (+20.3%) | 16 → 1 |
-| 3 — 12 unseen Kiwis, Mon 05:32 UTC, 80–10 m | 1447 | 23,524 | 27,711 | **+4,187 (+17.8%)** | 17,888 → 20,883 (+16.7%) | 17 → 1 |
-| 4 — 15 unseen Kiwis, Mon 15:00 UTC, 80–10 m | 1790 | 38,432 | 48,008 | **+9,576 (+24.9%)** | 28,053 → 34,840 (+24.2%) | 29 → 2 |
-| **runs 2 + 3 + 4 — unseen receivers only** | **4323** | **86,247** | **105,154** | **+18,907 (+21.9%)** | 63,934 → 77,369 (+21.0%) | 62 → 4 |
-| all four runs, 45 receivers | 5409 | 113,977 | 139,449 | +25,472 (+22.3%) | 85,426 → 103,668 (+21.4%) | 75 → 5 |
+| 3 — 12 unseen Kiwis, Mon 05:32 UTC, 80–10 m | 1447 | 23,524 | 28,206 | **+4,682 (+19.9%)** | 17,888 → 21,266 (+18.9%) | 17 → 1 |
+| 4 — 15 unseen Kiwis, Mon 15:00 UTC, 80–10 m | 1790 | 38,432 | 48,433 | **+10,001 (+26.0%)** | 28,053 → 35,110 (+25.2%) | 29 → 2 |
+| **runs 2 + 3 + 4 — unseen receivers only** | **4323** | **86,247** | **106,074** | **+19,827 (+23.0%)** | 63,934 → 78,022 (+22.0%) | 62 → 4 |
+| all four runs, 45 receivers | 5409 | 113,977 | 140,369 | +26,392 (+23.2%) | 85,426 → 104,321 (+22.1%) | 75 → 5 |
 
 What this says:
 
-- **About 18,900 extra decodes** out of 4,323 slots of unseen-receiver audio, i.e. **+4.4 decodes in every 15 s
-  slot** on top of `jt9` — +5.3 on run 4's busy daytime high bands, +2.9 on run 3's quiet dawn ones.
+- **About 19,800 extra decodes** out of 4,323 slots of unseen-receiver audio, i.e. **+4.6 decodes in every 15 s
+  slot** on top of `jt9` — +5.6 on run 4's busy daytime high bands, +3.2 on run 3's quiet dawn ones.
 - The gain is not a counting artefact: slot-confirmed decodes, the ones independently spotted by other receivers,
-  rise almost as much (+21.0%); before the repeat stage, 99% of our extra decodes named a callsign `jt9` itself
+  rise almost as much (+22.0%); before the repeat stage, 99% of our extra decodes named a callsign `jt9` itself
   heard at that receiver.
 - It is **not bought with false decodes** — the opposite. Across the four runs `jt9` leaves 75 unconfirmed
   decodes and ft8nn 5, and ft8nn finds no decode at all in 10,000 noise-only slots. FT8's CRC-14 plus the LDPC
   code does the filtering, and we kept both; the repeat stage, which skips both, is held to 0 accepted in 223,643
-  tests with a wrong receiver's context, and of its decodes that `jt9` or JTDX also decoded, 2,022 of 2,025 carry
+  tests with a wrong receiver's context, and of its decodes that `jt9` or JTDX also decoded, 1,936 of 1,939 carry
   the same message (`STATUS.md` plan 12).
 - Runs 2, 3 and 4 are the honest numbers (receivers, days, times and bands never used for training, and never
   used to tune a threshold). Run 1 reuses training receivers on other bands and times, and scores in the same
   range. The gain grows with band activity: run 4's crowded afternoon high bands (up to 45 decodes per slot)
-  give +24.9%, run 3's quiet dawn bands +17.8%.
+  give +26.0%, run 3's quiet dawn bands +19.9%.
 - ft8nn is not a superset of `jt9`: some decodes are `jt9`-only (948 of run 4's 38,432, 850 on run 2 when that
   count was last measured, with `nn_v3`), and surprisingly many of them are strong signals rather than marginal ones — 59 of
   run 4's at ≥ 0 dB. Diagnosing the remainder is open work — see `STATUS.md`.

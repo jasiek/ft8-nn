@@ -1,6 +1,9 @@
 # Status and plan (resume here)
 
-Last updated 2026-11-11 (**repeat stage shipped** (plan 12, tag `nn_v3_rpf`, Python + C, golden PASS): a context
+Last updated 2026-11-11 (**rebased onto `main` and measured together with DT re-centring**: tag `nn_v3_dtcrp`, runs
+2–4 pooled **106,074 / 78,022 / 4** (+23.0% / +22.0% over jt9; +13.6% over JTDX's defaults, +8.6% over its ceiling),
+run 1 / training / AWGN identical to `nn_v3_rpf`, golden PASS on the threaded C (1 thread and 4 threads streaming).
+Before that **repeat stage shipped** (plan 12, tag `nn_v3_rpf`, Python + C, golden PASS): a context
 message from 30/60 s earlier is tested as a whole known codeword on the residual; runs 2–4 pooled 100,630 → **105,154
 decodes (+4.5%)**, slot-confirmed 73,876 → **77,369 (+4.7%)**, unconf 3 → 4 (the new one an ordinary `osd0`, not
 the stage); now +21.9% over jt9, +12.6% over JTDX's defaults and +7.6% over JTDX's ceiling. Before that **where the
@@ -841,6 +844,14 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
     - vs JTDX (pooled): +12.6% / +11.9% over its defaults, +7.6% / +7.2% over its ceiling; JTDX-only slot-confirmed
       pairs 3,069 → 1,719. Next candidates: the 424 second signals within 10 Hz, and the 115 `verify.py` bracketed-
       call asymmetry (user's call).
+    - **Combined with DT re-centring, rebased onto `main`'s threaded decoder (tag `nn_v3_dtcrp`, the shipped
+      default)**: run 1 34,295 / 26,299 / 1, run 2 29,435 / 21,646 / 1, training 18,489, AWGN −22.49 — all
+      identical to `nn_v3_rpf` (the re-centring gate never arms there); run 3 28,206 / 21,266 / 1, run 4 48,433 /
+      35,110 / 2; **runs 2–4 pooled 106,074 / 78,022 / 4**, +5.4% / +5.6% over `nn_v3`. Stale check: 1,936 of
+      1,939 checkable `rp` decodes agree (the same 3 `^`-only disputes). On the threaded C, the last pass is now
+      subtracted when there is context (`main` had dropped that subtraction; the stage needs the residual), and
+      repeat decodes go out in the stream's `pass = -1` callback. Golden (MallocScribble): 00_40m 785/785,
+      08_80m 627/627, run 2 02_80m 749/749 at 4 threads streaming and at 1 thread, AWGN 429/429.
     - Reproduce: thresholds `uv run python tools/rp_eval.py $V/recordings --decodes data/val/run1 [--shuffle
       --shuffle-offset N] --dump F` (needs `decodes_nn_v3.txt`); A/B `WORKERS=8 tools/ab_run2.sh nn_v3_rpf`, then
       `tools/validate_full.sh nn_v3_rpf` (the stage is the default now); stale check `python3 tools/rp_stale.py

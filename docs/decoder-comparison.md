@@ -20,7 +20,8 @@ statistics decoding, a last-resort algebraic decoder; **BP** is the belief-propa
 | `jt9 -d 3` (WSJT-X, the recorded baseline) | 86,247 | – | 63,934 | – | 62 |
 | **JTDX 2.2.x, its own defaults** | **93,392** | **+8.3%** | **69,159** | **+8.2%** | **11** |
 | `nn_v3` (ours, as compared below) | 100,630 | +16.7% | 73,876 | +15.6% | 3 |
-| **`nn_v3_rpf` (ours, now shipped: + repeat stage)** | **105,154** | **+21.9%** | **77,369** | **+21.0%** | **4** |
+| `nn_v3_rpf` (+ repeat stage) | 105,154 | +21.9% | 77,369 | +21.0% | 4 |
+| **`nn_v3_dtcrp` (ours, now shipped: + repeat stage + DT re-centring)** | **106,074** | **+23.0%** | **78,022** | **+22.0%** | **4** |
 
 **Ours decodes 7.8% more than JTDX (6.8% more slot-confirmed), with 3 unconfirmed decodes against
 JTDX's 11.** JTDX in turn beats stock `jt9` by 8.3%, so roughly half of our margin over WSJT-X is
@@ -30,9 +31,11 @@ margin is +3.0% / +2.4%, and JTDX then makes 44 unconfirmed decodes to our 3 (se
 **Update 2026-11-11: the repeat stage** (`STATUS.md` plan 12), built from what this comparison found
 (section "What the JTDX-only confirmed decodes are"), tests a station's message from 30/60 s earlier
 as a whole known codeword on the audio left after every other decode, much as JTDX's `^` stage does.
-With it the shipped decoder is **+12.6% decodes / +11.9% slot-confirmed over default JTDX** and
-**+7.6% / +7.2% over JTDX at its ceiling** (97,711 / 72,160 / 44), and the slot-confirmed pairs JTDX
-gets and we miss fall from 3,069 to 1,719 (to 2,269 against deep JTDX, from 3,780). The rest of this
+With it the decoder is +12.6% decodes / +11.9% slot-confirmed over default JTDX and +7.6% / +7.2% over
+JTDX at its ceiling (97,711 / 72,160 / 44), and the slot-confirmed pairs JTDX gets and we miss fall from
+3,069 to 1,719. Together with `main`'s DT re-centring (receivers whose clock drifts), the shipped
+`nn_v3_dtcrp` is **+13.6% / +12.8% over default JTDX and +8.6% / +8.1% over its ceiling**, with
+JTDX-only slot-confirmed pairs at 1,595 (2,063 against deep JTDX, from 3,780). The rest of this
 document compares against `nn_v3`, the decoder before that change.
 
 Per run (decodes / slot-confirmed / unconf):
