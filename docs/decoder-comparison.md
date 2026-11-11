@@ -217,6 +217,19 @@ What it does find is clean (4 unconfirmed in 49,835), and 48,598 of its 48,825 c
 also found by JTDX. It is, however, extremely cheap: about 0.03 s per slot against JTDX's ~4.9 s and
 our decoder's ~4 s, which is the trade the app is making deliberately.
 
+### What the JTDX-only confirmed decodes are
+
+`tools/diag_ref_only.py` breaks the 3,069 slot-confirmed pairs JTDX gets and `nn_v3` misses down
+(`STATUS.md` plan 12 has the detail): three quarters are below −15 dB, 62.5% come from JTDX's `^`
+stage, and **1,675 (55%) are exact repeats** of a message we decoded ourselves 30 or 60 s earlier
+within 10 Hz — the case our context a-priori stage exists for, which loses them mostly at its
+confidence gate (53%) or for lack of a candidate (23%). Testing the whole known message against the
+audio at the earlier decode's frequency and time recovers about 90% of them in a 300-signal replay
+(`tools/diag_ctx_miss.py`). 424 (14%) are a second signal within 10 Hz of one we decode. And 115 (4%)
+are not misses: we decode them too, but print the resolved hashed callsign in brackets (`<SX200H>`),
+which `verify.py` does not count as a checkable sender while JTDX's unbracketed `SX200H` is — so the
+margins in this document slightly understate ours.
+
 ## Caveats
 
 - **JTDX keeps cross-slot state here; the jt9 baseline did not.** The baseline ran one `jt9`

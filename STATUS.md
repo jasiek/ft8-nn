@@ -1,6 +1,8 @@
 # Status and plan (resume here)
 
-Last updated 2026-11-10 (**compared against JTDX and FT8TW on the unseen validation runs** (plan 11,
+Last updated 2026-11-11 (**where the JTDX-only confirmed decodes come from** (plan 12): 55% are exact repeats of
+our own decodes 30/60 s earlier that context AP misses; a full-message test recovers ~90% of them in a replay, a
+prototype stage is next. Before that **compared against JTDX and FT8TW on the unseen validation runs** (plan 11,
 `docs/decoder-comparison.md`): pooled over runs 2+3+4, `nn_v3` is +7.8% decodes / +6.8% slot-confirmed over JTDX
 2.2.x at its defaults, which is itself +8.3% over stock jt9, and **+3.0% / +2.4% over JTDX at its ceiling**
 (`-w -c 3 -s 2`, now measured on all three runs: 44 unconfirmed against our 3); FT8TW publishes no decoder source, so
@@ -617,6 +619,27 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       prebuilt Android arm64 `libft8cn.so`. ft8_lib (`kgoba/ft8_lib`, `9fec6ca`, `tools/ft8lib_{build.sh,run.py}`)
       stands in on FT8CN's own README grounds (it credits Karlis Goba and says it uses lightweight rather than
       deep decoding); read that row as a floor for the family, not a measurement of the app.
+12. **Full-message a-priori ("repeat") stage — IN PROGRESS 2026-11-11.** Where JTDX's 3,069 slot-confirmed
+    (slot, sender) pairs that `nn_v3` misses come from (runs 2–4 pooled; `tools/diag_ref_only.py --tsv
+    data/logs/jtdx_cmp/jtdx_only_slot.tsv`): 75% are below −15 dB (JTDX's SNR); 62.5% come from JTDX's `^`
+    tone-matching stage, 12.0% from AP (`*`), 25.5% from plain BP/OSD; 70% are not decoded by jt9 either.
+    - **1,675 (55%) are repeats:** the exact text was decoded by `nn_v3` in the same period 30 or 60 s earlier
+      within 10 Hz (2,182 earlier at any distance/age). Context AP should catch these and does not.
+      `tools/diag_ctx_miss.py` on 300 of them (first gate that loses each): `ctx_gate` (expected bit errors ≥ 48)
+      159, no candidate within `CTX_DF`/`CTX_DDT` 68, pinned BP/OSD-2 fails 66, decodes in the residual 5, early-DT 2.
+    - **Full-message test** (all 77 bits known, so the whole codeword is; ρ = Σ l·s / Σ|l| between the NN LLRs and
+      the hypothesis codeword s = ±1), at the earlier decode's (f0, dt) with no candidate search: right message
+      median ρ 0.80, ≥ 0.40 for 90.7%; the right message on 3 receivers on other bands (station absent) max 0.36,
+      0 of 899 ≥ 0.40. Projected order of magnitude: +1,500 slot-confirmed on runs 2–4 if it lands near JTDX's rate.
+    - **Risk: stale messages.** A payload 1 bit away is still 40–50 codeword bits away, but a perfect signal gives
+      such a neighbour ρ up to 0.54 (0.61 at 2–4 bits); wrong messages on the right audio reached 0.70. A fixed
+      threshold would emit the previous over after the sender moved on (`-10` → `R-10`), and `verify.py` would
+      score it slot-confirmed. The stage must beat the hypothesis's successors (report → R-report → RR73/RRR/73)
+      by a margin. False-decode bound: the wrong-receiver test at context-AP scale (211,315) and `noise10k`.
+    - **Scorer asymmetry (not fixed, user's call):** 115 of the 3,069 are decoded by us too — we print a resolved
+      hashed call as `<SX200H>`, JTDX as `SX200H`, and `verify.py`'s `sender()` treats any `<` as uncheckable.
+      Fixing it changes every recorded number slightly in our favour; `verify.py` mirrors the data repo's copy.
+    - Also open: 424 (14%) are a second signal within 10 Hz of one we decode (JTDX gets both).
 10. Optional later work:
    - More AP types: the a2 MyCall type needs the operator's own callsign, and that is only useful inside an app
      (an `ft8nn_set_mycall` would slot into the same pinned-bit machinery as context AP).
