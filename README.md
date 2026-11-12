@@ -13,9 +13,9 @@ search (`bench/run_jt9.py`; the real-recording baselines were made with WSJT-X I
 Ours: the shipped default, `models/v3` + the decoder defaults (4 passes with subtraction, OSD, CQ and context
 a-priori decoding, DT re-centring for receivers whose clock drifts, the co-channel retry that finds a second station
 hidden under one already decoded, and the repeat stage that tests a station's message from 30/60 s earlier as a
-whole known codeword), tag `nn_v3_cc`. The AWGN and fading rows are unaffected by the last three (no slot times, so
-no context; the re-centring gate never arms; synthetic slots hold no co-channel pairs - AWGN re-measured with
-`nn_v3_cc`: identical) and were measured with `nn_v3`.
+whole known codeword against only the messages a station could send next), tag `nn_v3_ccrpc`. The AWGN and fading
+rows are unaffected by the last three (no slot times, so no context; the re-centring gate never arms; synthetic
+slots hold no co-channel pairs - AWGN re-measured with `nn_v3_ccrpc`: identical) and were measured with `nn_v3`.
 
 ### Sensitivity: about 1.2 dB on AWGN
 
@@ -38,7 +38,7 @@ AWGN 50% and 90% thresholds came out identical to the earlier run on different h
 they do. 1.2 dB is roughly the difference between hearing a station and not: on FT8's exponential-ish SNR
 distribution it is what produces the double-digit decode gains below.
 
-### Extra decodes on real air: +23.5% over `jt9`, on receivers we never trained on
+### Extra decodes on real air: +24% over `jt9`, on receivers we never trained on
 
 The validation set (`datasets/ft8-validation-set`) is KiwiSDR recordings of 120 consecutive 15 s slots per receiver,
 together with every FT8 spot that PSK Reporter logged worldwide in those same slots. That outside spot list is the
@@ -49,36 +49,37 @@ Both decoders are scored the same way on the same audio.
 
 | run (unseen = no receiver shared with training) | slots | `jt9` decodes | ft8nn decodes | extra decodes | slot-confirmed | unconf (≈ false) |
 |---|---|---|---|---|---|---|
-| 1 — 9 training-site Kiwis, other bands and times | 1086 | 27,730 | 34,585 | **+6,855 (+24.7%)** | 21,492 → 26,505 (+23.3%) | 13 → 1 |
-| 2 — 9 unseen Kiwis, Wed 22:30 UTC, 160–10 m | 1086 | 24,291 | 29,588 | **+5,297 (+21.8%)** | 17,993 → 21,751 (+20.9%) | 16 → 1 |
-| 3 — 12 unseen Kiwis, Mon 05:32 UTC, 80–10 m | 1447 | 23,524 | 28,295 | **+4,771 (+20.3%)** | 17,888 → 21,324 (+19.2%) | 17 → 1 |
-| 4 — 15 unseen Kiwis, Mon 15:00 UTC, 80–10 m | 1790 | 38,432 | 48,668 | **+10,236 (+26.6%)** | 28,053 → 35,249 (+25.7%) | 29 → 2 |
-| **runs 2 + 3 + 4 — unseen receivers only** | **4323** | **86,247** | **106,551** | **+20,304 (+23.5%)** | 63,934 → 78,324 (+22.5%) | 62 → 4 |
-| all four runs, 45 receivers | 5409 | 113,977 | 141,136 | +27,159 (+23.8%) | 85,426 → 104,829 (+22.7%) | 75 → 5 |
+| 1 — 9 training-site Kiwis, other bands and times | 1086 | 27,730 | 34,727 | **+6,997 (+25.2%)** | 21,492 → 26,615 (+23.8%) | 13 → 1 |
+| 2 — 9 unseen Kiwis, Wed 22:30 UTC, 160–10 m | 1086 | 24,291 | 29,691 | **+5,400 (+22.2%)** | 17,993 → 21,820 (+21.3%) | 16 → 1 |
+| 3 — 12 unseen Kiwis, Mon 05:32 UTC, 80–10 m | 1447 | 23,524 | 28,418 | **+4,894 (+20.8%)** | 17,888 → 21,421 (+19.8%) | 17 → 1 |
+| 4 — 15 unseen Kiwis, Mon 15:00 UTC, 80–10 m | 1790 | 38,432 | 48,999 | **+10,567 (+27.5%)** | 28,053 → 35,541 (+26.7%) | 29 → 2 |
+| **runs 2 + 3 + 4 — unseen receivers only** | **4323** | **86,247** | **107,108** | **+20,861 (+24.2%)** | 63,934 → 78,782 (+23.2%) | 62 → 4 |
+| all four runs, 45 receivers | 5409 | 113,977 | 141,835 | +27,858 (+24.4%) | 85,426 → 105,397 (+23.4%) | 75 → 5 |
 
 What this says:
 
-- **About 20,300 extra decodes** out of 4,323 slots of unseen-receiver audio, i.e. **+4.7 decodes in every 15 s
-  slot** on top of `jt9` — +5.7 on run 4's busy daytime high bands, +3.3 on run 3's quiet dawn ones.
+- **About 20,900 extra decodes** out of 4,323 slots of unseen-receiver audio, i.e. **+4.8 decodes in every 15 s
+  slot** on top of `jt9` — +5.9 on run 4's busy daytime high bands, +3.4 on run 3's quiet dawn ones.
 - The gain is not a counting artefact: slot-confirmed decodes, the ones independently spotted by other receivers,
-  rise almost as much (+22.5%); before the repeat stage, 99% of our extra decodes named a callsign `jt9` itself
+  rise almost as much (+23.2%); before the repeat stage, 99% of our extra decodes named a callsign `jt9` itself
   heard at that receiver.
 - It is **not bought with false decodes** — the opposite. Across the four runs `jt9` leaves 75 unconfirmed
   decodes and ft8nn 5, and ft8nn finds no decode at all in 10,000 noise-only slots. FT8's CRC-14 plus the LDPC
   code does the filtering, and we kept both; the repeat stage, which skips both, is held to 0 accepted in 223,643
   tests with a wrong receiver's context, and of its decodes that `jt9` or JTDX also decoded, 1,936 of 1,939 carry
-  the same message (`STATUS.md` plan 12). The co-channel retry, which decodes at places no sync search proposed,
+  the same message (`STATUS.md` plan 12; the competitor change kept that null at 0 and its 578 new decodes on runs
+  2–4 agree with every one of the 319 that a reference also decoded). The co-channel retry, which decodes at places no sync search proposed,
   made 0 false decodes from 1.17 million hypotheses forced onto noise-only audio, and none of its 874 decodes on
   the four runs is unconfirmed (`STATUS.md` plan 7.1 item 1c).
 - Runs 2, 3 and 4 are the honest numbers (receivers, days, times and bands never used for training, and never
   used to tune a threshold). Run 1 reuses training receivers on other bands and times, and scores in the same
   range. The gain grows with band activity: run 4's crowded afternoon high bands (up to 45 decodes per slot)
-  give +26.6%, run 3's quiet dawn bands +20.3%.
+  give +27.5%, run 3's quiet dawn bands +20.8%.
 - ft8nn is not a superset of `jt9`: some decodes are `jt9`-only (948 of run 4's 38,432, 850 on run 2 when that
   count was last measured, with `nn_v3`), and surprisingly many of them are strong signals rather than marginal ones — 59 of
   run 4's at ≥ 0 dB. Diagnosing the remainder is open work — see `STATUS.md`.
 
-### Against JTDX: +14.1% over its defaults, +9.0% over its most sensitive settings
+### Against JTDX: +14.7% over its defaults, +9.6% over its most sensitive settings
 
 JTDX 2.2.x (built from `git://git.code.sf.net/p/jtdx/code` by `tools/jtdx_build.py`) is the WSJT-X fork tuned for
 weak-signal FT8, so it is the stronger classical baseline. Same unseen runs, same audio, same scorer as above;
@@ -86,30 +87,31 @@ weak-signal FT8, so it is the stronger classical baseline. Same unseen runs, sam
 low-threshold pass), which costs it 5× the CPU of its defaults. `nn_v3` is our decoder before the repeat stage, DT re-centring and the co-channel retry, for reference.
 Decodes / slot-confirmed / unconf:
 
-| run | `jt9` | JTDX defaults | JTDX deep | `nn_v3` | **ft8nn (`nn_v3_cc`)** |
+| run | `jt9` | JTDX defaults | JTDX deep | `nn_v3` | **ft8nn (`nn_v3_ccrpc`)** |
 |---|---|---|---|---|---|
-| 2 | 24,291 / 17,993 / 16 | 26,293 / 19,435 / 1 | 27,417 / 20,202 / 16 | 28,198 / 20,701 / 1 | **29,588 / 21,751 / 1** |
-| 3 | 23,524 / 17,888 / 17 | 25,279 / 19,125 / 3 | 26,321 / 19,855 / 9 | 26,688 / 20,105 / 0 | **28,295 / 21,324 / 1** |
-| 4 | 38,432 / 28,053 / 29 | 41,820 / 30,599 / 7 | 43,973 / 32,103 / 19 | 45,744 / 33,070 / 2 | **48,668 / 35,249 / 2** |
-| **runs 2 + 3 + 4** | 86,247 / 63,934 / 62 | 93,392 / 69,159 / 11 | 97,711 / 72,160 / 44 | 100,630 / 73,876 / 3 | **106,551 / 78,324 / 4** |
+| 2 | 24,291 / 17,993 / 16 | 26,293 / 19,435 / 1 | 27,417 / 20,202 / 16 | 28,198 / 20,701 / 1 | **29,691 / 21,820 / 1** |
+| 3 | 23,524 / 17,888 / 17 | 25,279 / 19,125 / 3 | 26,321 / 19,855 / 9 | 26,688 / 20,105 / 0 | **28,418 / 21,421 / 1** |
+| 4 | 38,432 / 28,053 / 29 | 41,820 / 30,599 / 7 | 43,973 / 32,103 / 19 | 45,744 / 33,070 / 2 | **48,999 / 35,541 / 2** |
+| **runs 2 + 3 + 4** | 86,247 / 63,934 / 62 | 93,392 / 69,159 / 11 | 97,711 / 72,160 / 44 | 100,630 / 73,876 / 3 | **107,108 / 78,782 / 4** |
 
 ft8nn's margin over JTDX, decodes / slot-confirmed:
 
 | run | `nn_v3` vs JTDX defaults | **ft8nn vs JTDX defaults** | `nn_v3` vs JTDX deep | **ft8nn vs JTDX deep** |
 |---|---|---|---|---|
-| 2 | +7.2% / +6.5% | **+12.5% / +11.9%** | +2.8% / +2.5% | **+7.9% / +7.7%** |
-| 3 | +5.6% / +5.1% | **+11.9% / +11.5%** | +1.4% / +1.3% | **+7.5% / +7.4%** |
-| 4 | +9.4% / +8.1% | **+16.4% / +15.2%** | +4.0% / +3.0% | **+10.7% / +9.8%** |
-| **runs 2 + 3 + 4** | +7.8% / +6.8% | **+14.1% / +13.3%** | +3.0% / +2.4% | **+9.0% / +8.5%** |
+| 2 | +7.2% / +6.5% | **+12.9% / +12.3%** | +2.8% / +2.5% | **+8.3% / +8.0%** |
+| 3 | +5.6% / +5.1% | **+12.4% / +12.0%** | +1.4% / +1.3% | **+8.0% / +7.9%** |
+| 4 | +9.4% / +8.1% | **+17.2% / +16.2%** | +4.0% / +3.0% | **+11.4% / +10.7%** |
+| **runs 2 + 3 + 4** | +7.8% / +6.8% | **+14.7% / +13.9%** | +3.0% / +2.4% | **+9.6% / +9.2%** |
 
-- Pooled, that is 13,159 more decodes than JTDX at its defaults (9,165 more slot-confirmed) and 8,840 more than
-  JTDX at its ceiling (6,164 more slot-confirmed).
+- Pooled, that is 13,716 more decodes than JTDX at its defaults (9,623 more slot-confirmed) and 9,397 more than
+  JTDX at its ceiling (6,622 more slot-confirmed).
 - JTDX's extra sensitivity costs it false decodes: its deep settings raise unconf from 11 to 44, toward `jt9`'s 62;
   ft8nn has 4.
 - Most of the jump from `nn_v3` comes from the repeat stage (a station's message from 30/60 s earlier tested whole
   against the audio — the idea behind JTDX's own `^` stage, which this comparison found was most of what JTDX
   decoded and we missed), about 1 point from DT re-centring and half a point from the co-channel retry (a second
-  station sharing a decoded station's frequency and time, whose sync the subtraction of the first took away). Details, the JTDX build and the FT8TW / ft8_lib
+  station sharing a decoded station's frequency and time, whose sync the subtraction of the first took away) and
+  half a point from scoring repeats only against messages a station could send. Details, the JTDX build and the FT8TW / ft8_lib
   comparison: `docs/decoder-comparison.md`.
 
 `STATUS.md` has the per-decoder-version history behind these tables and the commands that produce them.

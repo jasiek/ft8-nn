@@ -1,6 +1,14 @@
 # Status and plan (resume here)
 
-Last updated 2026-11-12 (**co-channel retry shipped, tag `nn_v3_cc`** (plan 7.1 item 1c): after the last pass, every
+Last updated 2026-11-12 (**repeat stage scores only competitors a station could send, tag `nn_v3_ccrpc`** (plan
+12): a CQ's competitors no longer include `CQ K1ABC R FN42` or `CQ K1ABC RR73/-12`, which had beaten the margin on
+226 of the 320 repeats lost that way; a CQ-only sender then needs ρ ≥ 0.50 (`REPEAT_SOLO` 0.35), set on the run-1
+wrong-receiver null (0 of 223,643, as before); runs 2–4 pooled **107,108 / 78,782 / 4** (+557 decodes / +458
+slot-confirmed over `nn_v3_cc`, the same four unconfirmed, 0 stale of 319 checkable; +24.2% / +23.2% over jt9,
++14.7% over JTDX's defaults, +9.6% over its ceiling); run 1 34,727 / 26,615 / 1 (+142 / +110); C golden PASS;
+`validate_full.sh nn_v3_ccrpc` PASS. Also the **runs 2–4 miss profile** (`docs/miss-profile-dtcrp.md`): the
+2,495 slot-confirmed pairs jt9, JTDX or deep JTDX get and `nn_v3_dtcrp` missed, by mechanism and ranked lever; and
+the 12 doubtful `rp` decodes checked in the audio: none false. Before that **co-channel retry shipped, tag `nn_v3_cc`** (plan 7.1 item 1c): after the last pass, every
 decode's own cell is searched in the residual with a data-symbol sync metric for a second station whose sync the
 subtraction took away; runs 2–4 pooled **106,551 / 78,324 / 4** (+477 decodes / +302 slot-confirmed over
 `nn_v3_dtcrp`, unconfirmed the same four; +23.5% / +22.5% over jt9, +14.1% over JTDX's defaults, +9.0% over its
@@ -114,11 +122,13 @@ decodes verified identical to the main machine.
   a non-JSON line, exit on `quit`, and a missing model. The first attempt, a `jt9` shared-memory shim (`jt9nn`,
   Qt 5 + the 46 MiB `dec_data` segment, so stock WSJT-X would work too), was dropped: the fork has the sidecar
   interface and stock WSJT-X is not a target.
-- Last commit: the co-channel retry, tag `nn_v3_cc` (plan 7.1 item 1c), with the plausibility rules extended to
-  the other message types (plan 7.4); Python + C, golden PASS, `validate_full.sh nn_v3_cc` PASS.
-  Next: idle C timing of `nn_v3_cc` (nothing else running; the user schedules it), then the levers ranked by the
-  runs 2-4 miss profile (repeat stage without nonsense competitors, more lag tracks per frequency in the
-  candidate search), and the early pass (plan 6a).
+- Last commit: the repeat stage with only competitors a station could send, tag `nn_v3_ccrpc` (plan 12), on top of
+  the co-channel retry (`nn_v3_cc`, plan 7.1 item 1c); Python + C, golden PASS, `validate_full.sh nn_v3_ccrpc` PASS;
+  plus the runs 2-4 miss profile that ranked it (`docs/miss-profile-dtcrp.md`).
+  Next: idle C timing (nothing else running; the user schedules it), then the miss profile's other levers - more
+  lag tracks per frequency in the candidate search (396 misses decode when forced at the true lag, which the
+  per-frequency tracks lose to alias lags), and a look-back repeat stage (offline only: 564 misses are a station's
+  first overs that we decode 30/60 s later) - and the early pass (plan 6a).
 - Architecture study finished 2026-11-07 (plan 7.3d): keep the transformer. Its code (`train.py --kind conv|gru`,
   `--teacher`, `model.build`) is merged; models in `runs/{tf,conv,gru,tf_l2,tf_l2kd}_v{1,2}`, scripts `data/tmp/` (gitignored).
 - Loop log (finished): `nn_v2_eh` pass, `nn_v2_ob` fail (1 ghost), `nn_v2_og` pass, `nn_v2_p4` pass → run 2
@@ -142,7 +152,8 @@ CQ a-priori decoding (expected errors < 44), burst-erasure retry (expected error
 context a-priori decoding from our own decodes 30/60 s earlier (`bp_cx`/`osd_cx`, expected errors < 48; needs
 `context=` in Python, `ft8nn_decode_at` in C; the bench passes it, see plan 7.2c), DT re-centring (`dt_recenter`,
 plan 7.1 item 1b), and after the last pass, on the residual, the co-channel retry (`bp_cc`/`osd_cc`/`osd_bp_cc`,
-plan 7.1 item 1c) and, with context, the repeat stage (`rp`, plan 12).
+plan 7.1 item 1c) and, with context, the repeat stage (`rp`, plan 12; competitors only messages a station could
+send, a CQ-only sender needs ρ ≥ 0.50).
 
 ### Results vs WSJT-X jt9 (`-d 3`)
 
@@ -208,7 +219,8 @@ Scores (vs jt9 baseline, checkable = sender call is spotted-checkable):
 | 1 | nn_v2_pl | 31,951 (+15.2%) | 24,444 (+13.7%) | 2 | | |
 | 1 | **nn_v3** | **32,244 (+16.3%)** | **24,660 (+14.7%)** | **1** | | |
 | 1 | nn_v3_dtcrp | 34,295 (+23.7%) | 26,299 (+22.4%) | 1 | | |
-| 1 | **nn_v3_cc** | **34,585 (+24.7%)** | **26,505 (+23.3%)** | **1** | | |
+| 1 | nn_v3_cc | 34,585 (+24.7%) | 26,505 (+23.3%) | 1 | | |
+| 1 | **nn_v3_ccrpc** | **34,727 (+25.2%)** | **26,615 (+23.8%)** | **1** | | |
 | 2 (unseen sites) | jt9 | 24,291 | 17,993 | 16 | – | – |
 | 2 | nn_v2_er | 25,994 (+7.0%) | 19,244 (+7.0%) | 1 | 886 | 2590 |
 | 2 | nn_v2_f31 | 26,032 (+7.2%) | 19,281 (+7.2%) | 1 | 850 | |
@@ -221,23 +233,27 @@ Scores (vs jt9 baseline, checkable = sender call is spotted-checkable):
 | 2 | **nn_v3** | **28,198 (+16.1%)** | **20,701 (+15.1%)** | **1** | | |
 | 2 | **nn_v3_dtc** | **28,198 (+16.1%)** | **20,701 (+15.1%)** | **1** | | identical to `nn_v3`: the gate never arms here |
 | 2 | nn_v3_dtcrp | 29,435 (+21.2%) | 21,646 (+20.3%) | 1 | | |
-| 2 | **nn_v3_cc** | **29,588 (+21.8%)** | **21,751 (+20.9%)** | **1** | | |
+| 2 | nn_v3_cc | 29,588 (+21.8%) | 21,751 (+20.9%) | 1 | | |
+| 2 | **nn_v3_ccrpc** | **29,691 (+22.2%)** | **21,820 (+21.3%)** | **1** | | |
 | 3 (unseen sites, other day) | jt9 | 23,524 | 17,888 | 17 | – | – |
 | 3 | nn_v2_pl | 26,535 (+12.8%) | 19,982 (+11.7%) | 1 | | |
 | 3 | **nn_v3** | **26,688 (+13.5%)** | **20,105 (+12.4%)** | **0** | | |
 | 3 | **nn_v3_dtc** † | **26,993 (+14.7%)** | **20,342 (+13.7%)** | **0** | | |
 | 3 | nn_v3_dtcrp | 28,206 (+19.9%) | 21,266 (+18.9%) | 1 | | |
-| 3 | **nn_v3_cc** | **28,295 (+20.3%)** | **21,324 (+19.2%)** | **1** | | |
+| 3 | nn_v3_cc | 28,295 (+20.3%) | 21,324 (+19.2%) | 1 | | |
+| 3 | **nn_v3_ccrpc** | **28,418 (+20.8%)** | **21,421 (+19.8%)** | **1** | | |
 | 4 (unseen sites, high bands, afternoon) | jt9 | 38,432 | 28,053 | 29 | – | – |
 | 4 | **nn_v3** | **45,744 (+19.0%)** | **33,070 (+17.9%)** | **2** | 948 | 8,259 |
 | 4 | **nn_v3_dtc** † | **46,248 (+20.3%)** | **33,397 (+19.0%)** | **2** | 727 | 8,542 |
 | 4 | nn_v3_dtcrp | 48,433 (+26.0%) | 35,110 (+25.2%) | 2 | | |
-| 4 | **nn_v3_cc** | **48,668 (+26.6%)** | **35,249 (+25.7%)** | **2** | | |
+| 4 | nn_v3_cc | 48,668 (+26.6%) | 35,249 (+25.7%) | 2 | | |
+| 4 | **nn_v3_ccrpc** | **48,999 (+27.5%)** | **35,541 (+26.7%)** | **2** | | |
 | **2 + 3 + 4 pooled (unseen)** | jt9 | 86,247 | 63,934 | 62 | – | – |
 | **2 + 3 + 4 pooled (unseen)** | **nn_v3** | **100,630 (+16.7%)** | **73,876 (+15.6%)** | **3** | | |
 | **2 + 3 + 4 pooled (unseen)** | **nn_v3_dtc** † | **101,439 (+17.6%)** | **74,440 (+16.4%)** | **3** | | |
 | **2 + 3 + 4 pooled (unseen)** | nn_v3_dtcrp | 106,074 (+23.0%) | 78,022 (+22.0%) | 4 | | |
-| **2 + 3 + 4 pooled (unseen)** | **nn_v3_cc** | **106,551 (+23.5%)** | **78,324 (+22.5%)** | **4** | | |
+| **2 + 3 + 4 pooled (unseen)** | nn_v3_cc | 106,551 (+23.5%) | 78,324 (+22.5%) | 4 | | |
+| **2 + 3 + 4 pooled (unseen)** | **nn_v3_ccrpc** | **107,108 (+24.2%)** | **78,782 (+23.2%)** | **4** | | |
 
 † `nn_v3_dtc` on runs 3 and 4 = the re-measured drifting receiver (`03_20m`, `08_12m`) plus the other
 stations' unchanged `nn_v3` decodes; the gate provably cannot fire on those (replaying it over their
@@ -962,6 +978,45 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       `tools/validate_full.sh nn_v3_rpf` (the stage is the default now); stale check `python3 tools/rp_stale.py
       --decodes data/val/run2 --tag nn_v3_rpf --ref "$V/run2/recordings/{st}/decodes.txt" --ref
       "data/val/run2/{st}/decodes_jtdx.txt"`.
+    - **Only competitors a station could send - DONE 2026-11-12, tag `nn_v3_ccrpc` (on top of `nn_v3_cc`; Python +
+      C, golden PASS, `validate_full.sh nn_v3_ccrpc` PASS).** Found by the runs 2-4 miss profile
+      (`docs/miss-profile-dtcrp.md`, `tools/miss_profile.py`, `tools/miss_replay.py`): of 614 missed exact repeats,
+      320 lost only on the margin with the right message scoring best (median ρ 0.64, margin 0.10), and in 226 of
+      those the runner-up was a message no station sends - `_successors` built a CQ's competitors like a QSO
+      message's, so `CQ K1ABC R FN42` and `CQ K1ABC RR73/73/-12`, one 15-bit field from the truth.
+      Change: `decoder._sendable` (C `sendable`) drops from the competitors what `message.plausible` rejects and a
+      CQ carrying RRR/RR73/73/a report; QSO messages keep every competitor, the stale-message successors included.
+      A sender whose earlier messages are all CQs is then left with no competitor, and its runner-up is
+      `REPEAT_SOLO` = 0.35 (the stage took `order[1]` before; in C the runner-up was -1), i.e. it needs ρ ≥ 0.50.
+      `REPEAT` stays (0.40, 0.15, 2.0). `decoder.REPEAT_SENDABLE` / bench `--repeat-competitors shipped|sendable`
+      (default `sendable`) keeps the plan-12 set reachable.
+      **Null on run 1 only** (`tools/rp_competitors.py --shuffle 0..5`, base `nn_v3`, the same 223,643
+      wrong-receiver tests as above, which it reproduces exactly: shipped set 0 / 1 / 1 at 0.40-0.15 / margin 0.10
+      / ρ 0.35): sendable set with runner-up 0 - **6** false accepts, all uncontested CQs (43,557 tests, worst wrong
+      CQ ρ 0.459); runner-up 0.30 - 1; **0.35 - 0, and 1 at margin 0.10**, the same as the shipped set.
+      **Emulated first** (same tool, `--real`, both sets chained from saved decodes; the shipped-set emulation
+      reproduces 96% of the shipped `rp` decodes): run 1 +153 / +122 slot-confirmed / unconf 1 -> 1; runs 2-4 on
+      `nn_v3_dtcrp` +533 / +437 / 4 -> 4, on `nn_v3_cc` +536 / +438 / 4 -> 4 - the two stages add up.
+      **A/B on top of `nn_v3_cc`** (fork 1's stage merged; with `--repeat-competitors shipped` the merged code
+      reproduces `decodes_nn_v3_cc.txt` on 2,705 of 2,705 sample lines in every field): run 2 29,588 / 21,751 / 1 ->
+      **29,691 / 21,820 / 1**, run 3 28,295 / 21,324 / 1 -> **28,418 / 21,421 / 1**, run 4 48,668 / 35,249 / 2 ->
+      **48,999 / 35,541 / 2**; **pooled 106,551 / 78,324 / 4 -> 107,108 / 78,782 / 4 (+557 / +458)**, the same
+      four unconfirmed; predicted +536 / +438, and 89-96% of the real new `rp` decodes are ones the emulation named.
+      `rp` gained 578 (479 slot / 99 active / 0 unconf), lost 63 (uncontested CQs at ρ 0.40-0.50 the floor now
+      refuses). Stale check on the new `rp` decodes: 319 of 319 that jt9 / JTDX / deep JTDX also decoded carry
+      the same message. Noise 0 / 998 (no context there, so not a test of this stage).
+      `validate_full.sh nn_v3_ccrpc` vs `nn_v3_cc`: run 1 34,585 / 26,505 / 1 -> **34,727 / 26,615 / 1** (+142 /
+      +110, the same `CQ KR9ZUC/R AO63`); training recordings 18,563 -> 18,677 (jt9-only 197 -> 198); AWGN 50% -22.49 /
+      90% -21.24, identical (no context: unchanged by construction); golden C == Python under MallocScribble
+      00_40m 815/815, 08_80m 629/629, run 2 02_80m 754/754 (also at 1 thread and 4 threads streaming, and run 4
+      02_15m 885/885, 00_20m 898/898 - 13 gained and 6 lost `rp` decodes among them), AWGN 429/429; `ci_smoke.py`
+      51/51; `wsjtx/test_sidecar.sh` all checks. 1 h 21 min on the idle M4 with 8 workers, no sleep events.
+      **The 12 doubtful `rp` decodes** (an `rp` decode with a reference decoding a different sender within 10 Hz /
+      0.4 s and no reference decoding ours; `docs/rp-competitors.md` section 1): none false - 8 real at a different
+      spot 4-9 Hz away, 1 a real two-station collision (deep JTDX decodes ours in the same slot), 2 weak `rp`
+      chains. No guard: chain decodes (last CRC decode of the sender >= 90 s back) are slot-confirmed as often as
+      direct ones on every run, 0 unconfirmed.
+      Reproduce: `docs/rp-competitors.md`.
 
     The investigation that led to it: where JTDX's 3,069 slot-confirmed
     (slot, sender) pairs that `nn_v3` misses come from (runs 2–4 pooled; `tools/diag_ref_only.py --tsv

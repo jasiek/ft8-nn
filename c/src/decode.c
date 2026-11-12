@@ -92,7 +92,9 @@ static int prof = -1;
 #define REPEAT_RHO 0.40
 #define REPEAT_MARGIN 0.15
 #define REPEAT_CLIP 2.0
+#define REPEAT_SOLO 0.35 /* runner-up rho when a sender has no sendable competitor (decoder.REPEAT_SOLO) */
 #define MAXGRID4 32400
+#define NTOKENS_CQ 2063592u /* message.NTOKENS: call fields 2..NTOKENS-1 are CQ / CQ nnn / CQ ABCD */
 /* co-channel retry (decoder._cochannel_stage; decoder.COCHANNEL, COCHANNEL_GRID, COCHANNEL_REFINE): at each decode's
  * cell, data-symbol sync over df +-CC_SPAN Hz x dt +-CC_TFAR baseband samples; the CC_NEAR best local maxima within
  * +-CC_TNEAR samples and the CC_FAR best beyond, scoring >= CC_MIN, each as 3 x 3 hypotheses (+-CC_RDF Hz, +-CC_RDT) */
@@ -1027,8 +1029,9 @@ static int cochannel_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int n
 /* Repeat stage (decoder._repeat_stage): for each sender of a standard context message with no decode in this slot,
  * test its earlier messages as whole known codewords on the residual x at their (f0, dt): rho = sum(l*s)/sum(|l|) on
  * NN LLRs clipped to +-REPEAT_CLIP, s = +-1 per codeword bit, against competitors (the sender's CQ with any grid it
- * sent, then each earlier message with every R flag x grid/RRR/RR73/73/report -30..+30). Accept the best if it is an
- * earlier message, rho >= REPEAT_RHO and it beats the runner-up of the same hypothesis by REPEAT_MARGIN. Appends to
+ * sent, then each earlier message with every R flag x grid/RRR/RR73/73/report -30..+30 that a station could send:
+ * sendable()). Accept the best if it is an earlier message, rho >= REPEAT_RHO and it beats the runner-up of the same
+ * hypothesis by REPEAT_MARGIN; with no competitor left the runner-up is REPEAT_SOLO. Appends to
  * all; returns the new count, or -1 on an ONNX Runtime error. */
 static void set_bits(uint8_t *b, int v, int n) {
     for (int i = 0; i < n; i++) b[i] = (v >> (n - 1 - i)) & 1;
@@ -1037,6 +1040,13 @@ static int get_bits(const uint8_t *b, int n) {
     int v = 0;
     for (int i = 0; i < n; i++) v = v << 1 | b[i];
     return v;
+}
+/* decoder._sendable: no competitor a station never transmits - what plausible77 rejects (a CQ with the R flag), and a
+ * CQ carrying RRR/RR73/73 or a report in place of its locator */
+static int sendable(const uint8_t *b) {
+    if (!plausible77(b, 0)) return 0;
+    uint32_t n28a = (uint32_t)get_bits(b, 28);
+    return !(n28a >= 2 && n28a < NTOKENS_CQ && get_bits(b + 59, 15) > MAXGRID4 + 1);
 }
 static int add_alt(uint8_t (*alt)[77], int na, int cap, const uint8_t *b) {
     for (int i = 0; i < na; i++)
@@ -1103,7 +1113,7 @@ static int repeat_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int nall
                     memcpy(a, alt[i], 77);
                     a[58] = (uint8_t)r;
                     set_bits(a + 59, gv, 15);
-                    na = add_alt(alt, na, MAXALT, a);
+                    if (sendable(a)) na = add_alt(alt, na, MAXALT, a);
                 }
             }
         }
@@ -1150,7 +1160,7 @@ static int repeat_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int nall
                     if (a != b1 && (b2 < 0 || rho[a] > rho[b2])) b2 = a;
                 if (k1 < 0 || rho[b1] > r1) {
                     r1 = rho[b1];
-                    r2 = b2 >= 0 ? rho[b2] : -1.0;
+                    r2 = b2 >= 0 ? rho[b2] : REPEAT_SOLO; /* no sendable competitor (a CQ-only sender): rho >= 0.50 */
                     k1 = b1;
                     best_h = hyps[h];
                 }

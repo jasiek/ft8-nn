@@ -35,7 +35,7 @@ _RDF = 62.5
 _DTR = 0.8
 
 
-def _init(model, also_classical, n_hyp, ckw=None, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, passes=4, context=True, reuse_df=62.5, dt_recenter=0.8, repeat=None, cochannel=None):
+def _init(model, also_classical, n_hyp, ckw=None, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, passes=4, context=True, reuse_df=62.5, dt_recenter=0.8, repeat=None, cochannel=None, sendable=True):
     global _LLR, _NHYP, _CKW, _EG, _EOD, _OSN, _NP, _CTX, _RDF, _DTR, _RP, _CC
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     import torch
@@ -55,6 +55,7 @@ def _init(model, also_classical, n_hyp, ckw=None, erase_gate=15.0, erase_osd_dma
     _DTR = dt_recenter
     _RP = repeat
     _CC = cochannel
+    decoder.REPEAT_SENDABLE = sendable  # repeat-stage competitor set (--repeat-competitors)
 
 
 def _cc_arg(v):
@@ -174,6 +175,8 @@ def main():
     ap.add_argument("--dt-recenter", type=float, default=0.8, help="shift the DT search window by the median DT of the decodes so far (own + context) when it is at least this far from 0 (0 = off)")
     ap.add_argument("--no-context", action="store_true", help="no context a-priori (slots decoded independently)")
     ap.add_argument("--repeat", default="0.4,0.15,2", help="repeat stage RHO,MARGIN,CLIP; 'off' to disable")
+    ap.add_argument("--repeat-competitors", default="sendable", choices=["sendable", "shipped"],
+                    help="repeat-stage competitors: only messages a station could send, or the plan-12 set")
     ap.add_argument("--cochannel", default="2,1,8,24,50,3", help="co-channel retry NEAR_PEAKS,FAR_PEAKS,DF_SPAN,NEAR_DT,FAR_DT,MIN_SCORE (dt in 5 ms baseband samples); 'off' to disable")
     ap.add_argument("--out", default="data/real", help="output root: <out>/<station>/decodes_<tag>.txt")
     ap.add_argument("--compare-only", action="store_true")
@@ -190,7 +193,7 @@ def main():
     outroot = Path(a.out)
 
     if not a.compare_only:
-        with ProcessPoolExecutor(a.workers, initializer=_init, initargs=(a.model, a.also_classical, a.n_hyp, dict(per_symbol=a.per_symbol, fmax=a.fmax, base=a.base), a.erase_gate, a.erase_osd_dmax, a.osd_snaps, a.passes, not a.no_context, a.reuse_df, a.dt_recenter, None if a.repeat == "off" else tuple(map(float, a.repeat.split(","))), _cc_arg(a.cochannel))) as ex:
+        with ProcessPoolExecutor(a.workers, initializer=_init, initargs=(a.model, a.also_classical, a.n_hyp, dict(per_symbol=a.per_symbol, fmax=a.fmax, base=a.base), a.erase_gate, a.erase_osd_dmax, a.osd_snaps, a.passes, not a.no_context, a.reuse_df, a.dt_recenter, None if a.repeat == "off" else tuple(map(float, a.repeat.split(","))), _cc_arg(a.cochannel), a.repeat_competitors == "sendable")) as ex:
             jobs = []  # (station index, chain): one chain per station and period, or one per file without context
             for si, st in enumerate(stations):
                 files = sorted(str(f) for f in (st / "slots").glob("*.wav"))

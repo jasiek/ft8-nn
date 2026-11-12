@@ -72,6 +72,8 @@ def main():
     ap.add_argument("--dt-recenter", type=float, default=0.8, help="shift the DT search window by the median DT of the decodes so far when it is at least this far from 0 (0 = off)")
     ap.add_argument("--cochannel", default="2,1,8,24,50,3", help="co-channel retry NEAR_PEAKS,FAR_PEAKS,DF_SPAN,NEAR_DT,FAR_DT,MIN_SCORE (dt in 5 ms baseband samples); 'off' to disable")
     ap.add_argument("--repeat", default="", help="accepted for run_real.py parity; inert here (slots have no context)")
+    ap.add_argument("--repeat-competitors", default="sendable", choices=["sendable", "shipped"],
+                    help="accepted for run_real.py parity; inert here (slots have no context)")
     ap.add_argument("--osd-order", type=int, default=2)
     ap.add_argument("--osd-max-hard", type=int, default=40)
     ap.add_argument("--workers", type=int, default=8)

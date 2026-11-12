@@ -53,6 +53,14 @@ CTX_DF = 10.0  # Hz
 CTX_DDT = 0.5  # s
 # Repeat stage (_repeat_stage, plan 12): (rho_min, margin, LLR clip), chosen on validation run 1.
 REPEAT = (0.40, 0.15, 2.0)
+# Runner-up rho for a sender with no sendable competitor (its earlier messages are all CQs, and _successors no longer
+# offers a CQ with a report or the R flag), so such a sender needs rho >= 0.50. Run-1 shuffled-context null
+# (tools/rp_competitors.py, the same 223,643 tests as above): with runner-up 0, 6 false accepts; 0.30, 1 (the
+# highest uncontested wrong CQ scores 0.459); 0.35, 0 - and 1 at margin 0.10, as for the plan-12 competitor set.
+REPEAT_SOLO = 0.35
+# Competitor set of the repeat stage: True = only messages a station could send (_sendable); False = the plan-12 set
+# (bench --repeat-competitors shipped), which reproduces the decodes made before this change.
+REPEAT_SENDABLE = True
 # Co-channel retry (_cochannel_stage, plan 7.1 item 1c): (peaks per cell within the near dt span, peaks in the far dt
 # band, df span Hz, near and far dt spans in baseband samples, minimum data-sync score), chosen on validation run 1.
 COCHANNEL = (2, 1, 8.0, 24, 50, 3.0)
@@ -187,10 +195,21 @@ def _codeword(bits77):
     return _CW_CACHE[k]
 
 
-def _successors(b, grids=()):
+def _sendable(c):
+    """False for a competitor no station transmits: anything message.plausible rejects (a CQ with the R flag), and a
+    CQ carrying RRR/RR73/73 or a report in place of its locator. For a CQ prior these sit one 15-bit field from the
+    truth, so on a weak signal they score close behind it and the margin test failed real repeats: on runs 2-4 they
+    were the runner-up in 226 of the 320 repeats lost on the margin (docs/miss-profile-dtcrp.md)."""
+    if not message.plausible(c):
+        return False
+    return not (2 <= message._int(c[0:28]) < message.NTOKENS and message._int(c[59:74]) > message.MAXGRID4 + 1)
+
+
+def _successors(b, grids=(), sendable_only=True):
     """Payloads with b's two call fields and i3, every R flag and g15 a standard sender could use next, plus the
     sender's own CQ with each grid in `grids` (a sender who went back to calling CQ: run 3, `R3RZ BD1AUJ ON80`
-    read again while jt9 and JTDX both decoded `CQ BD1AUJ ON80`)."""
+    read again while jt9 and JTDX both decoded `CQ BD1AUJ ON80`). sendable_only: leave out what no station sends
+    (_sendable); False gives the competitor set shipped with plan 12."""
     out = []
     for gv in grids:
         c = b.copy()
@@ -204,7 +223,8 @@ def _successors(b, grids=()):
         for r in (0, 1):
             c = b.copy()
             c[58], c[59:74] = r, gb
-            out.append(c)
+            if not sendable_only or _sendable(c):
+                out.append(c)
     return out
 
 
@@ -229,7 +249,7 @@ def _repeat_stage(x, llr_fn, found, context, n_hyp, rho_min, margin, clip, log=N
         alts = dict(prior)
         grids = sorted({message._int(b[59:74]) for b in prior.values() if message._int(b[59:74]) < message.MAXGRID4})
         for b in prior.values():
-            for c in _successors(b, grids):
+            for c in _successors(b, grids, sendable_only=REPEAT_SENDABLE):
                 alts.setdefault(c.tobytes(), c)
         keys = list(alts)
         S = np.stack([_codeword(alts[k]) for k in keys])  # (n_alt, 174)
@@ -242,9 +262,12 @@ def _repeat_stage(x, llr_fn, found, context, n_hyp, rho_min, margin, clip, log=N
                 l = np.clip(llrs[0], -clip, clip)
                 rho = S @ l / (np.abs(l).sum() + 1e-9)
                 order = np.argsort(-rho, kind="stable")  # ties: lowest index, as the C port
-                i1, i2 = order[0], order[1]
+                i1 = order[0]
+                # a sender whose only earlier message is a CQ has no sendable competitor: the runner-up is then the
+                # noise ceiling REPEAT_SOLO, so the test asks rho >= REPEAT_SOLO + margin instead of rho >= rho_min
+                r2 = float(rho[order[1]]) if len(order) > 1 else REPEAT_SOLO
                 if best is None or rho[i1] > best[0]:
-                    best = (float(rho[i1]), float(rho[i2]), keys[i1], h)
+                    best = (float(rho[i1]), r2, keys[i1], h)
         if best is None:
             continue
         r1, r2, k1, h = best
