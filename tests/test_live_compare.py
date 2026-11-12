@@ -1,4 +1,5 @@
 import array
+import builtins
 import importlib.util
 import sys
 from pathlib import Path
@@ -9,6 +10,26 @@ SPEC = importlib.util.spec_from_file_location("live_compare", PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
+
+
+def test_module_imports_without_curses(monkeypatch):
+    real_import = builtins.__import__
+
+    def import_without_curses(name, *args, **kwargs):
+        if name == "curses":
+            raise ModuleNotFoundError("No module named '_curses'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", import_without_curses)
+    spec = importlib.util.spec_from_file_location("live_compare_without_curses", PATH)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+        assert module.curses is None
+        assert module.normalize_message(" cq  k1abc ") == "CQ K1ABC"
+    finally:
+        del sys.modules[spec.name]
 
 
 def decode(freq, text):

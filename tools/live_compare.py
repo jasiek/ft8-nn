@@ -22,7 +22,6 @@ import array
 import base64
 import collections
 import ctypes
-import curses
 import hashlib
 import json
 import os
@@ -41,6 +40,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
+
+try:
+    import curses
+except ImportError:  # Not included with the standard CPython distribution on Windows.
+    curses = None  # type: ignore[assignment]
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -142,6 +146,8 @@ def entry_label(entry: dict[str, Any]) -> str:
 
 
 def hide_cursor() -> None:
+    if curses is None:
+        return
     try:
         curses.curs_set(0)
     except curses.error:
@@ -149,6 +155,8 @@ def hide_cursor() -> None:
 
 
 def pick_receiver(screen: Any, entries: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if curses is None:
+        raise RuntimeError("the receiver picker requires Python curses")
     hide_cursor()
     screen.keypad(True)
     query = ""
@@ -738,7 +746,7 @@ def draw_comparison(screen: Any, entry: dict[str, Any], state: ComparisonState) 
     height, width = screen.getmaxyx()
     receiver = entry["receiver"]
     title = f"{receiver.get('label', receiver['url'])} — {entry['band']} FT8 — q to quit"
-    screen.addnstr(0, 0, title, width - 1, curses.A_BOLD)
+    screen.addnstr(0, 0, title, width - 1, curses.A_BOLD if curses is not None else 0)
     with state.lock:
         status = state.status
         slots = sorted(set(state.ours) | set(state.remote))
@@ -774,9 +782,10 @@ def draw_comparison(screen: Any, entry: dict[str, Any], state: ComparisonState) 
     gap = 3
     col = max(20, (width - gap) // 2)
     right = col + gap
-    screen.addnstr(6, 0, "OUR DECODER  Hz  dB   DT  message", col, curses.A_UNDERLINE)
+    underline = curses.A_UNDERLINE if curses is not None else 0
+    screen.addnstr(6, 0, "OUR DECODER  Hz  dB   DT  message", col, underline)
     if right < width:
-        screen.addnstr(6, right, "REMOTE DECODER  Hz  dB   DT  message", max(1, width - right - 1), curses.A_UNDERLINE)
+        screen.addnstr(6, right, "REMOTE DECODER  Hz  dB   DT  message", max(1, width - right - 1), underline)
     rows = match_decodes(ours, remote)
     for row, (local, server) in enumerate(rows[: max(0, height - 8)], start=7):
         screen.addnstr(row, 0, format_decode(local, col), col)
@@ -883,6 +892,9 @@ def main(argv: list[str] | None = None) -> int:
     entries = [entry for entry in document["entries"] if entry.get("band") in FT8_FREQUENCIES]
     if not entries:
         parser.error("receiver directory contains no supported entries")
+    if curses is None:
+        print("The live comparison terminal UI requires Python curses, which is not available.", file=sys.stderr)
+        return 2
     if not sys.stdin.isatty() or not sys.stdout.isatty() or not os.environ.get("TERM"):
         entry = fallback_picker(entries)
         if entry is None:
