@@ -8,6 +8,7 @@ Stages: candidate search -> semi-coherent fine sync (top-k hypotheses) -> soft m
 from dataclasses import dataclass, field
 
 import numpy as np
+from scipy.ndimage import maximum_filter
 
 from . import frontend as fe
 from . import ft8, ldpc, message
@@ -52,6 +53,9 @@ CTX_DF = 10.0  # Hz
 CTX_DDT = 0.5  # s
 # Repeat stage (_repeat_stage, plan 12): (rho_min, margin, LLR clip), chosen on validation run 1.
 REPEAT = (0.40, 0.15, 2.0)
+# Co-channel retry (_cochannel_stage, plan 7.1 item 1c): (peaks per cell within the near dt span, peaks in the far dt
+# band, df span Hz, near and far dt spans in baseband samples, minimum data-sync score), chosen on validation run 1.
+COCHANNEL = (2, 1, 8.0, 24, 50, 3.0)
 
 
 def context_patterns(context, f0, dt):
@@ -91,7 +95,7 @@ def classical_metrics(hyps):
     return out
 
 
-def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=4, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, context=(), ctx_gate=48.0, cand_kw=None, reuse_df=62.5, dt_recenter=0.8, repeat=REPEAT):
+def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=4, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, context=(), ctx_gate=48.0, cand_kw=None, reuse_df=62.5, dt_recenter=0.8, repeat=REPEAT, cochannel=COCHANNEL):
     """Decode one 15 s slot (real audio @12 kHz, any scale), with multi-pass subtraction.
 
     llr_fn(hyps) -> per-hypothesis list of LLR vectors to try in order (first success wins).
@@ -121,6 +125,9 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
     (find_candidates(dt_shift=)). 0 disables.
     repeat: (rho_min, margin, clip) for the repeat stage (_repeat_stage) after the last pass, which tests each context
     message whose sender has no decode in the slot as a whole known message (needs context); None: off.
+    cochannel: (near peaks, far peaks, df span, near dt span, far dt span, min score) for the co-channel retry
+    (_cochannel_stage) after the last pass, which searches every decode's own cell in the residual for a second
+    signal hidden under it; None: off.
     """
     x = np.array(x, dtype=np.float64, copy=True)
     found = {}
@@ -143,6 +150,11 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
             subtract(x, ft8.encode77(d.bits77)[1], d.f0, d.dt)
         if not new:
             break
+    if cochannel and found:
+        for d in _cochannel_stage(x, llr_fn, found, *cochannel, osd_order, osd_max_hard, osd_gate, osd_snaps):
+            d.info["pass"] = passes
+            found[d.key] = d
+            subtract(x, ft8.encode77(d.bits77)[1], d.f0, d.dt)
     if repeat and context:
         for d in _repeat_stage(x, llr_fn, found, context, n_hyp, *repeat):
             found[d.key] = d
@@ -243,6 +255,95 @@ def _repeat_stage(x, llr_fn, found, context, n_hyp, rho_min, margin, clip, log=N
             d.snr = estimate_snr(h, d.bits77)
             out.append(d)
     return out
+
+
+# Co-channel retry (plan 7.1 item 1c). Two stations within a few Hz and tens of ms of each other share one candidate
+# cell, because every FT8 signal carries the same three Costas arrays. We decode the stronger and subtract it, and as
+# the amplitude was fitted to the sum, the subtraction takes most of the weaker one's sync with it; its data symbols
+# carry another message and survive. No candidate search or Costas fine sync finds it afterwards. So after the last
+# pass, at every decode's own cell the residual is searched with a data-symbol metric (frontend.data_sync) over df +-8
+# Hz x dt +-50 baseband samples (+-0.25 s; 0.5 Hz x 2-sample grid). The best local maxima scoring at least min_score
+# go to the NN as 3x3 hypotheses (COCHANNEL_REFINE): `near` of them within +-24 samples, `far` beyond. Two zones,
+# because one +-50 window with 2 peaks lost 6 near recoveries to far peaks while gaining 7 far ones (run 1). NN
+# metric, BP, OSD and OSD on BP sums as in a pass; plausibility rules; a result that is a decode we already have, or
+# a ghost of any decode in the slot, is skipped.
+# Validation run 1, offline on the nn_v3_dtcrp residuals (34,295 cells, 14.7 NN hypotheses per cell): +253 decodes =
+# 174 slot-confirmed, 74 active, 0 unconfirmed, 5 unscorable; 72 of them are among the 146 jt9-only decodes within
+# 10 Hz / 0.4 s of one of ours (near zone only: 67; a brute 561-point grid over df +-8 Hz x dt +-80 ms, no data-sync
+# search: 69). min_score 3.0: with the cells of 1,000 busy real slots forced onto noise-only audio (43,474 cells) the
+# best score of a cell is at most 2.77, so no hypothesis reaches the NN; with no score limit those cells gave
+# 1,173,798 NN hypotheses and 0 decodes.
+COCHANNEL_REFINE = (0.4, 1)  # Hz, baseband samples around each data-sync peak (3 x 3 hypotheses)
+COCHANNEL_GRID = (0.5, 2)  # data-sync grid steps: Hz, baseband samples
+
+
+def _nn_only(llr_fn):
+    """The NN metric alone if llr_fn offers it (nn_metric.make_llr_fn), else llr_fn."""
+    return getattr(llr_fn, "nn", llr_fn)
+
+
+def _cochannel_stage(x, llr_fn, found, near, far, span, tnear, tfar, min_score, osd_order, osd_max_hard, osd_gate, osd_snaps, log=None):
+    """Decodes hidden under the cells of the decodes in `found` (see the comment above). log: list to append
+    (cell index, best data-sync score, outcome) to for every cell."""
+    bb = fe.Baseband(x)
+    gf, gt = COCHANNEL_GRID
+    rdf, rdt = COCHANNEL_REFINE
+    dfs = np.arange(-span - 2 * gf, span + 2 * gf + 1e-9, gf)  # one step beyond the window each way, so a peak on its
+    dts = np.arange(-tfar - gt, tfar + gt + 1, gt)  # edge must be a true local maximum
+    infreq = np.abs(dfs)[:, None] <= span + 1e-9
+    zones = ((near, infreq & (np.abs(dts)[None, :] <= tnear)), (far, infreq & (np.abs(dts)[None, :] > tnear) & (np.abs(dts)[None, :] <= tfar)))
+    offs = [(0.0, 0)] + [(a, b) for a in (-rdf, 0.0, rdf) for b in (-rdt, 0, rdt) if (a, b) != (0.0, 0)]
+    cells = list(found.values())
+    hyps, group, best = [], [], []
+    for ci, d in enumerate(cells):
+        y0 = bb.downsample(d.f0)
+        start0 = int(round((ft8.NOMINAL_START + d.dt) * fe.FS_BB))
+        M = fe.data_sync(y0, start0, dfs, dts)
+        lm = (M == maximum_filter(M, size=3)) & (M >= min_score)
+        best.append(float(M[zones[0][1] | zones[1][1]].max()))
+        for z, (k, zone) in enumerate(zones):
+            fi, ti = np.nonzero(lm & zone)
+            for rank, o in enumerate(np.argsort(-M[fi, ti], kind="stable")[:k]):
+                for a, b in offs:
+                    df, s = dfs[fi[o]] + a, start0 + int(dts[ti[o]]) + b
+                    hyps.append(fe.SyncHyp(d.f0 + df, s / fe.FS_BB - ft8.NOMINAL_START, fe._rotate(y0, df), s, float(M[fi[o], ti[o]])))
+                    group.append((ci, z, rank))
+    out, outcome = {}, {}
+    if hyps:
+        L = np.stack([l[0] for l in _nn_only(llr_fn)(hyps)])
+        bits, ok, nh = ldpc.bp_decode(L)
+        exp_err = (1.0 / (1.0 + np.exp(np.abs(L)))).sum(1)
+        done = set()
+        for i, (h, g) in enumerate(zip(hyps, group)):
+            if g in done:
+                continue
+            a91 = None
+            if ok[i] and ft8.crc_ok(bits[i, :91]):
+                a91, info = _plausible(bits[i, :91], {"method": "bp_cc", "nhard": int(nh[i])})
+            if a91 is None and osd_order >= 0 and exp_err[i] < osd_gate:
+                cw, crc, dist, n = ldpc.osd_decode(L[i], osd_order)
+                if crc and n <= osd_max_hard:
+                    a91, info = _plausible(cw[:91], {"method": "osd_cc", "nhard": n, "dist": dist})
+                if a91 is None and osd_snaps:
+                    a91, info = _try_osd_bp(L[i], osd_snaps, osd_order, osd_max_hard)
+                    if a91 is not None:
+                        a91, info = _plausible(a91, {**info, "method": "osd_bp_cc"})
+            if a91 is None or not a91[:77].any():
+                continue
+            d = Decode(a91[:77].copy(), h.f0, h.dt, h.metric, info["method"], {**info, "metric": 0, "exp_err": float(exp_err[i])})
+            if d.key in found or d.key in out:
+                outcome.setdefault(g[0], "known")
+                continue
+            if any(_is_ghost(d, e) for e in cells + list(out.values())):
+                outcome.setdefault(g[0], "ghost")
+                continue
+            d.snr = estimate_snr(h, d.bits77)
+            out[d.key] = d
+            outcome[g[0]] = "new"
+            done.add(g)
+    if log is not None:
+        log += [(ci, best[ci], outcome.get(ci, "")) for ci in range(len(cells))]
+    return list(out.values())
 
 
 @dataclass

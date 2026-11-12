@@ -90,16 +90,69 @@ def _call_blocks():
     return _BLOCKS
 
 
-def plausible(bits, deep=False):
-    """Could this payload be a real transmission? Standard messages (i3 = 1, 2) only; everything else passes.
+MAXGRID6 = 18 * 18 * 10 * 10 * 24 * 24  # 6-character locators (i3=5 g25)
 
-    Always rejected: a CQ with the R flag ("CQ K1ABC R FN42"; WSJT-X never sends it), a locator past RR99, a report
-    code above 135 (no encoder makes them; they unpack as nonsense like +112). Codes 5..135 are all real: WSJT-X packs
-    -30..+49 as 5..84 and -50..-31 as 86..105, other programs pack every negative report as 86..135. deep (OSD-family decodes, which can turn noise into a CRC-valid word): also every
-    full callsign must be well-formed and start with an amateur call block in use (data/call_blocks.txt).
-    On validation data no confirmed decode breaks these; false ones often do (STATUS plan 7.4).
+
+def _call_ok(n28):
+    """Deep test of a 28-bit call field: a full callsign must be well-formed and start with a call block in use."""
+    if n28 < NTOKENS + MAX22:  # token or hashed call: nothing to check
+        return True
+    if (n28 - NTOKENS - MAX22) // (36 * 10 * 27 * 27 * 27) > 36:
+        return False  # first character out of range
+    one, two = _call_blocks()
+    call = unpack28(n28, None)
+    return " " not in call and (call[0] in one or call[:2] in two)
+
+
+def _c58_ok(n58):
+    """Deep test of an i3=4 non-standard callsign: at most 11 characters (n58 < 38^11), no space inside, at most two
+    '/' and no empty part around one, and the longest part (the call itself, as in PJ4/K1ABC or HB9HRR/QRP) has a
+    letter and a digit and starts with a call block in use. Every one of the 2,770 i3=4 payloads saved on the
+    validation runs and training recordings passes; 54% of random i3=4 payloads fail. It cannot catch a random call
+    that happens to be well-formed (`FN3EPRKOCCN <...> 73`, run 2): real special-event calls look the same
+    (YO1BRANCUSI)."""
+    if n58 >= 38**11:
+        return False
+    s = ""
+    for _ in range(11):
+        s = C38[n58 % 38] + s
+        n58 //= 38
+    s = s.strip()
+    parts = s.split("/")
+    if not s or " " in s or len(parts) > 3 or not all(parts):
+        return False
+    base = max(parts, key=len)
+    one, two = _call_blocks()
+    return any(c.isdigit() for c in base) and any(c.isalpha() for c in base) and (base[0] in one or base[:2] in two)
+
+
+def plausible(bits, deep=False):
+    """Could this payload be a real transmission?
+
+    Standard messages (i3 = 1, 2), always rejected: a CQ with the R flag ("CQ K1ABC R FN42"; WSJT-X never sends it),
+    a locator past RR99, a report code above 135 (no encoder makes them; they unpack as nonsense like +112). Codes
+    5..135 are all real: WSJT-X packs -30..+49 as 5..84 and -50..-31 as 86..105, other programs pack every negative
+    report as 86..135. An EU VHF message (i3=5) with a 6-character locator past RR99XX is rejected too.
+    deep (OSD-family decodes, which can turn noise into a CRC-valid word): also every full callsign must be
+    well-formed and start with an amateur call block in use (data/call_blocks.txt) - the call fields of standard,
+    DXpedition (i3=0 n3=1) and RTTY Roundup (i3=3) messages, and the non-standard call of i3=4 messages (_c58_ok).
+    Free text and telemetry carry nothing to check. On validation data no confirmed decode breaks these; false ones
+    often do (STATUS plan 7.4).
     """
-    if _int(bits[74:77]) not in (1, 2):
+    i3 = _int(bits[74:77])
+    if i3 == 5:  # h12 h22 R1 r3 s11 g25
+        return _int(bits[49:74]) < MAXGRID6
+    if not deep and i3 not in (1, 2):
+        return True
+    if i3 == 4:  # h12 c58 h1 r2 c1
+        return _c58_ok(_int(bits[12:70]))
+    if i3 == 3:  # ARRL RTTY Roundup: t1 c28 c28 R1 r3 s13
+        return _call_ok(_int(bits[1:29])) and _call_ok(_int(bits[29:57]))
+    if i3 == 0:
+        if _int(bits[71:74]) == 1:  # DXpedition: c28 c28 h10 r5
+            return _call_ok(_int(bits[0:28])) and _call_ok(_int(bits[28:56]))
+        return True
+    if i3 not in (1, 2):
         return True
     n28a, n28b, ir, igrid4 = _int(bits[0:28]), _int(bits[29:57]), int(bits[58]), _int(bits[59:74])
     if igrid4 == MAXGRID4:  # would unpack as "SA00": not a locator
@@ -109,17 +162,7 @@ def plausible(bits, deep=False):
         return False
     if 2 <= n28a < NTOKENS and ir:  # CQ / CQ nnn / CQ ABCD with the R flag
         return False
-    if deep:
-        one, two = _call_blocks()
-        for n in (n28a, n28b):
-            if n < NTOKENS + MAX22:  # token or hashed call: nothing to check
-                continue
-            if (n - NTOKENS - MAX22) // (36 * 10 * 27 * 27 * 27) > 36:
-                return False  # first character out of range
-            call = unpack28(n, None)
-            if " " in call or not (call[0] in one or call[:2] in two):
-                return False
-    return True
+    return not deep or (_call_ok(n28a) and _call_ok(n28b))
 
 
 def _report(ir, igrid4):

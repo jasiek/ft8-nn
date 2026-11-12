@@ -284,25 +284,74 @@ static int call_block_ok(const char *c) {
     return 0;
 }
 
-/* message.plausible: 0 if a standard message (i3 = 1, 2) could not be a real transmission (CQ with the R flag, locator
- * past RR99, report code above 135; with deep also a malformed full callsign or one outside the call blocks) */
+/* message._call_ok: a full callsign in a 28-bit call field must be well-formed and start with a call block in use */
+static int call_ok(uint32_t n28) {
+    if (n28 < NTOKENS + MAX22) return 1; /* token or hashed call: nothing to check */
+    if ((n28 - NTOKENS - MAX22) / (36u * 10 * 27 * 27 * 27) > 36) return 0; /* first character out of range */
+    char c[16];
+    unpack28(n28, NULL, c, sizeof c);
+    return !strchr(c, ' ') && call_block_ok(c);
+}
+
+/* message._c58_ok: an i3=4 non-standard callsign - at most 11 characters (n58 < 38^11), no space inside, at most two
+ * '/' with no empty part around one, and the longest part has a letter and a digit and starts with a call block */
+static int c58_ok(uint64_t n58) {
+    uint64_t max = 1;
+    for (int i = 0; i < 11; i++) max *= 38;
+    if (n58 >= max) return 0;
+    char s[12];
+    for (int i = 10; i >= 0; i--) {
+        s[i] = C38[n58 % 38];
+        n58 /= 38;
+    }
+    s[11] = 0;
+    int lo = 0, hi = 11;
+    while (lo < hi && s[lo] == ' ') lo++;
+    while (hi > lo && s[hi - 1] == ' ') hi--;
+    if (lo == hi) return 0;
+    int nparts = 1, plen = 0, blo = lo, blen = 0, start = lo;
+    for (int i = lo; i <= hi; i++) {
+        if (i < hi && s[i] == ' ') return 0;
+        if (i == hi || s[i] == '/') {
+            plen = i - start;
+            if (!plen) return 0; /* empty part */
+            if (plen > blen) {   /* the first longest part, as max(parts, key=len) */
+                blen = plen;
+                blo = start;
+            }
+            if (i < hi && ++nparts > 3) return 0;
+            start = i + 1;
+        }
+    }
+    char base[12];
+    memcpy(base, s + blo, (size_t)blen);
+    base[blen] = 0;
+    int digit = 0, alpha = 0;
+    for (int i = 0; i < blen; i++) {
+        digit |= base[i] >= '0' && base[i] <= '9';
+        alpha |= base[i] >= 'A' && base[i] <= 'Z';
+    }
+    return digit && alpha && call_block_ok(base);
+}
+
+#define MAXGRID6 (18u * 18 * 10 * 10 * 24 * 24) /* 6-character locators (i3=5 g25) */
+
+/* message.plausible: 0 if the payload could not be a real transmission. Standard messages (i3 = 1, 2): CQ with the R
+ * flag, locator past RR99, report code above 135; EU VHF (i3 = 5): a 6-character locator past RR99XX. With deep also a
+ * malformed full callsign or one outside the call blocks, in standard, DXpedition (i3 = 0, n3 = 1) and RTTY Roundup
+ * (i3 = 3) messages, and a malformed i3 = 4 non-standard callsign. */
 int plausible77(const uint8_t *b, int deep) {
     int i3 = (int)bint(b, 74, 77);
+    if (i3 == 5) return bint(b, 49, 74) < MAXGRID6; /* h12 h22 R1 r3 s11 g25 */
+    if (!deep && i3 != 1 && i3 != 2) return 1;
+    if (i3 == 4) return c58_ok(bint(b, 12, 70));                                                      /* h12 c58 h1 r2 c1 */
+    if (i3 == 3) return call_ok((uint32_t)bint(b, 1, 29)) && call_ok((uint32_t)bint(b, 29, 57));      /* t1 c28 c28 ... */
+    if (i3 == 0) return bint(b, 71, 74) != 1 || (call_ok((uint32_t)bint(b, 0, 28)) && call_ok((uint32_t)bint(b, 28, 56)));
     if (i3 != 1 && i3 != 2) return 1;
     uint32_t n28a = (uint32_t)bint(b, 0, 28), n28b = (uint32_t)bint(b, 29, 57), igrid4 = (uint32_t)bint(b, 59, 74);
     if (igrid4 == MAXGRID4) return 0;
     int irpt = (int)igrid4 - MAXGRID4;
     if (irpt > 135) return 0; /* encoders use 5..135 (negative reports as 86..135 or 5..34) */
     if (n28a >= 2 && n28a < NTOKENS && b[58]) return 0;                    /* CQ ... with the R flag */
-    if (deep) {
-        const uint32_t ns[2] = {n28a, n28b};
-        for (int i = 0; i < 2; i++) {
-            if (ns[i] < NTOKENS + MAX22) continue; /* token or hashed call */
-            if ((ns[i] - NTOKENS - MAX22) / (36u * 10 * 27 * 27 * 27) > 36) return 0;
-            char c[16];
-            unpack28(ns[i], NULL, c, sizeof c);
-            if (strchr(c, ' ') || !call_block_ok(c)) return 0;
-        }
-    }
-    return 1;
+    return !deep || (call_ok(n28a) && call_ok(n28b));
 }

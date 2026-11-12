@@ -353,6 +353,8 @@ static void rotate(cplx *y, double df) {
     }
 }
 
+void bb_rotate(cplx *y, double df) { rotate(y, df); }
+
 int fine_sync2(const baseband *b, const candidate *c, int n_hyp, sync_hyp *out) {
     cplx y0[NBB];
     baseband_downsample(b, c->f0, y0);
@@ -437,6 +439,55 @@ int fine_sync2(const baseband *b, const candidate *c, int n_hyp, sync_hyp *out) 
         o->metric = Mp[i][j];
     }
     return nh;
+}
+
+/* ------------------------------------------------------------------ data-symbol sync (frontend.data_sync) */
+
+/* Per (df, dt): sum over the 58 data symbols of (strongest of tones 0..7 - stronger of tones -1 and 8) power, over the
+ * summed mean power of tones 0..7; M[fi * nt + ti]. Tone powers come from 32-sample DFTs at 6.25 k + df Hz of y0 from
+ * start0 + dts[ti] + 32 * DATA_POS[s] (samples outside y0 count as 0). dts must be ascending and of one parity. The
+ * DFTs are slid along y0 one sample at a time (X_{p+1} = e^{iw} (X_p - y_p + y_{p+32} e^{-32iw})) and restarted
+ * from the direct sum every 64 samples, so rounding cannot build up; numpy's matrix product gives the same values to
+ * ~1e-12 relative. */
+void data_sync(const cplx *y0, int start0, const double *dfs, int nf, const int *dts, int nt, double *M) {
+    int p0 = start0 + dts[0] + SPS_BB * DATA_POS[0], p1 = start0 + dts[nt - 1] + SPS_BB * DATA_POS[ND - 1];
+    int np = (p1 - p0) / 2 + 1; /* window starts p0, p0 + 2, ..., p1 */
+    double *P = malloc(sizeof(double) * 10 * (size_t)np);
+    for (int fi = 0; fi < nf; fi++) {
+        for (int k = 0; k < 10; k++) {
+            double w = 2 * M_PI * ((k - 1) * TONE_SPACING + dfs[fi]) / FS_BB;
+            cplx step = cos(w) + I * sin(w), back = cos(-SPS_BB * w) + I * sin(-SPS_BB * w), X = 0;
+            for (int p = p0; p <= p1; p++) {
+                if ((p - p0) % 64 == 0) { /* restart from the direct sum */
+                    X = 0;
+                    for (int n = 0; n < SPS_BB; n++) {
+                        int i = p + n;
+                        if (i >= 0 && i < NBB) X += y0[i] * (cos(-w * n) + I * sin(-w * n));
+                    }
+                }
+                if (!((p - p0) & 1)) P[(size_t)k * np + (p - p0) / 2] = creal(X) * creal(X) + cimag(X) * cimag(X);
+                cplx out = p >= 0 && p < NBB ? y0[p] : 0, in = p + SPS_BB >= 0 && p + SPS_BB < NBB ? y0[p + SPS_BB] : 0;
+                X = step * (X - out + in * back);
+            }
+        }
+        for (int ti = 0; ti < nt; ti++) {
+            double num = 0, den = 0;
+            for (int s = 0; s < ND; s++) {
+                int q = (start0 + dts[ti] + SPS_BB * DATA_POS[s] - p0) / 2;
+                double pin = 0, sum = 0;
+                for (int k = 1; k < 9; k++) {
+                    double v = P[(size_t)k * np + q];
+                    pin = v > pin ? v : pin;
+                    sum += v;
+                }
+                double a = P[q], b = P[(size_t)9 * np + q];
+                num += pin - (a > b ? a : b);
+                den += sum / 8;
+            }
+            M[fi * nt + ti] = num / (den > 1e-12 ? den : 1e-12);
+        }
+    }
+    free(P);
 }
 
 /* ------------------------------------------------------------------ symbol spectra / metrics */

@@ -16,17 +16,20 @@ def make_llr_fn(path, also_classical=False, device="cpu", batch=128):
     net = load(path, device)
 
     @torch.no_grad()
-    def llr_fn(hyps):
+    def nn_fn(hyps):
         y = torch.as_tensor(np.stack([h.y for h in hyps]), dtype=torch.complex64, device=device)
         start = torch.tensor([h.start for h in hyps], device=device)
         out = []
         for i in range(0, len(hyps), batch):
             out.append(net(model.features(y[i : i + batch], start[i : i + batch])).double().cpu().numpy())
-        nn = np.concatenate(out)
-        res = [[l] for l in nn]
+        return [[l] for l in np.concatenate(out)]
+
+    def llr_fn(hyps):
+        res = nn_fn(hyps)
         if also_classical:
             for r, cl in zip(res, decoder.classical_metrics(hyps)):
                 r.extend(cl)
         return res
 
+    llr_fn.nn = nn_fn  # NN metric only, for stages that use nothing else (decoder._nn_only)
     return llr_fn

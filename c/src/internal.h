@@ -98,6 +98,11 @@ typedef struct {
 } sync_hyp;
 /* returns number of hypotheses written (<= n_hyp) */
 int fine_sync2(const baseband *b, const candidate *c, int n_hyp, sync_hyp *out);
+/* frontend.data_sync: data-symbol sync metric M[fi * nt + ti] at offsets dfs (Hz) x dts (baseband samples, ascending,
+ * one parity) from start0 */
+void data_sync(const cplx *y0, int start0, const double *dfs, int nf, const int *dts, int nt, double *M);
+/* frontend._rotate: y *= exp(-2 pi i df n / FS_BB) */
+void bb_rotate(cplx *y, double df);
 
 /* NN input features (79 x NFEAT floats) from y rounded to float32, as model.features() */
 void nn_features(const cplx *y, int start, float *out);

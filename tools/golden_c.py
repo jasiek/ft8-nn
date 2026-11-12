@@ -91,7 +91,7 @@ def main():
     ap.add_argument("path")
     ap.add_argument("--n", type=int, default=20)
     ap.add_argument("--workers", type=int, default=6)
-    ap.add_argument("--tag", default="nn_v3_dtcrp", help="Python result tag to compare against")
+    ap.add_argument("--tag", default="nn_v3_cc", help="Python result tag to compare against")
     ap.add_argument("--onnx", default=None, help="model for the C side (default models/v3/ft8nn.onnx)")
     ap.add_argument("--out", default="data/real", help="root of the Python decodes (real mode), e.g. data/val/run2")
     ap.add_argument("--threads", type=int, default=4, help="C decode threads (0 = one per performance core)")

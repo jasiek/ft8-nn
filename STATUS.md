@@ -1,6 +1,11 @@
 # Status and plan (resume here)
 
-Last updated 2026-11-11 (**README gains a JTDX section**: per-run tables of jt9 / JTDX defaults / JTDX deep / `nn_v3` /
+Last updated 2026-11-12 (**co-channel retry shipped, tag `nn_v3_cc`** (plan 7.1 item 1c): after the last pass, every
+decode's own cell is searched in the residual with a data-symbol sync metric for a second station whose sync the
+subtraction took away; runs 2–4 pooled **106,551 / 78,324 / 4** (+477 decodes / +302 slot-confirmed over
+`nn_v3_dtcrp`, unconfirmed the same four; +23.5% / +22.5% over jt9, +14.1% over JTDX's defaults, +9.0% over its
+ceiling); the plausibility rules now also check non-standard-call, DXpedition, RTTY Roundup and EU VHF messages
+(plan 7.4); C port golden PASS (1 thread and 4 threads streaming); `validate_full.sh nn_v3_cc` PASS: run 1 34,585 / 26,505 / 1 (+290 / +206), training recordings 18,489 -> 18,563 (jt9-only 209 -> 197), AWGN identical. Before that **README gains a JTDX section**: per-run tables of jt9 / JTDX defaults / JTDX deep / `nn_v3` /
 `nn_v3_dtcrp` and ft8nn's margin over JTDX. Before that **rebased onto `main` and measured together with DT re-centring**: tag `nn_v3_dtcrp`, runs
 2–4 pooled **106,074 / 78,022 / 4** (+23.0% / +22.0% over jt9; +13.6% over JTDX's defaults, +8.6% over its ceiling),
 run 1 / training / AWGN identical to `nn_v3_rpf`, golden PASS on the threaded C (1 thread and 4 threads streaming).
@@ -109,8 +114,11 @@ decodes verified identical to the main machine.
   a non-JSON line, exit on `quit`, and a missing model. The first attempt, a `jt9` shared-memory shim (`jt9nn`,
   Qt 5 + the 46 MiB `dec_data` segment, so stock WSJT-X would work too), was dropped: the fork has the sidecar
   interface and stock WSJT-X is not a target.
-- Last commit: multi-threaded decoding with decodes streamed within a pass (plan 6 step 3; merged into `main`
-  with the user's OK, 2026-11-11). Next: idle timing on the M1 Pro, then the early pass (plan 6a).
+- Last commit: the co-channel retry, tag `nn_v3_cc` (plan 7.1 item 1c), with the plausibility rules extended to
+  the other message types (plan 7.4); Python + C, golden PASS, `validate_full.sh nn_v3_cc` PASS.
+  Next: idle C timing of `nn_v3_cc` (nothing else running; the user schedules it), then the levers ranked by the
+  runs 2-4 miss profile (repeat stage without nonsense competitors, more lag tracks per frequency in the
+  candidate search), and the early pass (plan 6a).
 - Architecture study finished 2026-11-07 (plan 7.3d): keep the transformer. Its code (`train.py --kind conv|gru`,
   `--teacher`, `model.build`) is merged; models in `runs/{tf,conv,gru,tf_l2,tf_l2kd}_v{1,2}`, scripts `data/tmp/` (gitignored).
 - Loop log (finished): `nn_v2_eh` pass, `nn_v2_ob` fail (1 ghost), `nn_v2_og` pass, `nn_v2_p4` pass → run 2
@@ -132,7 +140,9 @@ CQ a-priori decoding (expected errors < 44), burst-erasure retry (expected error
 (`osd_er`), OSD on summed BP posteriors after iterations 1–2 (`osd_bp`), ghost filter, candidate search 150–3100 Hz plus an early-DT track down to −2.5 s, candidate reuse in passes 2–4
 (`reuse_df` 62.5 Hz, plan 7.3b), message plausibility rules on every stage's result (plan 7.4),
 context a-priori decoding from our own decodes 30/60 s earlier (`bp_cx`/`osd_cx`, expected errors < 48; needs
-`context=` in Python, `ft8nn_decode_at` in C; the bench passes it, see plan 7.2c).
+`context=` in Python, `ft8nn_decode_at` in C; the bench passes it, see plan 7.2c), DT re-centring (`dt_recenter`,
+plan 7.1 item 1b), and after the last pass, on the residual, the co-channel retry (`bp_cc`/`osd_cc`/`osd_bp_cc`,
+plan 7.1 item 1c) and, with context, the repeat stage (`rp`, plan 12).
 
 ### Results vs WSJT-X jt9 (`-d 3`)
 
@@ -197,6 +207,8 @@ Scores (vs jt9 baseline, checkable = sender call is spotted-checkable):
 | 1 | nn_v2_rs | 31,952 (+15.2%) | 24,444 (+13.7%) | 3 | | |
 | 1 | nn_v2_pl | 31,951 (+15.2%) | 24,444 (+13.7%) | 2 | | |
 | 1 | **nn_v3** | **32,244 (+16.3%)** | **24,660 (+14.7%)** | **1** | | |
+| 1 | nn_v3_dtcrp | 34,295 (+23.7%) | 26,299 (+22.4%) | 1 | | |
+| 1 | **nn_v3_cc** | **34,585 (+24.7%)** | **26,505 (+23.3%)** | **1** | | |
 | 2 (unseen sites) | jt9 | 24,291 | 17,993 | 16 | – | – |
 | 2 | nn_v2_er | 25,994 (+7.0%) | 19,244 (+7.0%) | 1 | 886 | 2590 |
 | 2 | nn_v2_f31 | 26,032 (+7.2%) | 19,281 (+7.2%) | 1 | 850 | |
@@ -208,16 +220,24 @@ Scores (vs jt9 baseline, checkable = sender call is spotted-checkable):
 | 2 | nn_v2_pl | 27,928 (+15.0%) | 20,504 (+14.0%) | 0 | | |
 | 2 | **nn_v3** | **28,198 (+16.1%)** | **20,701 (+15.1%)** | **1** | | |
 | 2 | **nn_v3_dtc** | **28,198 (+16.1%)** | **20,701 (+15.1%)** | **1** | | identical to `nn_v3`: the gate never arms here |
+| 2 | nn_v3_dtcrp | 29,435 (+21.2%) | 21,646 (+20.3%) | 1 | | |
+| 2 | **nn_v3_cc** | **29,588 (+21.8%)** | **21,751 (+20.9%)** | **1** | | |
 | 3 (unseen sites, other day) | jt9 | 23,524 | 17,888 | 17 | – | – |
 | 3 | nn_v2_pl | 26,535 (+12.8%) | 19,982 (+11.7%) | 1 | | |
 | 3 | **nn_v3** | **26,688 (+13.5%)** | **20,105 (+12.4%)** | **0** | | |
 | 3 | **nn_v3_dtc** † | **26,993 (+14.7%)** | **20,342 (+13.7%)** | **0** | | |
+| 3 | nn_v3_dtcrp | 28,206 (+19.9%) | 21,266 (+18.9%) | 1 | | |
+| 3 | **nn_v3_cc** | **28,295 (+20.3%)** | **21,324 (+19.2%)** | **1** | | |
 | 4 (unseen sites, high bands, afternoon) | jt9 | 38,432 | 28,053 | 29 | – | – |
 | 4 | **nn_v3** | **45,744 (+19.0%)** | **33,070 (+17.9%)** | **2** | 948 | 8,259 |
 | 4 | **nn_v3_dtc** † | **46,248 (+20.3%)** | **33,397 (+19.0%)** | **2** | 727 | 8,542 |
+| 4 | nn_v3_dtcrp | 48,433 (+26.0%) | 35,110 (+25.2%) | 2 | | |
+| 4 | **nn_v3_cc** | **48,668 (+26.6%)** | **35,249 (+25.7%)** | **2** | | |
 | **2 + 3 + 4 pooled (unseen)** | jt9 | 86,247 | 63,934 | 62 | – | – |
 | **2 + 3 + 4 pooled (unseen)** | **nn_v3** | **100,630 (+16.7%)** | **73,876 (+15.6%)** | **3** | | |
 | **2 + 3 + 4 pooled (unseen)** | **nn_v3_dtc** † | **101,439 (+17.6%)** | **74,440 (+16.4%)** | **3** | | |
+| **2 + 3 + 4 pooled (unseen)** | nn_v3_dtcrp | 106,074 (+23.0%) | 78,022 (+22.0%) | 4 | | |
+| **2 + 3 + 4 pooled (unseen)** | **nn_v3_cc** | **106,551 (+23.5%)** | **78,324 (+22.5%)** | **4** | | |
 
 † `nn_v3_dtc` on runs 3 and 4 = the re-measured drifting receiver (`03_20m`, `08_12m`) plus the other
 stations' unchanged `nn_v3` decodes; the gate provably cannot fire on those (replaying it over their
@@ -450,8 +470,9 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       resolve in a worktree ("No version is set for command uv"), and `set -euo pipefail` made that a silent abort.
       `.tool-versions` now pins `uv 0.13.7` alongside `python 3.12.14` (`uv lock --check` clean and
       `uv sync --dry-run` "would make no changes", so the pinned 0.13.7 leaves the locked environment untouched).
-   1c. **Co-channel collisions: the strong signal's subtraction destroys the weak one's sync - DIAGNOSED
-      2026-11-11, not implemented.** With 1b in, the remaining jt9-only decodes were re-profiled from scratch.
+   1c. **Co-channel collisions: the strong signal's subtraction destroys the weak one's sync - DONE 2026-11-12 as
+      the co-channel retry, tag `nn_v3_cc` (the shipped default; Python + C, golden PASS).** Diagnosis first
+      (2026-11-11), then the stage (below the diagnosis). With 1b in, the remaining jt9-only decodes were re-profiled from scratch.
       **They are real, not jt9 false decodes.** Re-emitting each station's jt9-only decodes as their own decode
       file and running `collect/verify.py` over it: run 1 1,027 misses = 788 slot-confirmed / 199 active / 3
       repeat / 14 unconf, run 2 583 = 419 / 126 / 0 / 16, run 4 727 = 493 / 174 / 0 / 29. So 96-98% are
@@ -477,13 +498,76 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       + LDPC) recovers `EA3CCI AD8RW EN80` in all three slots at E = 18.6 / 3.4 / 9.5.
       **Class size** (jt9-only miss with a decode of ours within 10 Hz / 0.4 s, all SNRs): run 1 179 of 1,027
       (17.4%), run 2 112 of 583 (19.2%), run 4 111 of 727 (15.3%) - about 400 pooled, 90-96% spot-confirmed.
-      **Next: post-subtraction forced retry.** The decoder already knows every cell it subtracted from, so this
-      needs no new detector - only a gate, since forcing hypotheses is exactly where ghosts of the subtracted
-      signal live (`_is_ghost` already exists for that) and OSD on a forced hypothesis can fit CRC-valid
-      garbage. Cost is the open question: the +-7 Hz / 0.5 Hz grid used above is 377 hypotheses per subtracted
-      decode, ~50 decodes per busy slot, which is several times the whole current per-pass budget. Narrow it
-      first - a 1 Hz df step and dt +- 1 sample is 39, and the cell can be skipped unless residual energy at
-      that frequency is still above the local noise floor.
+      **The stage (`decoder._cochannel_stage`, C `cochannel_stage`; methods `bp_cc` / `osd_cc` / `osd_bp_cc`,
+      `FT8NN_BP_CC` = 10 / `FT8NN_OSD_CC` = 11 / `FT8NN_OSD_BP_CC` = 12).** After the last pass, on the residual
+      (every decode subtracted), at every decode's own cell: a **data-symbol sync** search
+      (`frontend.data_sync`, C `data_sync`) over df +-8 Hz x dt +-50 baseband samples (+-0.25 s) on a 0.5 Hz x
+      2-sample grid - per data symbol the strongest of the 8 tone powers minus the stronger of the two tones
+      just outside the band (-1 and 8), summed over the 58 data symbols, over the summed mean in-band power. The
+      out-of-band term is what makes it work: without it every signal scores almost the same at +-6.25 Hz (7 of
+      its 8 tones), and those aliases filled the top peaks (run-1 class recoveries 41 -> 42 with half the
+      hypotheses once removed). Then the 2 best local maxima within +-24 samples and the best one beyond, each
+      scoring >= 3.0, go to the NN as 3 x 3 hypotheses (+-0.4 Hz, +-1 sample); NN metric -> BP -> OSD-2
+      (expected errors < 40, hard errors <= 40) -> OSD on BP sums; plausibility rules; in order, one decode
+      per peak, and a payload already decoded or a ghost (`_is_ghost`) of any decode in the slot is skipped.
+      Stage decodes are subtracted, then the repeat stage runs. Run before the repeat stage, so a station both
+      would find is decoded with a CRC check rather than tested (151 of the 552 on runs 2-4 replaced `rp`
+      decodes). C: the grid search per cell and the per-hypothesis decoding run on the thread pool, then a
+      serial merge in Python's order; `data_sync` is a sliding 32-sample DFT over the ~1,080 window starts
+      (restarted from the direct sum every 64 samples), ~2 M operations per cell instead of 36 M direct; the
+      last pass is now always subtracted (it was only with context); stage decodes go out in the stream's
+      `pass = -1` batch. Bench flag `--cochannel NEAR,FAR,DF,NEAR_DT,FAR_DT,MIN` (default `2,1,8,24,50,3`,
+      `off` disables it).
+      **Choosing it (validation run 1 and the training recordings only; scratch scripts `cc_*.py`).** Offline
+      emulation: subtract a slot's saved `nn_v3_dtcrp` decodes, run the stage at every cell. On the run-1 class
+      (146 jt9-only decodes within 10 Hz / 0.4 s of ours, 179 before the repeat stage took some): the earlier
+      hand-test grid (+-7 Hz / +-30 ms, 377 hypotheses per cell) 42, a brute grid +-8 Hz / +-80 ms (561) 69,
+      Costas fine sync on the residual 31, data sync without the out-of-band term 41-43, with it and a 3 x 3
+      refinement (18 per cell) 67, and with the far band (+-0.25 s) **72**. The far band came from the runs 2-4
+      geometry of the other fork's miss profile (ΔDT p75 0.19 s, p90 0.28 s; a +-0.125 s window reached only
+      53% of that class) and was chosen on run 1: one +-0.25 s window with 2 peaks lost 6 near recoveries to far
+      peaks while gaining 7 far ones, two zones kept both. ±10 Hz gained nothing.
+      Run 1, all 34,295 cells: **+253 decodes = 174 slot-confirmed, 74 active, 0 unconfirmed, 5 unscorable**
+      (DXpedition/hashed formats), 14.7 NN hypotheses per cell. Training recordings: +50 decodes, 49 with a
+      callsign jt9 heard at that receiver (the other, `N9AOT KN4WJY -18`, plausible but unconfirmed), 1 ghost
+      filtered. **Noise:** the cells of 1,000 busy real slots forced onto noise-only audio (43,474 cells): best
+      data-sync score <= 2.77, so no hypothesis reaches the NN; with no score limit at all 1,173,798 NN
+      hypotheses and **0 false decodes**. AWGN: identical (no co-channel pairs in synthetic slots).
+      **A/B `nn_v3_cc` (runs 2-4, user-approved run 2026-11-12, scored against `nn_v3_dtcrp`):**
+
+      | run | `nn_v3_dtcrp` | `nn_v3_cc` | change |
+      |---|---|---|---|
+      | noise (998 signals) | 0 false | 0 false | - |
+      | 2 | 29,435 / 21,646 / 1 | 29,588 / 21,751 / 1 | +153 / +105 |
+      | 3 | 28,206 / 21,266 / 1 | 28,295 / 21,324 / 1 | +89 / +58 |
+      | 4 | 48,433 / 35,110 / 2 | 48,668 / 35,249 / 2 | +235 / +139 |
+      | **pooled** | 106,074 / 78,022 / 4 | **106,551 / 78,324 / 4** | **+477 / +302** |
+
+      Unconfirmed: the same four as before. The stage made 552 decodes = 356 slot-confirmed, 181 active, 0
+      unconfirmed, 15 unscorable (mostly the special-event LZ80RKVT's hashed messages). 552 -> +477: 151 replace
+      `rp` decodes of the same message, +79 more come from other stages in later slots (stage decodes become
+      context), 3 `rp` decodes were lost (`JA9BFN AC2Y FN03` slot-confirmed, two active). Against the
+      references: 249 agree with jt9/JTDX/deep JTDX decoding the same sender in that slot, 18 differ only in
+      hash formatting or are LZ80RKVT's several streams, 2 conflict with JTDX's CRC-less `^` stage only
+      (`9Y4C KX4TE R+23` vs `R-01`, `5B4AMX W2BDM -14` vs `PE2K W2BDM -14`; jt9 decoded neither), 283 have
+      no reference decode. Doubtful: `FN3EPRKOCCN <...> 73` (run 2, an `i3=4` non-standard call no rule can
+      tell from a real one; plan 7.4). Of the stage's new (slot, sender) pairs 101 are on the other fork's
+      list of reference-only slot-confirmed misses (68 inside its 130-decode "forced at the true spot" bound),
+      282 are signals no reference decoded as a slot-confirmed miss. Wall times (shaky: the other fork ran
+      Python jobs, and run 2 met a burst of macOS background work after the wake): run 2 49:48, run 3 44:58,
+      run 4 53:44 vs `nn_v3_rpf` 38.7 / 38.7 / 52.9 min; Python CPU on 36 sample slots +3.3%, NN hypotheses
+      +18.8% (436 per slot at 29 decodes).
+      **C port:** golden C == Python under MallocScribble, run 2 02_80m 753/753 all fields at 1 thread and at 4
+      threads streaming (3 stage decodes among them, `FN3EPRKOCCN` included); `tools/ci_smoke.py` 51/51 (51, not
+      57: plan 7.4); `wsjtx/test_sidecar.sh` all 8 checks.
+      **`tools/validate_full.sh nn_v3_cc` (2026-11-12 11:09:38-13:29:16, 2 h 20 min with 8 workers while the other
+      fork ran 8 Python workers too; no Sleep/DarkWake after the full wake at 07:48:18): PASS.** Run 1 34,295 /
+      26,299 / 1 -> **34,585 / 26,505 / 1** (+290 / +206; the same unconfirmed `CQ KR9ZUC/R AO63`); the stage made
+      322 decodes there = 227 slot-confirmed, 88 active, 1 repeat, 6 unscorable, 0 unconfirmed; at payload level
+      294 gained, 4 lost (3 slot-confirmed: `CQ SV3AUW KM17` and `KG4OLE IW9FRA JM68` from `rp`, `D44PX SV1AZL
+      KM17` from `osd`). Training recordings 18,489 -> 18,563 decodes, jt9-only 209 -> 197, corroborated 97%. AWGN
+      identical row by row (50% -22.49, 90% -21.24, 0 false). Golden 00_40m 807/807, 08_80m 627/627, run 2 02_80m
+      753/753 all fields, AWGN 429/429. Step times: run 1 75 min, training 58, AWGN 2, build + golden 5.
 
    2. **Deeper OSD for expected-error 13–40 FAILs: OSD on summed BP posteriors (`osd_bp`) — DONE as `nn_v2_og`.**
       WSJT-X's decode174_91 keeps the running sum of BP posteriors after the first iterations (zsave) and runs OSD on
@@ -667,6 +751,26 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       `1F8PNC K2AKA DB13` from context AP, `J11WYG/R OA4ENG -22` ×2): per model 1→0, 5→4 (tf retrain), 2→1, 4→1,
       6→2, 3→0. C == Python: 301k random payloads, golden 756/756, 599/599 (and 120-slot 08_80m), run 2 733/733,
       AWGN 429/429.
+      **Extended 2026-11-12 to the other message types (with `nn_v3_cc`).** `message.plausible` checked only
+      standard messages; the trigger was `FN3EPRKOCCN <...> 73`, an `i3=4` (non-standard call) `osd_bp_cc`
+      decode on run 2. New, for OSD-family results (deep): the 11-character call of `i3=4` messages must be
+      well-formed (`_c58_ok`: < 38^11, no space inside, at most two `/` with no empty part, the longest part has
+      a letter and a digit and starts with a call block in use), and the call fields of DXpedition (`i3=0
+      n3=1`) and RTTY Roundup (`i3=3`) messages get the standard messages' test (`_call_ok`); for every stage, an
+      EU VHF (`i3=5`) 6-character locator past RR99XX is rejected. Free text and telemetry carry nothing to check.
+      **Checked on every saved payload of every tag (runs 1-4 and the training recordings, 160,295 unique),
+      also with every payload treated as if OSD had produced it:** the only one removed is an `i3=3` OSD decode
+      (`TJ5DBX 5P0B M`, run 4, older tags only, unscorable); no real decode is lost, jt9-corroborated ones
+      included; 54% of random `i3=4` payloads fail. Nothing in `nn_v3_cc` changes, so its runs 2-4 numbers stand
+      without a re-run. **It does not remove `FN3EPRKOCCN`:** that call is well-formed, and real special-event
+      calls look the same (`YO1BRANCUSI`: 2 letters, digit, 8 letters, 38 decodes, 105 jt9/JTDX mentions).
+      Corroboration would catch it but loses real decodes: the call in the context (30/60 s earlier) removes 122
+      real deep `i3=4` decodes, the call decoded earlier in the session 29 (first decodes of `PC40EUDXF`,
+      `YO1BRANCUSI`, `SX200H`, ...) and would make decoding depend on the hash table. The two other `i3=3` OSD
+      decodes (`A91TDA 2W2ZUJ`, `F73CMI IL4YAN`, no RTTY Roundup on those dates) also pass; rejecting `i3=3`
+      from OSD outright would remove them at no measured cost, but would cost weak contest decodes on that
+      weekend (user's call). `tools/ci_smoke.py` now decodes 51, not 57: it draws fully random payloads, and 6
+      of them are `i3=5` with an impossible locator. C `plausible77` mirrors it; `tests/test_plausible.py` +3 tests.
    5. **Real noise + synthetic signals — DONE, shipped as `models/v3` (tag `nn_v3`, = `runs/rn_real_seed1`).** `tools/make_noise_bank.py`
       subtracts every `nn_v2_pl` decode from each training-recording slot (never run 1 or 2) and cuts 24 segments at
       random 200..2900 Hz with the decoder's own `Baseband.downsample`: 28,728 × 3,200 complex samples

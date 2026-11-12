@@ -3,7 +3,8 @@
  * Per pass: candidates -> fine_sync2 (2 hypotheses each) -> soft metrics [NN, classical nsym 1/2/3]
  * -> BP -> OSD-2 (NN metric only, gated; then on summed BP posteriors) -> context a-priori (decodes 30/60 s earlier,
  * ft8nn_decode_at only) -> CQ a-priori (NN metric only, gated) -> CRC.
- * Decodes are subtracted from the audio between passes.
+ * Decodes are subtracted from the audio after every pass; on the final residual the co-channel retry, then (with
+ * context) the repeat stage.
  */
 #include <math.h>
 #include <onnxruntime_c_api.h>
@@ -92,6 +93,22 @@ static int prof = -1;
 #define REPEAT_MARGIN 0.15
 #define REPEAT_CLIP 2.0
 #define MAXGRID4 32400
+/* co-channel retry (decoder._cochannel_stage; decoder.COCHANNEL, COCHANNEL_GRID, COCHANNEL_REFINE): at each decode's
+ * cell, data-symbol sync over df +-CC_SPAN Hz x dt +-CC_TFAR baseband samples; the CC_NEAR best local maxima within
+ * +-CC_TNEAR samples and the CC_FAR best beyond, scoring >= CC_MIN, each as 3 x 3 hypotheses (+-CC_RDF Hz, +-CC_RDT) */
+#define CC_NEAR 2
+#define CC_FAR 1
+#define CC_SPAN 8.0
+#define CC_TNEAR 24
+#define CC_TFAR 50
+#define CC_MIN 3.0
+#define CC_GF 0.5 /* grid steps: Hz, baseband samples */
+#define CC_GT 2
+#define CC_RDF 0.4
+#define CC_RDT 1
+#define CC_NF 37 /* -(CC_SPAN + 2 CC_GF) .. CC_SPAN + 2 CC_GF */
+#define CC_NT 53 /* -(CC_TFAR + CC_GT) .. CC_TFAR + CC_GT */
+#define CC_MAXH ((CC_NEAR + CC_FAR) * 9)
 #define DEC_CAP 512 /* decodes per slot */
 #define ERASE_GATE 15.0 /* burst-erasure retry for confident NN metrics that still fail */
 /* osd_er ghost test (decoder._is_ghost): neighbour within GHOST_MAX_DF Hz whose tones, shifted by whole symbols and
@@ -459,7 +476,7 @@ static int any_bits(const uint8_t *b, int n) {
 static int plausible(int method, const uint8_t *a91) {
     if (method < 0) return method;
     int deep = method == FT8NN_OSD || method == FT8NN_OSD_AP || method == FT8NN_OSD_ERASE || method == FT8NN_OSD_BP ||
-               method == FT8NN_OSD_CTX;
+               method == FT8NN_OSD_CTX || method == FT8NN_OSD_CC || method == FT8NN_OSD_BP_CC;
     return plausible77(a91, deep) ? method : -1;
 }
 
@@ -804,6 +821,209 @@ done:
     return added;
 }
 
+/* Co-channel retry (decoder._cochannel_stage). Two stations within a few Hz and tens of ms of each other share one
+ * candidate cell (every FT8 signal carries the same Costas arrays); subtracting the stronger takes most of the weaker
+ * one's sync with it, while its data symbols survive. So after the last pass, at every decode's own cell, the residual
+ * is searched with the data-symbol sync metric and the best peaks go to the NN as 3 x 3 hypotheses: NN metric -> BP ->
+ * OSD-2 (gated) -> OSD on BP sums, plausibility rules. In order: one decode per peak; skip a payload already decoded and
+ * a ghost of any decode in the slot. Three steps as decode_pass: the grid search per cell and the per-hypothesis
+ * decoding in parallel, then a serial merge in the order the Python loop takes. */
+typedef struct {
+    double df; /* Hz from the cell's f0 */
+    int start, cell, group;
+} cc_spec;
+
+static void cc_decode_hyp(const sync_hyp *hy, const double *l, hyp_res *r) {
+    r->status = 0;
+    double exp_err = 0, dist;
+    for (int i = 0; i < 174; i++) exp_err += 1.0 / (1.0 + exp(fabs(l[i])));
+    uint8_t bits[174], a91[91];
+    int nhard, method = -1;
+    if (bp_decode(l, 30, bits, &nhard) && crc_ok(bits)) {
+        memcpy(a91, bits, 91);
+        method = plausible(FT8NN_BP_CC, a91);
+    }
+    if (method < 0 && exp_err < OSD_GATE) {
+        if (osd_decode(l, OSD_ORDER, bits, &dist, &nhard) && nhard <= OSD_MAX_HARD) {
+            memcpy(a91, bits, 91);
+            method = plausible(FT8NN_OSD_CC, a91);
+        }
+        if (method < 0 && OSD_SNAPS > 0 && try_osd_bp(l, a91) >= 0) method = plausible(FT8NN_OSD_BP_CC, a91);
+    }
+    if (method < 0) return;
+    if (!any_bits(a91, 77)) {
+        r->status = 2;
+        return;
+    }
+    r->status = 1;
+    r->k = 0;
+    r->method = (int8_t)method;
+    memcpy(r->a91, a91, 91);
+    r->snr = estimate_snr(hy, a91);
+}
+
+typedef struct {
+    ft8nn_ctx *c;
+    const dec *cells;
+    const baseband *bb;
+    cplx *y0;      /* NBB per cell */
+    cc_spec *spec; /* CC_MAXH per cell */
+    int *nspec, *npeak;
+    const cc_spec **flat;
+    int nflat;
+    hyp_res *res;
+    atomic_int next, err;
+    double dfs[CC_NF];
+    int dts[CC_NT];
+} cc_job;
+
+static void cc_search(void *arg, int ci) {
+    cc_job *j = arg;
+    const dec *d = &j->cells[ci];
+    cplx *y0 = j->y0 + (size_t)ci * NBB;
+    baseband_downsample(j->bb, d->f0, y0);
+    int start0 = (int)nearbyint((NOMINAL_START + d->dt) * FS_BB);
+    const double *cc_dfs = j->dfs;
+    const int *cc_dts = j->dts;
+    double M[CC_NF * CC_NT];
+    data_sync(y0, start0, cc_dfs, CC_NF, cc_dts, CC_NT, M);
+    /* local maxima over a 3 x 3 window (scipy maximum_filter, reflect mode == clipped window), in row-major order */
+    int pk[CC_NF * CC_NT], np_ = 0;
+    for (int i = 0; i < CC_NF; i++)
+        for (int t = 0; t < CC_NT; t++) {
+            double v = M[i * CC_NT + t];
+            if (v < CC_MIN || fabs(cc_dfs[i]) > CC_SPAN + 1e-9 || abs(cc_dts[t]) > CC_TFAR) continue;
+            int ok = 1;
+            for (int di = -1; di <= 1 && ok; di++)
+                for (int dj = -1; dj <= 1; dj++) {
+                    int ii = i + di, jj = t + dj;
+                    if (ii >= 0 && ii < CC_NF && jj >= 0 && jj < CC_NT && M[ii * CC_NT + jj] > v) {
+                        ok = 0;
+                        break;
+                    }
+                }
+            if (ok) pk[np_++] = i * CC_NT + t;
+        }
+    int ns = 0, ng = 0;
+    for (int z = 0; z < 2; z++) { /* near zone, then the far band */
+        uint8_t used[CC_NF * CC_NT] = {0};
+        for (int r = 0; r < (z ? CC_FAR : CC_NEAR); r++) {
+            int bi = -1; /* best remaining peak of the zone; ties: earlier in row-major order */
+            for (int q = 0; q < np_; q++) {
+                int a = abs(cc_dts[pk[q] % CC_NT]);
+                if (used[q] || (z ? a <= CC_TNEAR : a > CC_TNEAR)) continue;
+                if (bi < 0 || M[pk[q]] > M[pk[bi]]) bi = q;
+            }
+            if (bi < 0) break;
+            used[bi] = 1;
+            static const double oa[9] = {0, -CC_RDF, -CC_RDF, -CC_RDF, 0, 0, CC_RDF, CC_RDF, CC_RDF};
+            static const int ob[9] = {0, -CC_RDT, 0, CC_RDT, -CC_RDT, CC_RDT, -CC_RDT, 0, CC_RDT};
+            for (int o = 0; o < 9; o++) {
+                cc_spec *s = &j->spec[(size_t)ci * CC_MAXH + ns++];
+                s->df = cc_dfs[pk[bi] / CC_NT] + oa[o];
+                s->start = start0 + cc_dts[pk[bi] % CC_NT] + ob[o];
+                s->cell = ci;
+                s->group = ng;
+            }
+            ng++;
+        }
+    }
+    j->nspec[ci] = ns;
+    j->npeak[ci] = ng;
+}
+
+static void cc_worker(void *arg, int w) {
+    (void)w;
+    cc_job *j = arg;
+    float *feat = malloc(sizeof(float) * NN_BATCH * NN * NFEAT);
+    double *llr = malloc(sizeof(double) * NN_CHUNK * 174);
+    sync_hyp *hy = malloc(sizeof(sync_hyp) * NN_CHUNK), *hp[NN_CHUNK];
+    for (;;) {
+        int i0 = atomic_fetch_add(&j->next, NN_CHUNK);
+        if (i0 >= j->nflat || atomic_load(&j->err)) break;
+        int b = j->nflat - i0 < NN_CHUNK ? j->nflat - i0 : NN_CHUNK;
+        for (int i = 0; i < b; i++) {
+            const cc_spec *s = j->flat[i0 + i];
+            memcpy(hy[i].y, j->y0 + (size_t)s->cell * NBB, sizeof hy[i].y);
+            bb_rotate(hy[i].y, s->df);
+            hy[i].start = s->start;
+            hy[i].f0 = j->cells[s->cell].f0 + s->df;
+            hy[i].dt = s->start / FS_BB - NOMINAL_START;
+            hy[i].metric = 0;
+            hp[i] = &hy[i];
+        }
+        if (run_nn(j->c, hp, b, llr, feat)) {
+            atomic_store(&j->err, 1);
+            break;
+        }
+        for (int i = 0; i < b; i++) cc_decode_hyp(&hy[i], llr + (size_t)i * 174, &j->res[i0 + i]);
+    }
+    free(feat);
+    free(llr);
+    free(hy);
+}
+
+/* Appends the stage's decodes to all[nall..); returns the new count, or -1 on an ONNX Runtime error. */
+static int cochannel_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int nall) {
+    double t0 = tnow();
+    baseband bb;
+    baseband_init(&bb, x, n, c->pool);
+    cc_job *j = calloc(1, sizeof *j);
+    for (int i = 0; i < CC_NF; i++) j->dfs[i] = -(CC_SPAN + 2 * CC_GF) + i * CC_GF; /* numpy arange: exact here */
+    for (int t = 0; t < CC_NT; t++) j->dts[t] = -(CC_TFAR + CC_GT) + t * CC_GT;
+    j->c = c;
+    j->cells = all;
+    j->bb = &bb;
+    j->y0 = malloc(sizeof(cplx) * NBB * (size_t)nall);
+    j->spec = malloc(sizeof(cc_spec) * CC_MAXH * (size_t)nall);
+    j->nspec = calloc((size_t)nall, sizeof(int));
+    j->npeak = calloc((size_t)nall, sizeof(int));
+    par_for(c->pool, nall, cc_search, j);
+    int ngroup = 0, *goff = malloc(sizeof(int) * (size_t)nall);
+    for (int ci = 0; ci < nall; ci++) {
+        goff[ci] = ngroup;
+        ngroup += j->npeak[ci];
+        j->nflat += j->nspec[ci];
+    }
+    j->flat = malloc(sizeof(cc_spec *) * (size_t)(j->nflat + 1));
+    for (int ci = 0, q = 0; ci < nall; ci++)
+        for (int s = 0; s < j->nspec[ci]; s++) j->flat[q++] = &j->spec[(size_t)ci * CC_MAXH + s];
+    j->res = malloc(sizeof(hyp_res) * (size_t)(j->nflat + 1));
+    atomic_init(&j->next, 0);
+    atomic_init(&j->err, 0);
+    if (j->nflat) par_run(c->pool, cc_worker, j);
+    int rc = atomic_load(&j->err) ? -1 : nall;
+    uint8_t *done = calloc((size_t)ngroup + 1, 1);
+    for (int i = 0; rc >= 0 && i < j->nflat; i++) {
+        const cc_spec *s = j->flat[i];
+        const hyp_res *r = &j->res[i];
+        int g = goff[s->cell] + s->group;
+        if (done[g] || r->status != 1) continue;
+        int skip = 0;
+        for (int q = 0; q < rc && !skip; q++) skip = same_payload(all[q].bits77, r->a91);
+        if (skip) continue;
+        dec d = {.f0 = all[s->cell].f0 + s->df, .dt = s->start / FS_BB - NOMINAL_START, .snr = r->snr,
+                 .method = r->method, .metric = 0, .pass = PASSES, .final = 0};
+        memcpy(d.bits77, r->a91, 77);
+        for (int q = 0; q < rc && !skip; q++) skip = is_ghost(&d, &all[q]);
+        if (skip || rc >= DEC_CAP) continue;
+        all[rc++] = d;
+        done[g] = 1;
+    }
+    if (prof) fprintf(stderr, "cochannel: cells %d hyp %d -> %d, %.2fs\n", nall, j->nflat, rc - nall, tnow() - t0);
+    free(done);
+    free(goff);
+    free(j->y0);
+    free(j->spec);
+    free(j->nspec);
+    free(j->npeak);
+    free(j->flat);
+    free(j->res);
+    free(j);
+    baseband_free(&bb);
+    return rc;
+}
+
 /* Repeat stage (decoder._repeat_stage): for each sender of a standard context message with no decode in this slot,
  * test its earlier messages as whole known codewords on the residual x at their (f0, dt): rho = sum(l*s)/sum(|l|) on
  * NN LLRs clipped to +-REPEAT_CLIP, s = +-1 per codeword bit, against competitors (the sender's CQ with any grid it
@@ -1055,7 +1275,7 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
         /* report first: subtraction only prepares the next pass, and takes ~20 ms per decode */
         report(c, all, nall, nall + k, 0, p, cb, user, batch);
         double ts = tnow();
-        for (int q = nall; q < nall + k && (p + 1 < PASSES || ncx > 0); q++) { /* + the repeat stage's residual */
+        for (int q = nall; q < nall + k; q++) { /* the last pass too: the co-channel and repeat stages work on the residual */
             uint8_t cw[174];
             int tones[NN];
             encode77(all[q].bits77, cw, tones);
@@ -1065,7 +1285,25 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
         nall += k;
         if (!k) break;
     }
-    if (ncx > 0) { /* x is now the residual */
+    if (nall > 0) { /* x is now the residual */
+        int r = cochannel_stage(c, x, n, all, nall);
+        if (r < 0) {
+            free(x);
+            free(all);
+            free(cx);
+            free(tried);
+            free(batch);
+            return -1;
+        }
+        for (int q = nall; q < r; q++) {
+            uint8_t cw[174];
+            int tones[NN];
+            encode77(all[q].bits77, cw, tones);
+            subtract_signal(x, n, tones, all[q].f0, all[q].dt, c->pool);
+        }
+        nall = r;
+    }
+    if (ncx > 0) {
         int r = repeat_stage(c, x, n, all, nall, cx, ncx);
         if (r < 0) {
             free(x);
@@ -1078,7 +1316,7 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
         nall = r;
     }
     nall = drop_ctx_dupes(all, 0, nall);
-    report(c, all, 0, nall, 1, -1, cb, user, batch); /* the context decodes that survived, and the repeat stage's */
+    report(c, all, 0, nall, 1, -1, cb, user, batch); /* the context decodes that survived, the co-channel and repeat stages' */
     free(batch);
     free(cx);
     free(tried);

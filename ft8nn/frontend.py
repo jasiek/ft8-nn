@@ -261,6 +261,28 @@ def _parabolic(m, i):
     return float(np.clip(0.5 * (a - c) / den, -0.5, 0.5)) if den < 0 else 0.0
 
 
+def data_sync(y0, start0, dfs, dts):
+    """Data-symbol sync metric on a (df, dt) grid -> (nf, nt), for signals whose Costas arrays are gone.
+
+    Per data symbol: power of the strongest of the 8 tones minus the strongest of the two tones just outside the
+    band (-1 and 8), summed over the 58 data symbols and divided by the summed mean in-band tone power. Noise gives
+    ~1.2 per grid point (2.3 for the best of the ~1,000 points of a decoder.COCHANNEL window); an FT8 signal at the
+    right (df, dt) puts one tone per symbol well above the rest. The out-of-band term
+    matters: a signal at df also fills 7 of the 8 tones at df +- 6.25 Hz (one tone spacing), and only the band edges
+    tell those aliases from the true offset. dts are offsets in baseband samples from start0."""
+    n = np.arange(SPS_BB)
+    f = (np.arange(-1, 9)[:, None] * ft8.TONE_SPACING + dfs[None, :]).reshape(-1)  # (10*nf,)
+    K = np.exp(-2j * np.pi * f[None, :] * n[:, None] / FS_BB)
+    idx = start0 + dts[None, :, None] + SPS_BB * ft8.DATA_POS[:, None, None] + n[None, None, :]
+    valid = (idx >= 0) & (idx < NBB)
+    seg = y0[np.clip(idx, 0, NBB - 1)] * valid  # (58, nt, 32)
+    p = np.abs(seg @ K) ** 2
+    p = p.reshape(len(ft8.DATA_POS), len(dts), 10, len(dfs))
+    pin = p[:, :, 1:9].max(2)
+    pout = np.maximum(p[:, :, 0], p[:, :, 9])
+    return ((pin - pout).sum(0) / np.maximum(p[:, :, 1:9].mean(2).sum(0), 1e-12)).T
+
+
 def fractional_shift(y, tau):
     """Advance y by tau samples (y'(n) = y(n + tau)) via an FFT phase ramp."""
     if abs(tau) < 1e-6:
