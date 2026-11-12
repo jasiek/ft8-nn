@@ -169,6 +169,66 @@ the M1 Pro. Other platforms and smaller machines have not been tried.
 | `collect/` | real-data collection: KiwiSDR recorder, PSK Reporter capture, jt9 labelling, spot scoring, run records and SHA-256 manifests (`docs/data-collection.md`) |
 | `wsjtx/` | `ft8nn_sidecar`: this decoder as WSJT-X's external FT8 decoder (`WSJTX_FT8_DECODER`, JSON lines + raw audio on a pipe), so WSJT-X decodes FT8 with it (`wsjtx/README.md`) |
 
+## Tools
+
+### Live receiver directory and comparison
+
+`collect/receiverbook_directory.py` builds `datasets/receiverbook-directory.json` from the OpenWebRX receivers
+listed by [Receiverbook](https://www.receiverbook.de/). A receiver-band pair is included only when its
+`metrics.json` advertises an FT8 decoder, a public WebSocket session can select a profile covering the standard
+FT8 dial frequency, and that session actually delivers audio samples. The builder takes two `metrics.json`
+snapshots 60 seconds apart and records the per-band counter delta as `ft8_decodes_per_minute`; the directory is
+sorted from highest to lowest measured rate. It also retains the second snapshot's cumulative counter as
+`ft8_decodes_total` for context. A counter reset or unavailable first snapshot produces a zero rate. Use
+`--traffic-window SECONDS` to change the sampling interval; rates are normalized to one minute.
+
+```sh
+python3 collect/receiverbook_directory.py                 # measure 60 s traffic, then verify streams
+make -C c                                                 # build libft8nn if needed
+python3 tools/live_compare.py                             # choose a receiver and compare live decodes
+```
+
+`live_compare.py` presents a curses receiver picker with arrow-key navigation and substring filtering. Once a
+receiver-band pair is selected, it consumes the same OpenWebRX audio and remote FT8-decoder messages, divides the
+audio into UTC FT8 slots, and decodes it locally with `libft8nn`. Local and remote results are shown in two
+frequency-ordered columns: matching messages share a row, while a decode found by only one side has a blank in
+the other column. The picker and streaming header show the measured FT8 decodes per minute; the header also shows
+the receiver's `metrics.json` URL and cumulative counter snapshot. Press `q` to stop the comparison.
+
+### Script reference
+
+| Script | Description |
+|---|---|
+| `tools/ab_run2.sh` | Runs the quick decoder-change A/B gate: noise-only false-decode testing followed by validation run 2 and PSK Reporter scoring. |
+| `tools/calib_snr.py` | Calibrates the decoder's estimated SNR against known SNRs in synthetic benchmark slots. |
+| `tools/ci_smoke.py` | Generates a small synthetic workload and checks that the C and Python decoding pipelines produce identical results without needing recorded data. |
+| `tools/compare_decoders.py` | Compares verified decoder outputs across validation runs, including totals, confirmation tiers, overlap, and exclusive signals. |
+| `tools/diag_ctx_miss.py` | Diagnoses reference-only repeated messages that context a-priori decoding should have been able to recover. |
+| `tools/diag_real_miss.py` | Replays a real slot and traces each `jt9`-only signal through residual candidate search, fine synchronization, and NN/LDPC decoding. |
+| `tools/diag_ref_only.py` | Profiles signals decoded by a reference decoder, normally JTDX, but missed by ft8nn. |
+| `tools/diag_strong_miss.py` | Classifies stronger `jt9`-only signals by the pipeline stage at which ft8nn loses them. |
+| `tools/diag_sync.py` | Measures where weak synthetic signals are lost by comparing candidate search and fine synchronization with oracle synchronization. |
+| `tools/diag_sync2.py` | Compares the old and semi-coherent fine synchronizers for timing/frequency accuracy and decode rate. |
+| `tools/export_onnx.py` | Exports a PyTorch `SoftDemod` checkpoint to ONNX and verifies its output with ONNX Runtime. |
+| `tools/extract_ldpc.py` | Extracts the FT8 LDPC generator and parity-check tables from ft8_lib into `ft8nn/data/ldpc.npz`. |
+| `tools/ft8lib_build.sh` | Builds kgoba/ft8_lib's file decoder for use as an FT8CN/FT8TW-family comparison baseline. |
+| `tools/ft8lib_run.py` | Runs ft8_lib over validation recordings and writes `jt9`-format output for the verification pipeline. |
+| `tools/gen_c_tables.py` | Generates the C LDPC header from the same NumPy tables used by the Python decoder. |
+| `tools/gen_call_blocks.py` | Generates the Python and C amateur-call-prefix tables used for message plausibility checks. |
+| `tools/get_onnxruntime.sh` | Downloads the official ONNX Runtime release for the current platform and installs the repository-local link used by the C build. |
+| `tools/golden_c.py` | Checks C-decoder output field by field against saved Python-decoder results on real or synthetic slots. |
+| `tools/jtdx_build.py` | Clones and builds the JTDX FT8 decoder together with the repository's WAV-file driver. |
+| `tools/jtdx_ft8_file.f90` | Provides a command-line WAV-file front end for JTDX's otherwise shared-memory-only FT8 decoder. |
+| `tools/jtdx_run.py` | Runs JTDX over validation stations in chronological order and writes output for verification. |
+| `tools/live_compare.py` | Selects a verified OpenWebRX receiver and compares local ft8nn and remote FT8 decodes live in aligned columns. |
+| `tools/make_message_pool.py` | Uses WSJT-X `ft8code` to generate realistic FT8 messages and their 77-bit payloads for benchmarks. |
+| `tools/make_noise_bank.py` | Builds a training bank of real residual receiver noise after subtracting known decodes from recorded slots. |
+| `tools/mini.sh` | Synchronizes code, data, and results with a configured Mac mini and runs experiments there. |
+| `tools/rp_eval.py` | Evaluates the repeat-decoding stage from saved base decodes without rerunning the complete decoder. |
+| `tools/rp_stale.py` | Detects repeat-stage decodes that incorrectly reuse an older message after a station has moved on. |
+| `tools/try_real_slots.py` | Quickly compares ft8nn and `jt9` on a selected set of real receiver slots. |
+| `tools/validate_full.sh` | Runs the complete pre-commit decoder validation: real runs, noise, AWGN, C build, and C/Python golden comparisons. |
+
 ## Reproduce
 
 ```sh

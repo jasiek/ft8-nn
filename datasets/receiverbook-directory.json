@@ -1,0 +1,4529 @@
+{
+  "generated_at": "2026-11-12T22:20:38.094436+00:00",
+  "source": "https://www.receiverbook.de/map",
+  "criteria": {
+    "internet_accessible": "public OpenWebRX WebSocket session connected",
+    "ft8_decoder_installed": "wsjt.decodes contains an FT8 metric for the band",
+    "audio_and_decodes_streamable": "selected a profile covering the FT8 dial frequency and received audio samples",
+    "traffic_order": "descending FT8 counter delta per minute",
+    "traffic_measurement": "two metrics.json snapshots; counter resets or missing baselines produce a zero rate"
+  },
+  "traffic_window_seconds": 60.0,
+  "entries": [
+    {
+      "receiver": {
+        "url": "https://fullerton.w6mfb.com/",
+        "label": "W6MFB/FULLERTON",
+        "site": "W6MFB/FULLERTON",
+        "lat": 33.861090595913474,
+        "lon": -117.88901509985612,
+        "type": "OpenWebRX",
+        "version": "1.2.119"
+      },
+      "band": "20m",
+      "ft8_decodes_total": 52391,
+      "ft8_decodes_per_minute": 171.43,
+      "traffic_sample_seconds": 68.25,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.surrealservers.net/",
+        "label": "Receiver",
+        "site": "Receiver",
+        "lat": 37.39837482690734,
+        "lon": -79.18129126969339,
+        "type": "OpenWebRX",
+        "version": "1.2.121"
+      },
+      "band": "20m",
+      "ft8_decodes_total": 53389,
+      "ft8_decodes_per_minute": 146.42,
+      "traffic_sample_seconds": 67.61,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr-serpuhov.ru/",
+        "label": "Серпуховский WEB SDR",
+        "site": "Серпуховский WEB SDR",
+        "lat": 54.917727384972494,
+        "lon": 37.427252188946035,
+        "type": "OpenWebRX",
+        "version": "1.2.119"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 273698,
+      "ft8_decodes_per_minute": 142.19,
+      "traffic_sample_seconds": 68.36,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://yo2cps.go.ro:8073/",
+        "label": "YO2CPS",
+        "site": "YO2CPS",
+        "lat": 45.863523648352725,
+        "lon": 22.89565117516746,
+        "type": "OpenWebRX",
+        "version": "1.2.123"
+      },
+      "band": "80m",
+      "ft8_decodes_total": 71885,
+      "ft8_decodes_per_minute": 114.2,
+      "traffic_sample_seconds": 67.78,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.we6k.com/",
+        "label": "WE6K San Francisco",
+        "site": "WE6K San Francisco",
+        "lat": 37.75596313629044,
+        "lon": -122.43365147910762,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "15m",
+      "ft8_decodes_total": 528,
+      "ft8_decodes_per_minute": 83.01,
+      "traffic_sample_seconds": 68.66,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.fomitchev.net/",
+        "label": "KX4TH",
+        "site": "KX4TH",
+        "lat": 38.943781769843426,
+        "lon": -104.74556,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 2328,
+      "ft8_decodes_per_minute": 71.42,
+      "traffic_sample_seconds": 68.89,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://ub3aww.ru:8073/",
+        "label": "[UB3AWW-SDR] (sdr.souyz.netcraze.pro)",
+        "site": "[UB3AWW-SDR] (sdr.souyz.netcraze.pro)",
+        "lat": 55.9462022066859,
+        "lon": 36.50373666149901,
+        "type": "OpenWebRX",
+        "version": "1.2.113"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 75627,
+      "ft8_decodes_per_minute": 67.35,
+      "traffic_sample_seconds": 68.6,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://138.118.215.154:8073/",
+        "label": "LU1XA Radio Club Rio Gallegos",
+        "site": "LU1XA Radio Club Rio Gallegos",
+        "lat": -51.68000987480535,
+        "lon": -69.21657773703642,
+        "type": "OpenWebRX",
+        "version": "1.2.82"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 696744,
+      "ft8_decodes_per_minute": 61.34,
+      "traffic_sample_seconds": 68.48,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://hf2.owrx.uk/",
+        "label": "https://owrx.uk - HF RECEIVER 02 - SDRplay RSP1B - 41.7m EFLW - M7NXS",
+        "site": "https://owrx.uk - HF RECEIVER 02 - SDRplay RSP1B - 41.7m EFLW - M7NXS",
+        "lat": 54.00334948205416,
+        "lon": -1.3030173782748222,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "80m",
+      "ft8_decodes_total": 2089,
+      "ft8_decodes_per_minute": 58.46,
+      "traffic_sample_seconds": 67.73,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://oh6kk.dy.fi:8073/",
+        "label": "OH6KK",
+        "site": "OH6KK",
+        "lat": 63.864949,
+        "lon": 23.158584,
+        "type": "OpenWebRX",
+        "version": "1.2.101"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 57285,
+      "ft8_decodes_per_minute": 58.34,
+      "traffic_sample_seconds": 68.91,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://ub3aww.ru:8073/",
+        "label": "[UB3AWW-SDR] (sdr.souyz.netcraze.pro)",
+        "site": "[UB3AWW-SDR] (sdr.souyz.netcraze.pro)",
+        "lat": 55.9462022066859,
+        "lon": 36.50373666149901,
+        "type": "OpenWebRX",
+        "version": "1.2.113"
+      },
+      "band": "80m",
+      "ft8_decodes_total": 35987,
+      "ft8_decodes_per_minute": 54.23,
+      "traffic_sample_seconds": 68.6,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://sdrkosutnjak.321.rs:8073/",
+        "label": "SDR Košutnjak",
+        "site": "SDR Košutnjak",
+        "lat": 44.75897710057063,
+        "lon": 20.42326563848707,
+        "type": "OpenWebRX",
+        "version": "1.2.124"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 51945,
+      "ft8_decodes_per_minute": 33.35,
+      "traffic_sample_seconds": 68.36,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdrbahia.com.ar/",
+        "label": "SDR Bahía Blanca LU3EHB <a href='https://cafecito.app/lu3ehb' rel='noopener' target='_blank'><img style=\"height:33px;vertical-align:middle\" srcset='https://cdn.cafecito.app/imgs/buttons/button_1.png 1x, https://cdn.cafecito.app/imgs/buttons/button_1_2x.png 2x, https://cdn.cafecito.app/imgs/buttons/button_1_3.75x.png 3.75x' src='https://cdn.cafecito.app/imgs/buttons/button_1.png' alt='Invitame un café en cafecito.app' /></a>",
+        "site": "SDR Bahía Blanca LU3EHB <a href='https://cafecito.app/lu3ehb' rel='noopener' target='_blank'><img style=\"height:33px;vertical-align:middle\" srcset='https://cdn.cafecito.app/imgs/buttons/button_1.png 1x, https://cdn.cafecito.app/imgs/buttons/button_1_2x.png 2x, https://cdn.cafecito.app/imgs/buttons/button_1_3.75x.png 3.75x' src='https://cdn.cafecito.app/imgs/buttons/button_1.png' alt='Invitame un café en cafecito.app' /></a>",
+        "lat": -38.757281,
+        "lon": -62.26511,
+        "type": "OpenWebRX",
+        "version": "1.2.126"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 356,
+      "ft8_decodes_per_minute": 25.69,
+      "traffic_sample_seconds": 67.72,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://138.118.215.154:8073/",
+        "label": "LU1XA Radio Club Rio Gallegos",
+        "site": "LU1XA Radio Club Rio Gallegos",
+        "lat": -51.68000987480535,
+        "lon": -69.21657773703642,
+        "type": "OpenWebRX",
+        "version": "1.2.82"
+      },
+      "band": "20m",
+      "ft8_decodes_total": 528151,
+      "ft8_decodes_per_minute": 19.28,
+      "traffic_sample_seconds": 68.48,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://138.118.215.154:8073/",
+        "label": "LU1XA Radio Club Rio Gallegos",
+        "site": "LU1XA Radio Club Rio Gallegos",
+        "lat": -51.68000987480535,
+        "lon": -69.21657773703642,
+        "type": "OpenWebRX",
+        "version": "1.2.82"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 422082,
+      "ft8_decodes_per_minute": 17.52,
+      "traffic_sample_seconds": 68.48,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.s59ekl.si/",
+        "label": "S59EKL",
+        "site": "S59EKL",
+        "lat": 46.356830335200236,
+        "lon": 15.120766413765745,
+        "type": "OpenWebRX",
+        "version": "1.2.2"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 1037661,
+      "ft8_decodes_per_minute": 14.09,
+      "traffic_sample_seconds": 68.12,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.republicaoa6.com/",
+        "label": "RepublicaOA6.com| 40m WebSDR",
+        "site": "RepublicaOA6.com| 40m WebSDR",
+        "lat": -16.480299579431826,
+        "lon": -71.47233583568745,
+        "type": "OpenWebRX",
+        "version": "1.2.118"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 167751,
+      "ft8_decodes_per_minute": 13.91,
+      "traffic_sample_seconds": 69.01,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://14alt266.freeboxos.fr/openwebrx/",
+        "label": "14ALT266",
+        "site": "14ALT266",
+        "lat": 43.6228932497094,
+        "lon": 7.04648735875531,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "60m",
+      "ft8_decodes_total": 646,
+      "ft8_decodes_per_minute": 8.81,
+      "traffic_sample_seconds": 68.14,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://ea8ee.ddns.net:8073/",
+        "label": "[EA8EE-34RC088]",
+        "site": "[EA8EE-34RC088]",
+        "lat": 27.76307141772238,
+        "lon": -15.60191184930471,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 49880,
+      "ft8_decodes_per_minute": 6.96,
+      "traffic_sample_seconds": 68.99,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://hf2.owrx.uk/",
+        "label": "https://owrx.uk - HF RECEIVER 02 - SDRplay RSP1B - 41.7m EFLW - M7NXS",
+        "site": "https://owrx.uk - HF RECEIVER 02 - SDRplay RSP1B - 41.7m EFLW - M7NXS",
+        "lat": 54.00334948205416,
+        "lon": -1.3030173782748222,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 190,
+      "ft8_decodes_per_minute": 3.54,
+      "traffic_sample_seconds": 67.73,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://hf2.owrx.uk/",
+        "label": "https://owrx.uk - HF RECEIVER 02 - SDRplay RSP1B - 41.7m EFLW - M7NXS",
+        "site": "https://owrx.uk - HF RECEIVER 02 - SDRplay RSP1B - 41.7m EFLW - M7NXS",
+        "lat": 54.00334948205416,
+        "lon": -1.3030173782748222,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "30m",
+      "ft8_decodes_total": 35,
+      "ft8_decodes_per_minute": 2.66,
+      "traffic_sample_seconds": 67.73,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://hf2.owrx.uk/",
+        "label": "https://owrx.uk - HF RECEIVER 02 - SDRplay RSP1B - 41.7m EFLW - M7NXS",
+        "site": "https://owrx.uk - HF RECEIVER 02 - SDRplay RSP1B - 41.7m EFLW - M7NXS",
+        "lat": 54.00334948205416,
+        "lon": -1.3030173782748222,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "60m",
+      "ft8_decodes_total": 68,
+      "ft8_decodes_per_minute": 0.89,
+      "traffic_sample_seconds": 67.73,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://websdr.sp2kds.pl/websdr/",
+        "label": "SP2KDS",
+        "site": "SP2KDS",
+        "lat": 54.3491784239476,
+        "lon": 18.705335384432143,
+        "type": "OpenWebRX",
+        "version": "1.2.102"
+      },
+      "band": "23cm",
+      "ft8_decodes_total": 372,
+      "ft8_decodes_per_minute": 0.88,
+      "traffic_sample_seconds": 68.32,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://138.118.215.154:8073/",
+        "label": "LU1XA Radio Club Rio Gallegos",
+        "site": "LU1XA Radio Club Rio Gallegos",
+        "lat": -51.68000987480535,
+        "lon": -69.21657773703642,
+        "type": "OpenWebRX",
+        "version": "1.2.82"
+      },
+      "band": "6m",
+      "ft8_decodes_total": 631,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.48,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://14482babelsberg.dnshome.de/",
+        "label": "Potsdam Babelsberg in Brandenburg🌹 0-30MHz",
+        "site": "Potsdam Babelsberg in Brandenburg🌹 0-30MHz",
+        "lat": 52.3891166184068,
+        "lon": 13.093711234217,
+        "type": "OpenWebRX",
+        "version": "1.3.0-dev"
+      },
+      "band": "160m",
+      "ft8_decodes_total": 26,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.96,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://14482babelsberg.dnshome.de/",
+        "label": "Potsdam Babelsberg in Brandenburg🌹 0-30MHz",
+        "site": "Potsdam Babelsberg in Brandenburg🌹 0-30MHz",
+        "lat": 52.3891166184068,
+        "lon": 13.093711234217,
+        "type": "OpenWebRX",
+        "version": "1.3.0-dev"
+      },
+      "band": "80m",
+      "ft8_decodes_total": 341,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.96,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://14482babelsberg.dnshome.de/",
+        "label": "Potsdam Babelsberg in Brandenburg🌹 0-30MHz",
+        "site": "Potsdam Babelsberg in Brandenburg🌹 0-30MHz",
+        "lat": 52.3891166184068,
+        "lon": 13.093711234217,
+        "type": "OpenWebRX",
+        "version": "1.3.0-dev"
+      },
+      "band": "60m",
+      "ft8_decodes_total": 67,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.96,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://185.175.11.145:8073/",
+        "label": "OK2CMW",
+        "site": "OK2CMW",
+        "lat": 49.730161,
+        "lon": 18.297627,
+        "type": "OpenWebRX",
+        "version": "1.2.45"
+      },
+      "band": "160m",
+      "ft8_decodes_total": 1,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.81,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://185.175.11.145:8073/",
+        "label": "OK2CMW",
+        "site": "OK2CMW",
+        "lat": 49.730161,
+        "lon": 18.297627,
+        "type": "OpenWebRX",
+        "version": "1.2.45"
+      },
+      "band": "80m",
+      "ft8_decodes_total": 1665,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.81,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://185.175.11.145:8073/",
+        "label": "OK2CMW",
+        "site": "OK2CMW",
+        "lat": 49.730161,
+        "lon": 18.297627,
+        "type": "OpenWebRX",
+        "version": "1.2.45"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 157970,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.81,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://185.175.11.145:8073/",
+        "label": "OK2CMW",
+        "site": "OK2CMW",
+        "lat": 49.730161,
+        "lon": 18.297627,
+        "type": "OpenWebRX",
+        "version": "1.2.45"
+      },
+      "band": "30m",
+      "ft8_decodes_total": 21,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.81,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://185.175.11.145:8073/",
+        "label": "OK2CMW",
+        "site": "OK2CMW",
+        "lat": 49.730161,
+        "lon": 18.297627,
+        "type": "OpenWebRX",
+        "version": "1.2.45"
+      },
+      "band": "20m",
+      "ft8_decodes_total": 25041,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.81,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://185.175.11.145:8073/",
+        "label": "OK2CMW",
+        "site": "OK2CMW",
+        "lat": 49.730161,
+        "lon": 18.297627,
+        "type": "OpenWebRX",
+        "version": "1.2.45"
+      },
+      "band": "17m",
+      "ft8_decodes_total": 433,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.81,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://185.175.11.145:8073/",
+        "label": "OK2CMW",
+        "site": "OK2CMW",
+        "lat": 49.730161,
+        "lon": 18.297627,
+        "type": "OpenWebRX",
+        "version": "1.2.45"
+      },
+      "band": "15m",
+      "ft8_decodes_total": 150,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.81,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://185.175.11.145:8073/",
+        "label": "OK2CMW",
+        "site": "OK2CMW",
+        "lat": 49.730161,
+        "lon": 18.297627,
+        "type": "OpenWebRX",
+        "version": "1.2.45"
+      },
+      "band": "12m",
+      "ft8_decodes_total": 1816,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.81,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://185.175.11.145:8073/",
+        "label": "OK2CMW",
+        "site": "OK2CMW",
+        "lat": 49.730161,
+        "lon": 18.297627,
+        "type": "OpenWebRX",
+        "version": "1.2.45"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 9,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.81,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://185.230.119.204:8073/",
+        "label": "[HB9ITR]",
+        "site": "[HB9ITR]",
+        "lat": 46.9,
+        "lon": 7.24,
+        "type": "OpenWebRX",
+        "version": "1.2.111"
+      },
+      "band": "20m",
+      "ft8_decodes_total": 289,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.1,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://186.13.27.90:8073/",
+        "label": "LU5DA",
+        "site": "LU5DA",
+        "lat": -34.51519881704802,
+        "lon": -58.48991112495678,
+        "type": "OpenWebRX",
+        "version": "1.2.111"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 97419,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.74,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://82.165.1.21:8073/",
+        "label": "Assisi Italy IW0RQJ iw0rqj@gmail.com",
+        "site": "Assisi Italy IW0RQJ iw0rqj@gmail.com",
+        "lat": 43.0377,
+        "lon": 12.6253,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 17695,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.31,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://90.187.72.177:8073/",
+        "label": "2m/70cm | Berlin - JO62QJ | DC7JZB",
+        "site": "2m/70cm | Berlin - JO62QJ | DC7JZB",
+        "lat": 52.40779629238412,
+        "lon": 13.40388133168175,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 12,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 69.08,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://aro99.homeip.net:5573/",
+        "label": "CB0ARO",
+        "site": "CB0ARO",
+        "lat": 50.8419509804473,
+        "lon": 12.773415194596408,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "80m",
+      "ft8_decodes_total": 409,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 67.97,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://aro99.homeip.net:5573/",
+        "label": "CB0ARO",
+        "site": "CB0ARO",
+        "lat": 50.8419509804473,
+        "lon": 12.773415194596408,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "20m",
+      "ft8_decodes_total": 261,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 67.97,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://aro99.homeip.net:5573/",
+        "label": "CB0ARO",
+        "site": "CB0ARO",
+        "lat": 50.8419509804473,
+        "lon": 12.773415194596408,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "12m",
+      "ft8_decodes_total": 23,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 67.97,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://dh5ym.hopto.org:8074/",
+        "label": "DL0TUD/RX",
+        "site": "DL0TUD/RX",
+        "lat": 50.9986266588463,
+        "lon": 13.8050260816456,
+        "type": "OpenWebRX",
+        "version": "1.3.0-dev"
+      },
+      "band": "4m",
+      "ft8_decodes_total": 31,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.93,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://dh5ym.hopto.org:8074/",
+        "label": "DL0TUD/RX",
+        "site": "DL0TUD/RX",
+        "lat": 50.9986266588463,
+        "lon": 13.8050260816456,
+        "type": "OpenWebRX",
+        "version": "1.3.0-dev"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 343,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.93,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://f1ubl.ddns.net:8073/",
+        "label": "F1UBL OpenWebRX public (est)",
+        "site": "F1UBL OpenWebRX public (est)",
+        "lat": 48.7723697803614,
+        "lon": 1.94055179866496,
+        "type": "OpenWebRX",
+        "version": "1.2.126"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 197,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.69,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://f1uqr.freeboxos.fr:8073/",
+        "label": "F1UQR",
+        "site": "F1UQR",
+        "lat": 48.29316369161562,
+        "lon": 6.600642364312255,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 65,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.61,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://francedmr.ddns.net:8073/",
+        "label": "F1JWV",
+        "site": "F1JWV",
+        "lat": 44.037336928522826,
+        "lon": -0.33319091796873757,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "160m",
+      "ft8_decodes_total": 12,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.92,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://francedmr.ddns.net:8073/",
+        "label": "F1JWV",
+        "site": "F1JWV",
+        "lat": 44.037336928522826,
+        "lon": -0.33319091796873757,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "80m",
+      "ft8_decodes_total": 3,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.92,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://francedmr.ddns.net:8073/",
+        "label": "F1JWV",
+        "site": "F1JWV",
+        "lat": 44.037336928522826,
+        "lon": -0.33319091796873757,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "60m",
+      "ft8_decodes_total": 12,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.92,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://francedmr.ddns.net:8073/",
+        "label": "F1JWV",
+        "site": "F1JWV",
+        "lat": 44.037336928522826,
+        "lon": -0.33319091796873757,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 1774,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.92,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://francedmr.ddns.net:8073/",
+        "label": "F1JWV",
+        "site": "F1JWV",
+        "lat": 44.037336928522826,
+        "lon": -0.33319091796873757,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "30m",
+      "ft8_decodes_total": 578,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.92,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://francedmr.ddns.net:8073/",
+        "label": "F1JWV",
+        "site": "F1JWV",
+        "lat": 44.037336928522826,
+        "lon": -0.33319091796873757,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "20m",
+      "ft8_decodes_total": 36,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.92,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://francedmr.ddns.net:8073/",
+        "label": "F1JWV",
+        "site": "F1JWV",
+        "lat": 44.037336928522826,
+        "lon": -0.33319091796873757,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "15m",
+      "ft8_decodes_total": 65,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.92,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://francedmr.ddns.net:8073/",
+        "label": "F1JWV",
+        "site": "F1JWV",
+        "lat": 44.037336928522826,
+        "lon": -0.33319091796873757,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 21,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.92,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://g0xbuwebsdr.ddns.net:8073/",
+        "label": "G0XBU",
+        "site": "G0XBU",
+        "lat": 53.23,
+        "lon": -2.313,
+        "type": "OpenWebRX",
+        "version": "1.2.120"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 41,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 69.01,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://hb9re.ddns.net:8080/",
+        "label": "Funkclub Schlössli - HB9RE - DMR2282157",
+        "site": " Funkclub Schlössli - HB9RE - DMR2282157 | Bodenberg, Switzerland",
+        "lat": 47.154132,
+        "lon": 7.923172,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 47,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 69.04,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://hirrkhq05e1w02ak.myfritz.net:8073/",
+        "label": "WebSDR Berlin - DO9MAD",
+        "site": "WebSDR Berlin - DO9MAD",
+        "lat": 52.507714510742,
+        "lon": 13.495903105278,
+        "type": "OpenWebRX",
+        "version": "1.2.124"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 16,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.64,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://hirrkhq05e1w02ak.myfritz.net:8073/",
+        "label": "WebSDR Berlin - DO9MAD",
+        "site": "WebSDR Berlin - DO9MAD",
+        "lat": 52.507714510742,
+        "lon": 13.495903105278,
+        "type": "OpenWebRX",
+        "version": "1.2.124"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 16,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.64,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://hirrkhq05e1w02ak.myfritz.net:8073/",
+        "label": "WebSDR Berlin - DO9MAD",
+        "site": "WebSDR Berlin - DO9MAD",
+        "lat": 52.507714510742,
+        "lon": 13.495903105278,
+        "type": "OpenWebRX",
+        "version": "1.2.124"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 24,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.64,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://home.gettoweb.de:8073/",
+        "label": "DL1RMT",
+        "site": "DL1RMT",
+        "lat": 52.154338,
+        "lon": 11.570362,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "15m",
+      "ft8_decodes_total": 100,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.87,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://home.gettoweb.de:8073/",
+        "label": "DL1RMT",
+        "site": "DL1RMT",
+        "lat": 52.154338,
+        "lon": 11.570362,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 949,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.87,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://hym.sytes.net:8073/",
+        "label": "SDR ECB81VBS / EA4IHP /  Villanueva de Perales",
+        "site": "SDR ECB81VBS / EA4IHP /  Villanueva de Perales",
+        "lat": 40.3471627406447,
+        "lon": -4.097792144136084,
+        "type": "OpenWebRX",
+        "version": "1.2.2"
+      },
+      "band": "80m",
+      "ft8_decodes_total": 39,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.84,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://hym.sytes.net:8073/",
+        "label": "SDR ECB81VBS / EA4IHP /  Villanueva de Perales",
+        "site": "SDR ECB81VBS / EA4IHP /  Villanueva de Perales",
+        "lat": 40.3471627406447,
+        "lon": -4.097792144136084,
+        "type": "OpenWebRX",
+        "version": "1.2.2"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 14338,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.84,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://hym.sytes.net:8073/",
+        "label": "SDR ECB81VBS / EA4IHP /  Villanueva de Perales",
+        "site": "SDR ECB81VBS / EA4IHP /  Villanueva de Perales",
+        "lat": 40.3471627406447,
+        "lon": -4.097792144136084,
+        "type": "OpenWebRX",
+        "version": "1.2.2"
+      },
+      "band": "20m",
+      "ft8_decodes_total": 2886,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.84,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://hym.sytes.net:8073/",
+        "label": "SDR ECB81VBS / EA4IHP /  Villanueva de Perales",
+        "site": "SDR ECB81VBS / EA4IHP /  Villanueva de Perales",
+        "lat": 40.3471627406447,
+        "lon": -4.097792144136084,
+        "type": "OpenWebRX",
+        "version": "1.2.2"
+      },
+      "band": "15m",
+      "ft8_decodes_total": 2442,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.84,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://hym.sytes.net:8073/",
+        "label": "SDR ECB81VBS / EA4IHP /  Villanueva de Perales",
+        "site": "SDR ECB81VBS / EA4IHP /  Villanueva de Perales",
+        "lat": 40.3471627406447,
+        "lon": -4.097792144136084,
+        "type": "OpenWebRX",
+        "version": "1.2.2"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 14607,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.84,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://hym.sytes.net:8073/",
+        "label": "SDR ECB81VBS / EA4IHP /  Villanueva de Perales",
+        "site": "SDR ECB81VBS / EA4IHP /  Villanueva de Perales",
+        "lat": 40.3471627406447,
+        "lon": -4.097792144136084,
+        "type": "OpenWebRX",
+        "version": "1.2.2"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 2,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.84,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://iq1zw.ddns.net:42154/",
+        "label": "Gruppo Radio Liguria - IQ1ZW",
+        "site": "Gruppo Radio Liguria - IQ1ZW",
+        "lat": 44.412808329583,
+        "lon": 8.97715299683594,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "80m",
+      "ft8_decodes_total": 3888,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.6,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://iq1zw.ddns.net:42154/",
+        "label": "Gruppo Radio Liguria - IQ1ZW",
+        "site": "Gruppo Radio Liguria - IQ1ZW",
+        "lat": 44.412808329583,
+        "lon": 8.97715299683594,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 982,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.6,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://iq1zw.ddns.net:42154/",
+        "label": "Gruppo Radio Liguria - IQ1ZW",
+        "site": "Gruppo Radio Liguria - IQ1ZW",
+        "lat": 44.412808329583,
+        "lon": 8.97715299683594,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "30m",
+      "ft8_decodes_total": 73,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.6,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://iq1zw.ddns.net:42154/",
+        "label": "Gruppo Radio Liguria - IQ1ZW",
+        "site": "Gruppo Radio Liguria - IQ1ZW",
+        "lat": 44.412808329583,
+        "lon": 8.97715299683594,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "17m",
+      "ft8_decodes_total": 2051,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.6,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://iq1zw.ddns.net:42154/",
+        "label": "Gruppo Radio Liguria - IQ1ZW",
+        "site": "Gruppo Radio Liguria - IQ1ZW",
+        "lat": 44.412808329583,
+        "lon": 8.97715299683594,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "12m",
+      "ft8_decodes_total": 3,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.6,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://iq1zw.ddns.net:42154/",
+        "label": "Gruppo Radio Liguria - IQ1ZW",
+        "site": "Gruppo Radio Liguria - IQ1ZW",
+        "lat": 44.412808329583,
+        "lon": 8.97715299683594,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 5966,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.6,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://it9ewl.ddns.net/",
+        "label": "IT9EWL - SICILIA - ITALIA",
+        "site": "IT9EWL - SICILIA - ITALIA",
+        "lat": 38.208272786052106,
+        "lon": 15.227501793897988,
+        "type": "OpenWebRX",
+        "version": "1.2.128"
+      },
+      "band": "80m",
+      "ft8_decodes_total": 2,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.77,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://it9ewl.ddns.net/",
+        "label": "IT9EWL - SICILIA - ITALIA",
+        "site": "IT9EWL - SICILIA - ITALIA",
+        "lat": 38.208272786052106,
+        "lon": 15.227501793897988,
+        "type": "OpenWebRX",
+        "version": "1.2.128"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 2965,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.77,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://it9ewl.ddns.net/",
+        "label": "IT9EWL - SICILIA - ITALIA",
+        "site": "IT9EWL - SICILIA - ITALIA",
+        "lat": 38.208272786052106,
+        "lon": 15.227501793897988,
+        "type": "OpenWebRX",
+        "version": "1.2.128"
+      },
+      "band": "30m",
+      "ft8_decodes_total": 6,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.77,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://it9ewl.ddns.net/",
+        "label": "IT9EWL - SICILIA - ITALIA",
+        "site": "IT9EWL - SICILIA - ITALIA",
+        "lat": 38.208272786052106,
+        "lon": 15.227501793897988,
+        "type": "OpenWebRX",
+        "version": "1.2.128"
+      },
+      "band": "20m",
+      "ft8_decodes_total": 180,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.77,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://it9ewl.ddns.net/",
+        "label": "IT9EWL - SICILIA - ITALIA",
+        "site": "IT9EWL - SICILIA - ITALIA",
+        "lat": 38.208272786052106,
+        "lon": 15.227501793897988,
+        "type": "OpenWebRX",
+        "version": "1.2.128"
+      },
+      "band": "17m",
+      "ft8_decodes_total": 2,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.77,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://it9ewl.ddns.net/",
+        "label": "IT9EWL - SICILIA - ITALIA",
+        "site": "IT9EWL - SICILIA - ITALIA",
+        "lat": 38.208272786052106,
+        "lon": 15.227501793897988,
+        "type": "OpenWebRX",
+        "version": "1.2.128"
+      },
+      "band": "15m",
+      "ft8_decodes_total": 57,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.77,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://it9ewl.ddns.net/",
+        "label": "IT9EWL - SICILIA - ITALIA",
+        "site": "IT9EWL - SICILIA - ITALIA",
+        "lat": 38.208272786052106,
+        "lon": 15.227501793897988,
+        "type": "OpenWebRX",
+        "version": "1.2.128"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 55,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.77,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://it9ewl.ddns.net/",
+        "label": "IT9EWL - SICILIA - ITALIA",
+        "site": "IT9EWL - SICILIA - ITALIA",
+        "lat": 38.208272786052106,
+        "lon": 15.227501793897988,
+        "type": "OpenWebRX",
+        "version": "1.2.128"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 519,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.77,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://kudlov.ok1hz.cz:8073/",
+        "label": "OK2OZL",
+        "site": "OK2OZL",
+        "lat": 49.200625461782955,
+        "lon": 17.69081285657127,
+        "type": "OpenWebRX",
+        "version": "1.2.121"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 24911,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.77,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://nc-home.tgws.de:8473/",
+        "label": "OWRX-4 - SDR-4 at  DG1KPC/DAA704 -- FOR 10-12 M / 24-30MHz",
+        "site": "OWRX-4 - SDR-4 at  DG1KPC/DAA704 -- FOR 10-12 M / 24-30MHz",
+        "lat": 50.815,
+        "lon": 7.6122,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 1,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.59,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://nieuwkerke.on4ipr.be:8073/",
+        "label": "[ON4JES-12] IPR - RADIOCLUB IEPER - WATOU VHF/UHF",
+        "site": "[ON4JES-12] IPR - RADIOCLUB IEPER - WATOU VHF/UHF",
+        "lat": 50.867920116557,
+        "lon": 2.62003386020662,
+        "type": "OpenWebRX",
+        "version": "1.2.90"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 5088,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.7,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://nieuwkerke.on4ipr.be:8074/",
+        "label": "[ON4JES-12] IPR - RADIOCLUB IEPER - WATOU VHF/UHF",
+        "site": "[ON4JES-12] IPR - RADIOCLUB IEPER - WATOU VHF/UHF",
+        "lat": 50.867920116557,
+        "lon": 2.62003386020662,
+        "type": "OpenWebRX",
+        "version": "1.2.90"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 5088,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.75,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://noradio86.ddns.net:8074/",
+        "label": "OpenWebRX B VHF/UHF  de Poitiers 86 (Smarves)",
+        "site": "OpenWebRX B VHF/UHF  de Poitiers 86 (Smarves)",
+        "lat": 46.50957532134839,
+        "lon": 0.35070800781251243,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 20,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.98,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://owrxbreezand.duckdns.org/",
+        "label": "M.N.M De Graaf BV. WebSDR",
+        "site": "M.N.M De Graaf BV. WebSDR",
+        "lat": 52.88704747759002,
+        "lon": 4.8548774754952895,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "20m",
+      "ft8_decodes_total": 17310,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.66,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://redbaron92.goip.de/",
+        "label": "RedBaron",
+        "site": "RedBaron",
+        "lat": 53.38217316226249,
+        "lon": 10.102829447100556,
+        "type": "OpenWebRX",
+        "version": "1.2.122"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 1,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.89,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://remoteradio.changeip.org:8077/",
+        "label": "Located in Bedford UK OpenWebRX+ SDRPlay RSP1A LF/MF/HF/VHF/UHF <br> + RTL-SDR Blog V3 for ABS-D Open Map to view Plots. Ask before tuning.",
+        "site": "Bedford, England ",
+        "lat": 52.11736723849368,
+        "lon": -0.45002051405630406,
+        "type": "OpenWebRX",
+        "version": "1.2.128"
+      },
+      "band": "160m",
+      "ft8_decodes_total": 161,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.9,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://remoteradio.changeip.org:8077/",
+        "label": "Located in Bedford UK OpenWebRX+ SDRPlay RSP1A LF/MF/HF/VHF/UHF <br> + RTL-SDR Blog V3 for ABS-D Open Map to view Plots. Ask before tuning.",
+        "site": "Bedford, England ",
+        "lat": 52.11736723849368,
+        "lon": -0.45002051405630406,
+        "type": "OpenWebRX",
+        "version": "1.2.128"
+      },
+      "band": "80m",
+      "ft8_decodes_total": 208,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.9,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://remoteradio.changeip.org:8077/",
+        "label": "Located in Bedford UK OpenWebRX+ SDRPlay RSP1A LF/MF/HF/VHF/UHF <br> + RTL-SDR Blog V3 for ABS-D Open Map to view Plots. Ask before tuning.",
+        "site": "Bedford, England ",
+        "lat": 52.11736723849368,
+        "lon": -0.45002051405630406,
+        "type": "OpenWebRX",
+        "version": "1.2.128"
+      },
+      "band": "30m",
+      "ft8_decodes_total": 44,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.9,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://remoteradio.changeip.org:8077/",
+        "label": "Located in Bedford UK OpenWebRX+ SDRPlay RSP1A LF/MF/HF/VHF/UHF <br> + RTL-SDR Blog V3 for ABS-D Open Map to view Plots. Ask before tuning.",
+        "site": "Bedford, England ",
+        "lat": 52.11736723849368,
+        "lon": -0.45002051405630406,
+        "type": "OpenWebRX",
+        "version": "1.2.128"
+      },
+      "band": "20m",
+      "ft8_decodes_total": 536,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.9,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://s4wmv4hovyls5ebz.myfritz.net:8076/",
+        "label": "DM6CM",
+        "site": "DM6CM",
+        "lat": 53.4908648097928,
+        "lon": 10.2537521748898,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 3,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.72,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://s4wmv4hovyls5ebz.myfritz.net:8076/",
+        "label": "DM6CM",
+        "site": "DM6CM",
+        "lat": 53.4908648097928,
+        "lon": 10.2537521748898,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 15,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.72,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://sdr.l0c4l.net:8073/",
+        "label": "ML1PB",
+        "site": "ML1PB",
+        "lat": 51.754236035838,
+        "lon": 8.7264846190869,
+        "type": "OpenWebRX",
+        "version": "1.2.126"
+      },
+      "band": "60m",
+      "ft8_decodes_total": 5,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.9,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://sdr.l0c4l.net:8073/",
+        "label": "ML1PB",
+        "site": "ML1PB",
+        "lat": 51.754236035838,
+        "lon": 8.7264846190869,
+        "type": "OpenWebRX",
+        "version": "1.2.126"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 1,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.9,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://sdr.packetradio.at:8901/",
+        "label": "sdr.packetradio.at",
+        "site": "sdr.packetradio.at",
+        "lat": 48.41858056758566,
+        "lon": 15.563992883190263,
+        "type": "OpenWebRX",
+        "version": "1.2.74"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 1,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 69.01,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://sdr.pi4utr.nl:8073/",
+        "label": "PI4UTR WebSDR",
+        "site": "PI4UTR WebSDR",
+        "lat": 52.12262,
+        "lon": 5.07129,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "160m",
+      "ft8_decodes_total": 176,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.84,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://sdr.pi4utr.nl:8073/",
+        "label": "PI4UTR WebSDR",
+        "site": "PI4UTR WebSDR",
+        "lat": 52.12262,
+        "lon": 5.07129,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "80m",
+      "ft8_decodes_total": 11121,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.84,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://sdr.pi4utr.nl:8073/",
+        "label": "PI4UTR WebSDR",
+        "site": "PI4UTR WebSDR",
+        "lat": 52.12262,
+        "lon": 5.07129,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 69,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.84,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://sdr.pi4utr.nl:8073/",
+        "label": "PI4UTR WebSDR",
+        "site": "PI4UTR WebSDR",
+        "lat": 52.12262,
+        "lon": 5.07129,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 2,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.84,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://sdr2.justjakob.de/",
+        "label": "DD5JFK tech demo",
+        "site": "DD5JFK tech demo",
+        "lat": 48.1200380875952,
+        "lon": 11.5311849117279,
+        "type": "OpenWebRX",
+        "version": "1.3.0-dev"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 11156,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 69.07,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://sdrkosutnjak.321.rs:8073/",
+        "label": "SDR Košutnjak",
+        "site": "SDR Košutnjak",
+        "lat": 44.75897710057063,
+        "lon": 20.42326563848707,
+        "type": "OpenWebRX",
+        "version": "1.2.124"
+      },
+      "band": "80m",
+      "ft8_decodes_total": 158,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.36,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://sdrkosutnjak.321.rs:8073/",
+        "label": "SDR Košutnjak",
+        "site": "SDR Košutnjak",
+        "lat": 44.75897710057063,
+        "lon": 20.42326563848707,
+        "type": "OpenWebRX",
+        "version": "1.2.124"
+      },
+      "band": "30m",
+      "ft8_decodes_total": 36,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.36,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://sdrkosutnjak.321.rs:8073/",
+        "label": "SDR Košutnjak",
+        "site": "SDR Košutnjak",
+        "lat": 44.75897710057063,
+        "lon": 20.42326563848707,
+        "type": "OpenWebRX",
+        "version": "1.2.124"
+      },
+      "band": "20m",
+      "ft8_decodes_total": 61453,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.36,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://sdrkosutnjak.321.rs:8073/",
+        "label": "SDR Košutnjak",
+        "site": "SDR Košutnjak",
+        "lat": 44.75897710057063,
+        "lon": 20.42326563848707,
+        "type": "OpenWebRX",
+        "version": "1.2.124"
+      },
+      "band": "15m",
+      "ft8_decodes_total": 152,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.36,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://sdrkosutnjak.321.rs:8073/",
+        "label": "SDR Košutnjak",
+        "site": "SDR Košutnjak",
+        "lat": 44.75897710057063,
+        "lon": 20.42326563848707,
+        "type": "OpenWebRX",
+        "version": "1.2.124"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 20,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.36,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://sdrkosutnjak.321.rs:8073/",
+        "label": "SDR Košutnjak",
+        "site": "SDR Košutnjak",
+        "lat": 44.75897710057063,
+        "lon": 20.42326563848707,
+        "type": "OpenWebRX",
+        "version": "1.2.124"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 10,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.36,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://sdrsjriopreto.ddns.net:8073/",
+        "label": "SDR São José do Rio Preto, SP, Brasil - PU2XZL -HF-CB-10m-VHF-2m",
+        "site": "SDR São José do Rio Preto, SP, Brasil - PU2XZL -HF-CB-10m-VHF-2m",
+        "lat": -20.7556479129044,
+        "lon": -49.3301090052156,
+        "type": "OpenWebRX",
+        "version": "1.2.126"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 56,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.11,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://sdrtoyb.ddns.net:8074/",
+        "label": "SDRplay (Antenna: Long Wire and 1:9 Balun)",
+        "site": "SDRplay (Antenna: Long Wire and 1:9 Balun)",
+        "lat": 60.5680861,
+        "lon": 9.1027427,
+        "type": "OpenWebRX",
+        "version": "1.2.123"
+      },
+      "band": "80m",
+      "ft8_decodes_total": 208,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.66,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://sdrvalencia.com/",
+        "label": "SDR Valencia - EA5TB",
+        "site": "SDR Valencia - EA5TB",
+        "lat": 39.4316934287378,
+        "lon": -0.822307715370314,
+        "type": "OpenWebRX",
+        "version": "1.2.126"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 18,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.75,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://sv3smg.ddns.net:8073/",
+        "label": "The Sleeping Cat Reciever",
+        "site": "The Sleeping Cat Reciever",
+        "lat": 37.02603304273152,
+        "lon": 22.117131734678534,
+        "type": "OpenWebRX",
+        "version": "1.2.120"
+      },
+      "band": "80m",
+      "ft8_decodes_total": 713,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.44,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://sv3smg.ddns.net:8073/",
+        "label": "The Sleeping Cat Reciever",
+        "site": "The Sleeping Cat Reciever",
+        "lat": 37.02603304273152,
+        "lon": 22.117131734678534,
+        "type": "OpenWebRX",
+        "version": "1.2.120"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 11717,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.44,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://sv3smg.ddns.net:8073/",
+        "label": "The Sleeping Cat Reciever",
+        "site": "The Sleeping Cat Reciever",
+        "lat": 37.02603304273152,
+        "lon": 22.117131734678534,
+        "type": "OpenWebRX",
+        "version": "1.2.120"
+      },
+      "band": "20m",
+      "ft8_decodes_total": 15060,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.44,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://sv3smg.ddns.net:8073/",
+        "label": "The Sleeping Cat Reciever",
+        "site": "The Sleeping Cat Reciever",
+        "lat": 37.02603304273152,
+        "lon": 22.117131734678534,
+        "type": "OpenWebRX",
+        "version": "1.2.120"
+      },
+      "band": "17m",
+      "ft8_decodes_total": 630,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.44,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://sv3smg.ddns.net:8073/",
+        "label": "The Sleeping Cat Reciever",
+        "site": "The Sleeping Cat Reciever",
+        "lat": 37.02603304273152,
+        "lon": 22.117131734678534,
+        "type": "OpenWebRX",
+        "version": "1.2.120"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 512,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.44,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://vhf.es4rvn.ee:8073/",
+        "label": "ES4N",
+        "site": "ES4N",
+        "lat": 59.3740811914467,
+        "lon": 28.1903479469811,
+        "type": "OpenWebRX",
+        "version": "1.2.119"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 3,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.75,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://vhfsdr.gb0snb.com:8074/",
+        "label": "GB0SNB VHF-SHF SDR (6m-23cm)",
+        "site": "GB0SNB VHF-SHF SDR (6m-23cm)",
+        "lat": 51.67167205395181,
+        "lon": 0.25657398078398064,
+        "type": "OpenWebRX",
+        "version": "1.2.85"
+      },
+      "band": "6m",
+      "ft8_decodes_total": 15263,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.81,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://vhfsdr.gb0snb.com:8074/",
+        "label": "GB0SNB VHF-SHF SDR (6m-23cm)",
+        "site": "GB0SNB VHF-SHF SDR (6m-23cm)",
+        "lat": 51.67167205395181,
+        "lon": 0.25657398078398064,
+        "type": "OpenWebRX",
+        "version": "1.2.85"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 34491,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.81,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://vpn14585.unicoip.org:22528/",
+        "label": "GRUPPO RADIOAMATORI ARGENTA",
+        "site": "GRUPPO RADIOAMATORI ARGENTA",
+        "lat": 44.60927,
+        "lon": 11.842558,
+        "type": "OpenWebRX",
+        "version": "1.2.123"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 135564,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.76,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://vpn14585.unicoip.org:22528/",
+        "label": "GRUPPO RADIOAMATORI ARGENTA",
+        "site": "GRUPPO RADIOAMATORI ARGENTA",
+        "lat": 44.60927,
+        "lon": 11.842558,
+        "type": "OpenWebRX",
+        "version": "1.2.123"
+      },
+      "band": "30m",
+      "ft8_decodes_total": 14,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.76,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://vpn14585.unicoip.org:22528/",
+        "label": "GRUPPO RADIOAMATORI ARGENTA",
+        "site": "GRUPPO RADIOAMATORI ARGENTA",
+        "lat": 44.60927,
+        "lon": 11.842558,
+        "type": "OpenWebRX",
+        "version": "1.2.123"
+      },
+      "band": "20m",
+      "ft8_decodes_total": 12416,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.76,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://vpn14585.unicoip.org:22528/",
+        "label": "GRUPPO RADIOAMATORI ARGENTA",
+        "site": "GRUPPO RADIOAMATORI ARGENTA",
+        "lat": 44.60927,
+        "lon": 11.842558,
+        "type": "OpenWebRX",
+        "version": "1.2.123"
+      },
+      "band": "17m",
+      "ft8_decodes_total": 608,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.76,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://vpn14585.unicoip.org:22528/",
+        "label": "GRUPPO RADIOAMATORI ARGENTA",
+        "site": "GRUPPO RADIOAMATORI ARGENTA",
+        "lat": 44.60927,
+        "lon": 11.842558,
+        "type": "OpenWebRX",
+        "version": "1.2.123"
+      },
+      "band": "15m",
+      "ft8_decodes_total": 335,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.76,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://watou.on4ipr.be:8073/",
+        "label": "[ON4JES-12] IPR - RADIOCLUB IEPER - WATOU VHF/UHF",
+        "site": "[ON4JES-12] IPR - RADIOCLUB IEPER - WATOU VHF/UHF",
+        "lat": 50.867920116557,
+        "lon": 2.62003386020662,
+        "type": "OpenWebRX",
+        "version": "1.2.90"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 5088,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.79,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://watou.on4ipr.be:8076/",
+        "label": "[ON4JES-12] IPR - RADIOCLUB IEPER - WATOU VHF/UHF",
+        "site": "[ON4JES-12] IPR - RADIOCLUB IEPER - WATOU VHF/UHF",
+        "lat": 50.867920116557,
+        "lon": 2.62003386020662,
+        "type": "OpenWebRX",
+        "version": "1.2.90"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 5088,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.83,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://webrx.sk3gk.se:8074/",
+        "label": "SK3GK Kungsberget",
+        "site": "SK3GK Kungsberget",
+        "lat": 60.75091784750988,
+        "lon": 16.490742078387893,
+        "type": "OpenWebRX",
+        "version": "1.3.0-dev"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 597540,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.93,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://webrx.sk3gk.se:8074/",
+        "label": "SK3GK Kungsberget",
+        "site": "SK3GK Kungsberget",
+        "lat": 60.75091784750988,
+        "lon": 16.490742078387893,
+        "type": "OpenWebRX",
+        "version": "1.3.0-dev"
+      },
+      "band": "6m",
+      "ft8_decodes_total": 4392,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.93,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://webrx.sk3gk.se:8074/",
+        "label": "SK3GK Kungsberget",
+        "site": "SK3GK Kungsberget",
+        "lat": 60.75091784750988,
+        "lon": 16.490742078387893,
+        "type": "OpenWebRX",
+        "version": "1.3.0-dev"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 7894,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.93,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://websdr.mateusz.pro/",
+        "label": "SQ9NKX",
+        "site": "SQ9NKX",
+        "lat": 50.477450397341514,
+        "lon": 19.39835697464894,
+        "type": "OpenWebRX",
+        "version": "1.2.115"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 32,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.97,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://websdr.pi1utr.hamnet.nl:8073/",
+        "label": "PI1UTR WebSDR",
+        "site": "PI1UTR WebSDR",
+        "lat": 52.01013427597713,
+        "lon": 5.053865780281797,
+        "type": "OpenWebRX",
+        "version": "1.2.126"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 460,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.72,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://websdr.sp2kds.pl/websdr/",
+        "label": "SP2KDS",
+        "site": "SP2KDS",
+        "lat": 54.3491784239476,
+        "lon": 18.705335384432143,
+        "type": "OpenWebRX",
+        "version": "1.2.102"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 667,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.32,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://yo2cps.go.ro:8073/",
+        "label": "YO2CPS",
+        "site": "YO2CPS",
+        "lat": 45.863523648352725,
+        "lon": 22.89565117516746,
+        "type": "OpenWebRX",
+        "version": "1.2.123"
+      },
+      "band": "160m",
+      "ft8_decodes_total": 906,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 67.78,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://yo2cps.go.ro:8073/",
+        "label": "YO2CPS",
+        "site": "YO2CPS",
+        "lat": 45.863523648352725,
+        "lon": 22.89565117516746,
+        "type": "OpenWebRX",
+        "version": "1.2.123"
+      },
+      "band": "30m",
+      "ft8_decodes_total": 11,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 67.78,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://yo2cps.go.ro:8073/",
+        "label": "YO2CPS",
+        "site": "YO2CPS",
+        "lat": 45.863523648352725,
+        "lon": 22.89565117516746,
+        "type": "OpenWebRX",
+        "version": "1.2.123"
+      },
+      "band": "20m",
+      "ft8_decodes_total": 55444,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 67.78,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "http://yo2cps.go.ro:8073/",
+        "label": "YO2CPS",
+        "site": "YO2CPS",
+        "lat": 45.863523648352725,
+        "lon": 22.89565117516746,
+        "type": "OpenWebRX",
+        "version": "1.2.123"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 3356,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 67.78,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://14alt266.freeboxos.fr/openwebrx/",
+        "label": "14ALT266",
+        "site": "14ALT266",
+        "lat": 43.6228932497094,
+        "lon": 7.04648735875531,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "160m",
+      "ft8_decodes_total": 76,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.14,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://14alt266.freeboxos.fr/openwebrx/",
+        "label": "14ALT266",
+        "site": "14ALT266",
+        "lat": 43.6228932497094,
+        "lon": 7.04648735875531,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "80m",
+      "ft8_decodes_total": 1323,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.14,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://14alt266.freeboxos.fr/openwebrx/",
+        "label": "14ALT266",
+        "site": "14ALT266",
+        "lat": 43.6228932497094,
+        "lon": 7.04648735875531,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 21717,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.14,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://14alt266.freeboxos.fr/openwebrx/",
+        "label": "14ALT266",
+        "site": "14ALT266",
+        "lat": 43.6228932497094,
+        "lon": 7.04648735875531,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "30m",
+      "ft8_decodes_total": 6219,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.14,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://14alt266.freeboxos.fr/openwebrx/",
+        "label": "14ALT266",
+        "site": "14ALT266",
+        "lat": 43.6228932497094,
+        "lon": 7.04648735875531,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 3382,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.14,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://fullerton.w6mfb.com/",
+        "label": "W6MFB/FULLERTON",
+        "site": "W6MFB/FULLERTON",
+        "lat": 33.861090595913474,
+        "lon": -117.88901509985612,
+        "type": "OpenWebRX",
+        "version": "1.2.119"
+      },
+      "band": "60m",
+      "ft8_decodes_total": 60,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.25,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://fullerton.w6mfb.com/",
+        "label": "W6MFB/FULLERTON",
+        "site": "W6MFB/FULLERTON",
+        "lat": 33.861090595913474,
+        "lon": -117.88901509985612,
+        "type": "OpenWebRX",
+        "version": "1.2.119"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 56774,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.25,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://fullerton.w6mfb.com/",
+        "label": "W6MFB/FULLERTON",
+        "site": "W6MFB/FULLERTON",
+        "lat": 33.861090595913474,
+        "lon": -117.88901509985612,
+        "type": "OpenWebRX",
+        "version": "1.2.119"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 582,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.25,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://fullerton.w6mfb.com/",
+        "label": "W6MFB/FULLERTON",
+        "site": "W6MFB/FULLERTON",
+        "lat": 33.861090595913474,
+        "lon": -117.88901509985612,
+        "type": "OpenWebRX",
+        "version": "1.2.119"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 12,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.25,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://hasenberg01.openwebrx.ch/",
+        "label": "HASENBERG AG 700M SWITZERLAND (HB9HEH)",
+        "site": "HASENBERG AG 700M SWITZERLAND",
+        "lat": 47.37836,
+        "lon": 8.36445,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 949,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.99,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://kwrx.oberehueb.duckdns.org/",
+        "label": "RadioHill ObereHueb",
+        "site": "RadioHill ObereHueb",
+        "lat": 47.530124,
+        "lon": 8.636786,
+        "type": "OpenWebRX",
+        "version": "1.2.126"
+      },
+      "band": "30m",
+      "ft8_decodes_total": 1,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.05,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://openwebrx.kiwihasenberg.ch/",
+        "label": "HASENBERG AG 700M SWITZERLAND (HB9HEH)",
+        "site": "HASENBERG AG 700M SWITZERLAND (HB9HEH)",
+        "lat": 47.37836,
+        "lon": 8.36445,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 949,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.85,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://openwebrx.taild7742.ts.net/",
+        "label": "troyBORG",
+        "site": "troyBORG",
+        "lat": 41.81791988716215,
+        "lon": -90.53626338563126,
+        "type": "OpenWebRX",
+        "version": "1.2.119"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 5974,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.43,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://openwebrx.zl3bcj.duckdns.org/",
+        "label": "ZL3BCJ",
+        "site": "ZL3BCJ",
+        "lat": -43.8118,
+        "lon": 172.252,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 109183,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.6,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://openwebrx.zl3bcj.duckdns.org/",
+        "label": "ZL3BCJ",
+        "site": "ZL3BCJ",
+        "lat": -43.8118,
+        "lon": 172.252,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "30m",
+      "ft8_decodes_total": 491,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.6,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://openwebrx.zl3bcj.duckdns.org/",
+        "label": "ZL3BCJ",
+        "site": "ZL3BCJ",
+        "lat": -43.8118,
+        "lon": 172.252,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "20m",
+      "ft8_decodes_total": 23187,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.6,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://openwebrx.zl3bcj.duckdns.org/",
+        "label": "ZL3BCJ",
+        "site": "ZL3BCJ",
+        "lat": -43.8118,
+        "lon": 172.252,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "17m",
+      "ft8_decodes_total": 164,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.6,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://openwebrx.zl3bcj.duckdns.org/",
+        "label": "ZL3BCJ",
+        "site": "ZL3BCJ",
+        "lat": -43.8118,
+        "lon": 172.252,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "15m",
+      "ft8_decodes_total": 1133,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.6,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://openwebrx.zl3bcj.duckdns.org/",
+        "label": "ZL3BCJ",
+        "site": "ZL3BCJ",
+        "lat": -43.8118,
+        "lon": 172.252,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 8,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.6,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://owrxp.ng5p.com/",
+        "label": "NG5P",
+        "site": "NG5P",
+        "lat": 34.81,
+        "lon": -92.21,
+        "type": "OpenWebRX",
+        "version": "1.2.128"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 297,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.69,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://rannu.sdr.ee/",
+        "label": "Rannu SDR",
+        "site": "Rannu SDR",
+        "lat": 58.228333,
+        "lon": 26.123333,
+        "type": "OpenWebRX",
+        "version": "1.2.126"
+      },
+      "band": "20m",
+      "ft8_decodes_total": 96,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.1,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://rannu.sdr.ee/",
+        "label": "Rannu SDR",
+        "site": "Rannu SDR",
+        "lat": 58.228333,
+        "lon": 26.123333,
+        "type": "OpenWebRX",
+        "version": "1.2.126"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 7,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.1,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://rx.kd0bqs.com/",
+        "label": "KD0BQS",
+        "site": "KD0BQS",
+        "lat": 38.424657102434004,
+        "lon": -90.42908669772822,
+        "type": "OpenWebRX",
+        "version": "1.2.71"
+      },
+      "band": "80m",
+      "ft8_decodes_total": 3,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.24,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr-1.giarel.li/",
+        "label": "FR08YG - Montcy-Saint-Pierre",
+        "site": "FR08YG - Montcy-Saint-Pierre",
+        "lat": 49.7734575233212,
+        "lon": 4.73673122588266,
+        "type": "OpenWebRX",
+        "version": "1.2.125"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 50,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 67.74,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr-serpuhov.ru/",
+        "label": "Серпуховский WEB SDR",
+        "site": "Серпуховский WEB SDR",
+        "lat": 54.917727384972494,
+        "lon": 37.427252188946035,
+        "type": "OpenWebRX",
+        "version": "1.2.119"
+      },
+      "band": "160m",
+      "ft8_decodes_total": 16041,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.36,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr-serpuhov.ru/",
+        "label": "Серпуховский WEB SDR",
+        "site": "Серпуховский WEB SDR",
+        "lat": 54.917727384972494,
+        "lon": 37.427252188946035,
+        "type": "OpenWebRX",
+        "version": "1.2.119"
+      },
+      "band": "15m",
+      "ft8_decodes_total": 277,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.36,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr-serpuhov.ru/",
+        "label": "Серпуховский WEB SDR",
+        "site": "Серпуховский WEB SDR",
+        "lat": 54.917727384972494,
+        "lon": 37.427252188946035,
+        "type": "OpenWebRX",
+        "version": "1.2.119"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 7573,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.36,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.acuanticopower.com/",
+        "label": "SDR Pirineo - acuanticopower.com",
+        "site": "SDR Pirineo - acuanticopower.com",
+        "lat": 42.354,
+        "lon": 1.45,
+        "type": "OpenWebRX",
+        "version": "1.2.104"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 916,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 67.88,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.autumnishere.dev/",
+        "label": "[KM7HJA] Treasure Valley SDR (VHF + HF)",
+        "site": "[KM7HJA] Treasure Valley SDR (VHF + HF)",
+        "lat": 43.598685,
+        "lon": -116.187425,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "80m",
+      "ft8_decodes_total": 1304,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.35,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.autumnishere.dev/",
+        "label": "[KM7HJA] Treasure Valley SDR (VHF + HF)",
+        "site": "[KM7HJA] Treasure Valley SDR (VHF + HF)",
+        "lat": 43.598685,
+        "lon": -116.187425,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "60m",
+      "ft8_decodes_total": 1793,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.35,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.autumnishere.dev/",
+        "label": "[KM7HJA] Treasure Valley SDR (VHF + HF)",
+        "site": "[KM7HJA] Treasure Valley SDR (VHF + HF)",
+        "lat": 43.598685,
+        "lon": -116.187425,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 6171,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.35,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.autumnishere.dev/",
+        "label": "[KM7HJA] Treasure Valley SDR (VHF + HF)",
+        "site": "[KM7HJA] Treasure Valley SDR (VHF + HF)",
+        "lat": 43.598685,
+        "lon": -116.187425,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "20m",
+      "ft8_decodes_total": 110778,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.35,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.autumnishere.dev/",
+        "label": "[KM7HJA] Treasure Valley SDR (VHF + HF)",
+        "site": "[KM7HJA] Treasure Valley SDR (VHF + HF)",
+        "lat": 43.598685,
+        "lon": -116.187425,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 847,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.35,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.dot.mk/",
+        "label": "Z32VSA",
+        "site": "Z32VSA",
+        "lat": 41.99424037944422,
+        "lon": 21.444073526536734,
+        "type": "OpenWebRX",
+        "version": "1.2.126"
+      },
+      "band": "160m",
+      "ft8_decodes_total": 2,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 67.97,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.dot.mk/",
+        "label": "Z32VSA",
+        "site": "Z32VSA",
+        "lat": 41.99424037944422,
+        "lon": 21.444073526536734,
+        "type": "OpenWebRX",
+        "version": "1.2.126"
+      },
+      "band": "80m",
+      "ft8_decodes_total": 2,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 67.97,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.dot.mk/",
+        "label": "Z32VSA",
+        "site": "Z32VSA",
+        "lat": 41.99424037944422,
+        "lon": 21.444073526536734,
+        "type": "OpenWebRX",
+        "version": "1.2.126"
+      },
+      "band": "30m",
+      "ft8_decodes_total": 4,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 67.97,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.dot.mk/",
+        "label": "Z32VSA",
+        "site": "Z32VSA",
+        "lat": 41.99424037944422,
+        "lon": 21.444073526536734,
+        "type": "OpenWebRX",
+        "version": "1.2.126"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 1,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 67.97,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.ellievision.net/",
+        "label": "Ellen’s Shack | Open the banner for live spots and radio logs",
+        "site": "Ellen’s Shack | Open the banner for live spots and radio logs",
+        "lat": 40.86171586722456,
+        "lon": -80.2825178598314,
+        "type": "OpenWebRX",
+        "version": "1.2.115"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 951,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 67.91,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.ellievision.net/",
+        "label": "Ellen’s Shack | Open the banner for live spots and radio logs",
+        "site": "Ellen’s Shack | Open the banner for live spots and radio logs",
+        "lat": 40.86171586722456,
+        "lon": -80.2825178598314,
+        "type": "OpenWebRX",
+        "version": "1.2.115"
+      },
+      "band": "17m",
+      "ft8_decodes_total": 7,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 67.91,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.furrysdr.de/",
+        "label": "<a class=\"highlight\">FurrySDR</a>",
+        "site": "<a class=\"highlight\">FurrySDR</a>",
+        "lat": 52.5258331127553,
+        "lon": 9.72564336846846,
+        "type": "OpenWebRX",
+        "version": "1.2.125"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 6,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 67.73,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.henry.lan64.de/",
+        "label": "Henrys SDR",
+        "site": "Henrys SDR",
+        "lat": 50.9450462296244,
+        "lon": 13.6703080233291,
+        "type": "OpenWebRX",
+        "version": "1.2.119"
+      },
+      "band": "20m",
+      "ft8_decodes_total": 15,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 67.66,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.iz7qeb.keenetic.link/",
+        "label": "IZ7QEB WebReceiver 0 - 30 MHz  ---  www.iz7qeb.it",
+        "site": "IZ7QEB WebReceiver 0 - 30 MHz  ---  www.iz7qeb.it",
+        "lat": 40.54685729807277,
+        "lon": 17.97090309310987,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "80m",
+      "ft8_decodes_total": 37,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 67.63,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.iz7qeb.keenetic.link/",
+        "label": "IZ7QEB WebReceiver 0 - 30 MHz  ---  www.iz7qeb.it",
+        "site": "IZ7QEB WebReceiver 0 - 30 MHz  ---  www.iz7qeb.it",
+        "lat": 40.54685729807277,
+        "lon": 17.97090309310987,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 3124,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 67.63,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.iz7qeb.keenetic.link/",
+        "label": "IZ7QEB WebReceiver 0 - 30 MHz  ---  www.iz7qeb.it",
+        "site": "IZ7QEB WebReceiver 0 - 30 MHz  ---  www.iz7qeb.it",
+        "lat": 40.54685729807277,
+        "lon": 17.97090309310987,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "20m",
+      "ft8_decodes_total": 686,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 67.63,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.labre-pe.org.br/",
+        "label": "Liga de Amadores Brasileiros de Rádio Emissão - LABRE-PE",
+        "site": "Liga de Amadores Brasileiros de Rádio Emissão - LABRE-PE",
+        "lat": -8.13672526935597,
+        "lon": -34.9138554837633,
+        "type": "OpenWebRX",
+        "version": "1.2.122"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 6396,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 67.67,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.on.vek.io/",
+        "label": "Velingrad SDR",
+        "site": "Velingrad SDR",
+        "lat": 42.034885619522036,
+        "lon": 23.987024070635268,
+        "type": "OpenWebRX",
+        "version": "1.2.115"
+      },
+      "band": "80m",
+      "ft8_decodes_total": 14635,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 67.88,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.on.vek.io/",
+        "label": "Velingrad SDR",
+        "site": "Velingrad SDR",
+        "lat": 42.034885619522036,
+        "lon": 23.987024070635268,
+        "type": "OpenWebRX",
+        "version": "1.2.115"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 279,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 67.88,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.pajadam.me/",
+        "label": "sdr.sp9arl.pl",
+        "site": "sdr.sp9arl.pl",
+        "lat": 50.430249446103076,
+        "lon": 18.837746464376014,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 2116,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 67.89,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.radarc.org/",
+        "label": "RADARC websdr 1",
+        "site": "RADARC websdr 1",
+        "lat": 51.44318833497072,
+        "lon": -0.7659959793090821,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "6m",
+      "ft8_decodes_total": 154,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.16,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.radarc.org/",
+        "label": "RADARC websdr 1",
+        "site": "RADARC websdr 1",
+        "lat": 51.44318833497072,
+        "lon": -0.7659959793090821,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 606,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.16,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.s59ekl.si/",
+        "label": "S59EKL",
+        "site": "S59EKL",
+        "lat": 46.356830335200236,
+        "lon": 15.120766413765745,
+        "type": "OpenWebRX",
+        "version": "1.2.2"
+      },
+      "band": "80m",
+      "ft8_decodes_total": 112,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.12,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.s59ekl.si/",
+        "label": "S59EKL",
+        "site": "S59EKL",
+        "lat": 46.356830335200236,
+        "lon": 15.120766413765745,
+        "type": "OpenWebRX",
+        "version": "1.2.2"
+      },
+      "band": "20m",
+      "ft8_decodes_total": 230337,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.12,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.s59ekl.si/",
+        "label": "S59EKL",
+        "site": "S59EKL",
+        "lat": 46.356830335200236,
+        "lon": 15.120766413765745,
+        "type": "OpenWebRX",
+        "version": "1.2.2"
+      },
+      "band": "15m",
+      "ft8_decodes_total": 366,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.12,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.s59ekl.si/",
+        "label": "S59EKL",
+        "site": "S59EKL",
+        "lat": 46.356830335200236,
+        "lon": 15.120766413765745,
+        "type": "OpenWebRX",
+        "version": "1.2.2"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 287,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.12,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.sp9ipz.pl/",
+        "label": "SP9IPZ Jaworzno",
+        "site": "SP9IPZ Jaworzno",
+        "lat": 50.2092291409071,
+        "lon": 19.356786259223,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "80m",
+      "ft8_decodes_total": 31201,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.41,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.sp9ipz.pl/",
+        "label": "SP9IPZ Jaworzno",
+        "site": "SP9IPZ Jaworzno",
+        "lat": 50.2092291409071,
+        "lon": 19.356786259223,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "60m",
+      "ft8_decodes_total": 17750,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.41,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.sp9ipz.pl/",
+        "label": "SP9IPZ Jaworzno",
+        "site": "SP9IPZ Jaworzno",
+        "lat": 50.2092291409071,
+        "lon": 19.356786259223,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 82529,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.41,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.sp9ipz.pl/",
+        "label": "SP9IPZ Jaworzno",
+        "site": "SP9IPZ Jaworzno",
+        "lat": 50.2092291409071,
+        "lon": 19.356786259223,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "20m",
+      "ft8_decodes_total": 13801,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.41,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.sp9ipz.pl/",
+        "label": "SP9IPZ Jaworzno",
+        "site": "SP9IPZ Jaworzno",
+        "lat": 50.2092291409071,
+        "lon": 19.356786259223,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 39697,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.41,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.sp9ipz.pl/",
+        "label": "SP9IPZ Jaworzno",
+        "site": "SP9IPZ Jaworzno",
+        "lat": 50.2092291409071,
+        "lon": 19.356786259223,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 406,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.41,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.surrealservers.net/",
+        "label": "Receiver",
+        "site": "Receiver",
+        "lat": 37.39837482690734,
+        "lon": -79.18129126969339,
+        "type": "OpenWebRX",
+        "version": "1.2.121"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 2,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 67.61,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.we6k.com/",
+        "label": "WE6K San Francisco",
+        "site": "WE6K San Francisco",
+        "lat": 37.75596313629044,
+        "lon": -122.43365147910762,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "40m",
+      "ft8_decodes_total": 317,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.66,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.we6k.com/",
+        "label": "WE6K San Francisco",
+        "site": "WE6K San Francisco",
+        "lat": 37.75596313629044,
+        "lon": -122.43365147910762,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "17m",
+      "ft8_decodes_total": 11210,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.66,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr.we6k.com/",
+        "label": "WE6K San Francisco",
+        "site": "WE6K San Francisco",
+        "lat": 37.75596313629044,
+        "lon": -122.43365147910762,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "12m",
+      "ft8_decodes_total": 854,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.66,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sdr2forbord.la4m.no/",
+        "label": "LA4M",
+        "site": "LA4M",
+        "lat": 63.524932,
+        "lon": 10.892206,
+        "type": "OpenWebRX",
+        "version": "1.2.128"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 91,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.69,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sp6pwt.club/",
+        "label": "SP6PWT SDR",
+        "site": "SP6PWT SDR",
+        "lat": 51.103383,
+        "lon": 17.086449,
+        "type": "OpenWebRX",
+        "version": "1.2.119"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 331,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.74,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sp6pwt.club/",
+        "label": "SP6PWT SDR",
+        "site": "SP6PWT SDR",
+        "lat": 51.103383,
+        "lon": 17.086449,
+        "type": "OpenWebRX",
+        "version": "1.2.119"
+      },
+      "band": "23cm",
+      "ft8_decodes_total": 9,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.74,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://sv3dvo.ddns.net/",
+        "label": "SV3DVO  Center City Patras",
+        "site": "SV3DVO  Center City Patras",
+        "lat": 38.2421823663868,
+        "lon": 21.7415991658915,
+        "type": "OpenWebRX",
+        "version": "1.2.112"
+      },
+      "band": "160m",
+      "ft8_decodes_total": 313,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 67.77,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://ub3aww.ru:8073/",
+        "label": "[UB3AWW-SDR] (sdr.souyz.netcraze.pro)",
+        "site": "[UB3AWW-SDR] (sdr.souyz.netcraze.pro)",
+        "lat": 55.9462022066859,
+        "lon": 36.50373666149901,
+        "type": "OpenWebRX",
+        "version": "1.2.113"
+      },
+      "band": "20m",
+      "ft8_decodes_total": 65200,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.6,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://ub3aww.ru:8073/",
+        "label": "[UB3AWW-SDR] (sdr.souyz.netcraze.pro)",
+        "site": "[UB3AWW-SDR] (sdr.souyz.netcraze.pro)",
+        "lat": 55.9462022066859,
+        "lon": 36.50373666149901,
+        "type": "OpenWebRX",
+        "version": "1.2.113"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 42331,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.6,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://ub3aww.ru:8073/",
+        "label": "[UB3AWW-SDR] (sdr.souyz.netcraze.pro)",
+        "site": "[UB3AWW-SDR] (sdr.souyz.netcraze.pro)",
+        "lat": 55.9462022066859,
+        "lon": 36.50373666149901,
+        "type": "OpenWebRX",
+        "version": "1.2.113"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 140,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.6,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://vosrx.nl/",
+        "label": "<font color=gold>Vos RX   **Antenne richting:  220°, voor feedback of richting veranderen: Rxreport@live.nl** </font>",
+        "site": "<font color=gold>Vos RX   **Antenne richting:  220°, voor feedback of richting veranderen: Rxreport@live.nl** </font>",
+        "lat": 53.3627691479221,
+        "lon": 6.1790743615517,
+        "type": "OpenWebRX",
+        "version": "1.2.58"
+      },
+      "band": "160m",
+      "ft8_decodes_total": 3010,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.76,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://vosrx.nl/",
+        "label": "<font color=gold>Vos RX   **Antenne richting:  220°, voor feedback of richting veranderen: Rxreport@live.nl** </font>",
+        "site": "<font color=gold>Vos RX   **Antenne richting:  220°, voor feedback of richting veranderen: Rxreport@live.nl** </font>",
+        "lat": 53.3627691479221,
+        "lon": 6.1790743615517,
+        "type": "OpenWebRX",
+        "version": "1.2.58"
+      },
+      "band": "80m",
+      "ft8_decodes_total": 2,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.76,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://vosrx.nl/",
+        "label": "<font color=gold>Vos RX   **Antenne richting:  220°, voor feedback of richting veranderen: Rxreport@live.nl** </font>",
+        "site": "<font color=gold>Vos RX   **Antenne richting:  220°, voor feedback of richting veranderen: Rxreport@live.nl** </font>",
+        "lat": 53.3627691479221,
+        "lon": 6.1790743615517,
+        "type": "OpenWebRX",
+        "version": "1.2.58"
+      },
+      "band": "60m",
+      "ft8_decodes_total": 34,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.76,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://vosrx.nl/",
+        "label": "<font color=gold>Vos RX   **Antenne richting:  220°, voor feedback of richting veranderen: Rxreport@live.nl** </font>",
+        "site": "<font color=gold>Vos RX   **Antenne richting:  220°, voor feedback of richting veranderen: Rxreport@live.nl** </font>",
+        "lat": 53.3627691479221,
+        "lon": 6.1790743615517,
+        "type": "OpenWebRX",
+        "version": "1.2.58"
+      },
+      "band": "10m",
+      "ft8_decodes_total": 792,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.76,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://vosrx.nl/",
+        "label": "<font color=gold>Vos RX   **Antenne richting:  220°, voor feedback of richting veranderen: Rxreport@live.nl** </font>",
+        "site": "<font color=gold>Vos RX   **Antenne richting:  220°, voor feedback of richting veranderen: Rxreport@live.nl** </font>",
+        "lat": 53.3627691479221,
+        "lon": 6.1790743615517,
+        "type": "OpenWebRX",
+        "version": "1.2.58"
+      },
+      "band": "4m",
+      "ft8_decodes_total": 1,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.76,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://websdr.do1tob.de/",
+        "label": "DO1TOB WebSDR 2m/70cm",
+        "site": "DO1TOB WebSDR 2m/70cm",
+        "lat": 51.5951893950741,
+        "lon": 8.6301670614654,
+        "type": "OpenWebRX",
+        "version": "1.2.130"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 5078,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.47,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    },
+    {
+      "receiver": {
+        "url": "https://websdr.ok1pkr.radio/",
+        "label": "LOMNICE",
+        "site": "LOMNICE",
+        "lat": 50.529087458840955,
+        "lon": 15.36743230648684,
+        "type": "OpenWebRX",
+        "version": "1.2.2"
+      },
+      "band": "2m",
+      "ft8_decodes_total": 19257,
+      "ft8_decodes_per_minute": 0.0,
+      "traffic_sample_seconds": 68.47,
+      "capabilities": {
+        "audio_stream": "openwebrx-websocket",
+        "decodes": "openwebrx-websocket",
+        "ft8_decoder": "openwebrx-wsjt-metric",
+        "stream_probe": "audio-samples-received"
+      }
+    }
+  ]
+}
