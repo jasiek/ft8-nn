@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Build a directory of public OpenWebRX receivers with FT8 decoding.
+"""Build a directory of public receivers with FT8 decoding.
 
-Receiverbook's map is the source of receiver identity and location.  Each
-OpenWebRX receiver is then contacted at its public ``metrics.json`` endpoint.
+UberSDR's public API is the default source. Legacy Receiverbook HTML remains
+accepted explicitly for OpenWebRX directory rebuilds. Each legacy OpenWebRX
+receiver is then contacted at its public ``metrics.json`` endpoint.
 For every advertised FT8 band, the script also opens the receiver WebSocket,
 selects a profile covering the FT8 dial frequency, starts its demodulator, and
 waits for actual audio samples.  An entry is emitted only after that complete
@@ -33,12 +34,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tools.live_compare import FT8_FREQUENCIES, OpenWebRXClient
+from tools.live_compare import FT8_FREQUENCIES, OpenWebRXClient, directory_entries
 
 
-SOURCE_URL = "https://www.receiverbook.de/map"
+SOURCE_URL = "https://instances.ubersdr.org/api/instances?conditions=true"
 DEFAULT_OUTPUT = ROOT / "datasets" / "receiverbook-directory.json"
-USER_AGENT = "ft8-nn receiverbook directory builder/1"
+USER_AGENT = "ft8-nn receiver directory builder/2"
 BAND_RE = re.compile(r"^(?:\d+(?:\.\d+)?)(?:m|cm|mm)$", re.IGNORECASE)
 
 
@@ -229,9 +230,31 @@ def probe(
 
 def build(source: str, timeout: float, workers: int, traffic_window: float = 60.0) -> tuple[dict[str, Any], list[str]]:
     if urllib.parse.urlparse(source).scheme in ("http", "https"):
-        html = fetch(source, timeout).decode("utf-8", "replace")
+        content = fetch(source, timeout).decode("utf-8", "replace")
     else:
-        html = Path(source).read_text(encoding="utf-8")
+        content = Path(source).read_text(encoding="utf-8")
+    try:
+        api_document = json.loads(content)
+    except json.JSONDecodeError:
+        api_document = None
+    if isinstance(api_document, dict) and isinstance(api_document.get("instances"), list):
+        entries = directory_entries(api_document)
+        return (
+            {
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "source": source,
+                "criteria": {
+                    "internet_accessible": "UberSDR directory reports the instance online",
+                    "ft8_decoder_installed": "digital_decodes is enabled",
+                    "audio_and_decodes_streamable": "UberSDR Opus and digital-spots WebSocket APIs",
+                    "traffic_order": "descending current FT8-band SNR",
+                    "traffic_measurement": "PSK Reporter daily count from the UberSDR directory snapshot",
+                },
+                "entries": entries,
+            },
+            [],
+        )
+    html = content
     receivers = parse_receiverbook(html)
 
     before, errors = take_metrics_snapshot(receivers, timeout, workers)
@@ -288,7 +311,7 @@ def build(source: str, timeout: float, workers: int, traffic_window: float = 60.
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", default=SOURCE_URL, help="Receiverbook map URL or saved HTML file")
+    parser.add_argument("--source", default=SOURCE_URL, help="UberSDR API URL, saved JSON, or Receiverbook HTML")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--timeout", type=float, default=8.0, help="per-request timeout in seconds")
     parser.add_argument("--workers", type=int, default=32)

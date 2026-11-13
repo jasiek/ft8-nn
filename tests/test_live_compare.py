@@ -90,8 +90,48 @@ def test_remote_absolute_frequency_is_normalized_to_audio_offset():
     assert MODULE.audio_frequency(1997, 7_074_000) == 1997
 
 
+def test_ubersdr_frame_time_reads_nanoseconds_and_rejects_bad_values():
+    payload = (1_700_000_000_250_000_000).to_bytes(8, "little")
+    assert MODULE.ubersdr_frame_time(payload, 1_700_000_000.5) == 1_700_000_000.25
+    assert MODULE.ubersdr_frame_time(payload, 1_800_000_000.0) == 1_800_000_000.0
+
+
+def test_receiver_ui_returns_to_picker_after_comparison(monkeypatch):
+    first = {"receiver": {"url": "https://one/"}}
+    second = {"receiver": {"url": "https://two/"}}
+    choices = iter([first, second, None])
+    opened = []
+    monkeypatch.setattr(MODULE, "pick_receiver", lambda _screen, _entries: next(choices))
+    monkeypatch.setattr(MODULE, "run_comparison", lambda _screen, entry, _args: opened.append(entry))
+    assert MODULE.receiver_ui(None, [first, second], object())
+    assert opened == [first, second]
+
+
 def test_metrics_url_preserves_receiver_subpath():
     assert MODULE.metrics_url("https://example.test/openwebrx/") == "https://example.test/openwebrx/metrics.json"
+
+
+def test_ubersdr_directory_response_is_normalized():
+    document = {
+        "instances": [{
+            "is_online": True,
+            "digital_decodes": True,
+            "public_url": "https://example.tunnel.ubersdr.org/",
+            "callsign": "K1ABC",
+            "location": "Example",
+            "latitude": 1,
+            "longitude": 2,
+            "version": "0.1.68",
+            "tuning_range": {"min_frequency": 10_000, "max_frequency": 30_000_000},
+            "band_conditions": {"40m": 22.5, "6m": 30},
+            "pskreporter_rank": {"reports": {"40m": {"day": 1234}}},
+        }]
+    }
+    entries = MODULE.directory_entries(document)
+    assert len(entries) == 1
+    assert entries[0]["band"] == "40m"
+    assert entries[0]["ft8_decodes_total"] == 1234
+    assert entries[0]["receiver"]["type"] == "UberSDR"
 
 
 def test_streaming_view_shows_metrics_link_and_decode_snapshot():
@@ -119,6 +159,6 @@ def test_streaming_view_shows_metrics_link_and_decode_snapshot():
         "receiver": {"url": "https://example.test/rx/", "label": "Example"},
     }
     MODULE.draw_comparison(screen, entry, MODULE.ComparisonState())
-    assert screen.lines[2] == "Metrics: https://example.test/rx/metrics.json"
+    assert screen.lines[2] == "Directory: https://example.test/rx/metrics.json"
     assert screen.lines[3] == "FT8 traffic at directory build: 42.50/min  total since restart: 1,234,567"
     assert "42.50/min" in MODULE.entry_label(entry)

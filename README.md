@@ -175,27 +175,27 @@ the M1 Pro. Other platforms and smaller machines have not been tried.
 
 ### Live receiver directory and comparison
 
-`collect/receiverbook_directory.py` builds `datasets/receiverbook-directory.json` from the OpenWebRX receivers
-listed by [Receiverbook](https://www.receiverbook.de/). A receiver-band pair is included only when its
-`metrics.json` advertises an FT8 decoder, a public WebSocket session can select a profile covering the standard
-FT8 dial frequency, and that session actually delivers audio samples. The builder takes two `metrics.json`
-snapshots 60 seconds apart and records the per-band counter delta as `ft8_decodes_per_minute`; the directory is
-sorted from highest to lowest measured rate. It also retains the second snapshot's cumulative counter as
-`ft8_decodes_total` for context. A counter reset or unavailable first snapshot produces a zero rate. Use
-`--traffic-window SECONDS` to change the sampling interval; rates are normalized to one minute.
+By default, `tools/live_compare.py` reads the live public-instance API from
+[UberSDR](https://instances.ubersdr.org/), keeps online receivers that advertise digital decoding, and offers
+their supported FT8 bands. It consumes the selected receiver's 12 kHz Opus stream and matching FT8 messages from
+UberSDR's digital-spot WebSocket. `libopus` must be available at runtime.
+
+`collect/receiverbook_directory.py` can snapshot that API to `datasets/receiverbook-directory.json`. It also
+continues to accept a Receiverbook map URL or saved HTML through `--source`; for that legacy OpenWebRX input it
+performs the active stream probes and 60-second traffic measurement described by `--traffic-window`.
 
 ```sh
-python3 collect/receiverbook_directory.py                 # measure 60 s traffic, then verify streams
+python3 collect/receiverbook_directory.py                 # optional UberSDR directory snapshot
 make -C c                                                 # build libft8nn if needed
 python3 tools/live_compare.py                             # choose a receiver and compare live decodes
 ```
 
 `live_compare.py` presents a curses receiver picker with arrow-key navigation and substring filtering. Once a
-receiver-band pair is selected, it consumes the same OpenWebRX audio and remote FT8-decoder messages, divides the
+receiver-band pair is selected, it consumes the same UberSDR audio and remote FT8-decoder messages, divides the
 audio into UTC FT8 slots, and decodes it locally with `libft8nn`. Local and remote results are shown in two
 frequency-ordered columns: matching messages share a row, while a decode found by only one side has a blank in
-the other column. The picker and streaming header show the measured FT8 decodes per minute; the header also shows
-the receiver's `metrics.json` URL and cumulative counter snapshot. Press `q` to stop the comparison.
+the other column. The picker shows each receiver's current per-band SNR when supplied by the directory, and the
+streaming header links back to the UberSDR directory. Press `q` to stop the comparison.
 
 ### Script reference
 
@@ -222,7 +222,7 @@ the receiver's `metrics.json` URL and cumulative counter snapshot. Press `q` to 
 | `tools/jtdx_build.py` | Clones and builds the JTDX FT8 decoder together with the repository's WAV-file driver. |
 | `tools/jtdx_ft8_file.f90` | Provides a command-line WAV-file front end for JTDX's otherwise shared-memory-only FT8 decoder. |
 | `tools/jtdx_run.py` | Runs JTDX over validation stations in chronological order and writes output for verification. |
-| `tools/live_compare.py` | Selects a verified OpenWebRX receiver and compares local ft8nn and remote FT8 decodes live in aligned columns. |
+| `tools/live_compare.py` | Selects a public UberSDR receiver and compares local ft8nn and remote FT8 decodes live in aligned columns. |
 | `tools/make_message_pool.py` | Uses WSJT-X `ft8code` to generate realistic FT8 messages and their 77-bit payloads for benchmarks. |
 | `tools/make_noise_bank.py` | Builds a training bank of real residual receiver noise after subtracting known decodes from recorded slots. |
 | `tools/mini.sh` | Synchronizes code, data, and results with a configured Mac mini and runs experiments there. |

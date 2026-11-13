@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Compare ft8-nn with an OpenWebRX FT8 decoder on the same live audio.
+"""Compare ft8-nn with an UberSDR FT8 decoder on the same live audio.
 
 The receiver picker supports arrow keys and live substring filtering.  After a
-receiver/band pair is selected, this client tunes its OpenWebRX profile to the
+receiver/band pair is selected, this client tunes its UberSDR stream to the
 standard FT8 dial frequency, receives the server's 12 kHz audio and FT8
 decodes, decodes each UTC slot with libft8nn, and displays the results in two
 frequency-ordered columns.
@@ -22,6 +22,7 @@ import array
 import base64
 import collections
 import ctypes
+import ctypes.util
 import hashlib
 import json
 import os
@@ -36,6 +37,8 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+import uuid
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -48,7 +51,7 @@ except ImportError:  # Not included with the standard CPython distribution on Wi
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_DIRECTORY = ROOT / "datasets" / "receiverbook-directory.json"
+DEFAULT_DIRECTORY = "https://instances.ubersdr.org/api/instances?conditions=true"
 DEFAULT_MODEL = ROOT / "models" / "v3" / "ft8nn.onnx"
 FT8_FREQUENCIES = {
     "2190m": 136_000,
@@ -138,7 +141,10 @@ def filter_entries(entries: list[dict[str, Any]], query: str) -> list[dict[str, 
 def entry_label(entry: dict[str, Any]) -> str:
     receiver = entry["receiver"]
     rate = entry.get("ft8_decodes_per_minute")
+    snr = entry.get("band_snr")
     traffic = f"  {rate:,.2f}/min" if isinstance(rate, (int, float)) else ""
+    if not traffic and isinstance(snr, (int, float)):
+        traffic = f"  SNR {snr:+.1f} dB"
     return (
         f"{entry['band']:>5}{traffic}  "
         f"{receiver.get('label') or receiver.get('site') or receiver['url']}  [{receiver['url']}]"
@@ -158,6 +164,7 @@ def pick_receiver(screen: Any, entries: list[dict[str, Any]]) -> dict[str, Any] 
     if curses is None:
         raise RuntimeError("the receiver picker requires Python curses")
     hide_cursor()
+    screen.nodelay(False)
     screen.keypad(True)
     query = ""
     selected = 0
@@ -430,6 +437,15 @@ def audio_frequency(value: Any, dial: int) -> float:
     return frequency - dial if frequency > 100_000 else frequency
 
 
+def ubersdr_frame_time(payload: bytes, fallback: float) -> float:
+    """Return UberSDR's nanosecond audio timestamp, rejecting implausible values."""
+    if len(payload) >= 8:
+        timestamp = struct.unpack_from("<Q", payload)[0] / 1_000_000_000
+        if abs(timestamp - fallback) < 300:
+            return timestamp
+    return fallback
+
+
 def resolve_receiver_url(url: str, timeout: float) -> str:
     request = urllib.request.Request(url, headers={"User-Agent": "ft8-nn-live-compare/1"})
     with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -439,6 +455,246 @@ def resolve_receiver_url(url: str, timeout: float) -> str:
 def metrics_url(receiver_url: str) -> str:
     """Return the metrics endpoint while preserving an OpenWebRX subpath."""
     return urllib.parse.urljoin(receiver_url.rstrip("/") + "/", "metrics.json")
+
+
+def directory_entries(document: dict[str, Any]) -> list[dict[str, Any]]:
+    """Normalize an UberSDR API response or a legacy generated directory."""
+    if isinstance(document.get("entries"), list):
+        return document["entries"]
+    entries = []
+    for instance in document.get("instances", []):
+        if not instance.get("is_online") or not instance.get("digital_decodes") or not instance.get("public_url"):
+            continue
+        tuning = instance.get("tuning_range") or {}
+        minimum = tuning.get("min_frequency", 10_000)
+        maximum = tuning.get("max_frequency", 30_000_000)
+        reports = (instance.get("pskreporter_rank") or {}).get("reports") or {}
+        conditions = instance.get("band_conditions") or {}
+        for band in set(reports) | set(conditions):
+            dial = FT8_FREQUENCIES.get(band)
+            if dial is None or not minimum <= dial <= maximum:
+                continue
+            report = reports.get(band) or {}
+            entries.append(
+                {
+                    "receiver": {
+                        "url": instance["public_url"],
+                        "label": instance.get("callsign") or instance.get("name") or instance["public_url"],
+                        "site": instance.get("location", ""),
+                        "lat": instance.get("latitude"),
+                        "lon": instance.get("longitude"),
+                        "type": "UberSDR",
+                        "version": instance.get("version"),
+                    },
+                    "band": band,
+                    "ft8_decodes_total": report.get("day"),
+                    "band_snr": conditions.get(band),
+                    "capabilities": {
+                        "audio_stream": "ubersdr-opus-websocket",
+                        "decodes": "ubersdr-dxcluster-websocket",
+                        "ft8_decoder": "ubersdr-digital-decodes",
+                    },
+                }
+            )
+    return sorted(
+        entries,
+        key=lambda entry: (
+            -(entry.get("band_snr") if isinstance(entry.get("band_snr"), (int, float)) else -999),
+            entry["receiver"]["url"],
+            entry["band"],
+        ),
+    )
+
+
+def load_directory(source: str, timeout: float) -> dict[str, Any]:
+    if urllib.parse.urlparse(source).scheme in ("http", "https"):
+        request = urllib.request.Request(source, headers={"User-Agent": "ft8-nn-live-compare/1"})
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.load(response)
+    return json.loads(Path(source).read_text())
+
+
+class OpusDecoder:
+    """Thin libopus wrapper for UberSDR's header-plus-raw-Opus frames."""
+
+    def __init__(self, sample_rate: int, channels: int) -> None:
+        names = [ctypes.util.find_library("opus")]
+        if sys.platform == "darwin":
+            names.extend(["/opt/local/lib/libopus.0.dylib", "/opt/homebrew/lib/libopus.dylib"])
+        self.lib = None
+        for name in names:
+            if not name:
+                continue
+            try:
+                self.lib = ctypes.CDLL(name)
+                break
+            except OSError:
+                continue
+        if self.lib is None:
+            raise RuntimeError("libopus is required for UberSDR audio")
+        self.lib.opus_decoder_create.argtypes = [ctypes.c_int32, ctypes.c_int, ctypes.POINTER(ctypes.c_int)]
+        self.lib.opus_decoder_create.restype = ctypes.c_void_p
+        self.lib.opus_decode.argtypes = [
+            ctypes.c_void_p, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32,
+            ctypes.POINTER(ctypes.c_int16), ctypes.c_int, ctypes.c_int,
+        ]
+        self.lib.opus_decode.restype = ctypes.c_int
+        self.lib.opus_decoder_destroy.argtypes = [ctypes.c_void_p]
+        error = ctypes.c_int()
+        self.decoder = self.lib.opus_decoder_create(sample_rate, channels, ctypes.byref(error))
+        if not self.decoder or error.value:
+            raise RuntimeError(f"opus_decoder_create failed: {error.value}")
+        self.channels = channels
+
+    def decode(self, packet: bytes) -> array.array:
+        encoded = (ctypes.c_ubyte * len(packet)).from_buffer_copy(packet)
+        pcm = (ctypes.c_int16 * (5760 * self.channels))()
+        frames = self.lib.opus_decode(self.decoder, encoded, len(packet), pcm, 5760, 0)
+        if frames < 0:
+            raise RuntimeError(f"opus_decode failed: {frames}")
+        result = array.array("h")
+        result.frombytes(bytes(pcm)[: frames * self.channels * 2])
+        return result
+
+    def close(self) -> None:
+        if self.decoder:
+            self.lib.opus_decoder_destroy(self.decoder)
+            self.decoder = None
+
+
+class UberSDRClient:
+    def __init__(
+        self,
+        url: str,
+        band: str,
+        on_audio: Callable[[array.array, float], None],
+        on_decode: Callable[[int, Decode], None],
+        on_status: Callable[[str], None],
+        timeout: float = 10.0,
+    ) -> None:
+        self.url = url.rstrip("/")
+        self.band = band
+        self.dial = FT8_FREQUENCIES[band]
+        self.on_audio = on_audio
+        self.on_decode = on_decode
+        self.on_status = on_status
+        self.timeout = timeout
+        self.session_id = str(uuid.uuid4())
+        self.audio_ws: WebSocket | None = None
+        self.spots_ws: WebSocket | None = None
+        self.decoder: OpusDecoder | None = None
+        self.threads: list[threading.Thread] = []
+        self.stop_event = threading.Event()
+        self.error: Exception | None = None
+        self.first_slot: int | None = None
+
+    def start(self) -> None:
+        self.first_slot = (int(time.time()) // 15 + 1) * 15
+        request = urllib.request.Request(
+            self.url + "/connection",
+            data=json.dumps({"user_session_id": self.session_id}).encode(),
+            headers={"Content-Type": "application/json", "User-Agent": "ft8-nn-live-compare/1"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            permission = json.load(response)
+        if not permission.get("allowed"):
+            raise RuntimeError(permission.get("reason", "connection rejected"))
+        parsed = urllib.parse.urlparse(self.url)
+        scheme = "wss" if parsed.scheme == "https" else "ws"
+        query = urllib.parse.urlencode(
+            {
+                "frequency": self.dial,
+                "mode": "usb",
+                "user_session_id": self.session_id,
+                "format": "opus",
+                "version": 3,
+            }
+        )
+        self.audio_ws = WebSocket(f"{scheme}://{parsed.netloc}/ws?{query}", self.timeout)
+        self.spots_ws = WebSocket(
+            f"{scheme}://{parsed.netloc}/ws/dxcluster?user_session_id={urllib.parse.quote(self.session_id)}",
+            self.timeout,
+        )
+        self.audio_ws.send_json(
+            {"type": "tune", "frequency": self.dial, "mode": "usb", "bandwidthLow": 0, "bandwidthHigh": 3000}
+        )
+        self.spots_ws.send_json({"type": "subscribe_digital_spots"})
+        self.threads = [
+            threading.Thread(target=self._audio_loop, name="ubersdr-audio", daemon=True),
+            threading.Thread(target=self._spots_loop, name="ubersdr-spots", daemon=True),
+        ]
+        for thread in self.threads:
+            thread.start()
+        self.on_status(
+            f"streaming UberSDR at {self.dial / 1e6:.6f} MHz; "
+            "collecting first complete local slot (up to 30 s)"
+        )
+
+    def _fail(self, error: Exception) -> None:
+        if not self.stop_event.is_set():
+            self.error = error
+            self.on_status(f"UberSDR error: {error}")
+
+    def _audio_loop(self) -> None:
+        try:
+            while not self.stop_event.is_set():
+                kind, payload = self.audio_ws.recv()
+                if kind != "binary" or len(payload) < 22:
+                    continue
+                sample_rate = struct.unpack_from("<I", payload, 8)[0]
+                channels = payload[12]
+                if self.decoder is None:
+                    if sample_rate != 12_000 or channels != 1:
+                        raise RuntimeError(f"unsupported UberSDR audio format: {sample_rate} Hz, {channels} channels")
+                    self.decoder = OpusDecoder(sample_rate, channels)
+                samples = self.decoder.decode(payload[21:])
+                if samples:
+                    now = time.time()
+                    self.on_audio(samples, ubersdr_frame_time(payload, now))
+        except Exception as error:
+            self._fail(error)
+
+    def _spots_loop(self) -> None:
+        try:
+            while not self.stop_event.is_set():
+                kind, payload = self.spots_ws.recv()
+                if kind != "text":
+                    continue
+                message = json.loads(payload)
+                value = message.get("data")
+                if message.get("type") != "digital_spot" or not isinstance(value, dict):
+                    continue
+                if value.get("mode") != "FT8" or value.get("band") != self.band:
+                    continue
+                slot = int(parse_timestamp(value["timestamp"]) // 15 * 15)
+                # The subscription begins with buffered historical spots. They cannot
+                # have matching local audio from a session that has only just started.
+                if self.first_slot is not None and slot < self.first_slot:
+                    continue
+                self.on_decode(
+                    slot,
+                    Decode(
+                        audio_frequency(value.get("frequency", 0), self.dial),
+                        float(value.get("dt", 0)),
+                        float(value.get("snr", 0)),
+                        str(value.get("message", "")),
+                        "remote",
+                    ),
+                )
+        except Exception as error:
+            self._fail(error)
+
+    def close(self) -> None:
+        self.stop_event.set()
+        for ws in (self.audio_ws, self.spots_ws):
+            if ws:
+                ws.close()
+        for thread in self.threads:
+            if thread.is_alive():
+                thread.join(timeout=2)
+        if self.decoder:
+            self.decoder.close()
 
 
 class OpenWebRXClient:
@@ -756,14 +1012,20 @@ def draw_comparison(screen: Any, entry: dict[str, Any], state: ComparisonState) 
         elapsed = state.decode_seconds.get(slot) if slot is not None else None
         audio_slot = state.latest_audio_slot
     screen.addnstr(1, 0, status, width - 1)
-    screen.addnstr(2, 0, f"Metrics: {metrics_url(receiver['url'])}", width - 1)
+    detail_url = (
+        "https://instances.ubersdr.org/"
+        if receiver.get("type") == "UberSDR"
+        else metrics_url(receiver["url"])
+    )
+    screen.addnstr(2, 0, f"Directory: {detail_url}", width - 1)
     rate = entry.get("ft8_decodes_per_minute")
     rate_text = f"{rate:,.2f}/min" if isinstance(rate, (int, float)) else "unknown"
     decode_count = entry.get("ft8_decodes_total", entry.get("ft8_decodes"))
     count_text = f"{decode_count:,}" if isinstance(decode_count, int) else "unknown"
+    traffic_label = "today" if receiver.get("type") == "UberSDR" else "total since restart"
     screen.addnstr(
         3, 0,
-        f"FT8 traffic at directory build: {rate_text}  total since restart: {count_text}",
+        f"FT8 traffic at directory build: {rate_text}  {traffic_label}: {count_text}",
         width - 1,
     )
     if slot is None:
@@ -815,6 +1077,7 @@ def run_comparison(screen: Any, entry: dict[str, Any], args: argparse.Namespace)
     def submit(slot: int, samples: array.array) -> None:
         with state.lock:
             state.latest_audio_slot = slot
+            state.status = f"decoding local slot {datetime.fromtimestamp(slot, timezone.utc):%H:%M:%S} UTC…"
         try:
             jobs.put_nowait((slot, samples))
         except queue.Full:
@@ -837,6 +1100,7 @@ def run_comparison(screen: Any, entry: dict[str, Any], args: argparse.Namespace)
                 with state.lock:
                     state.ours[slot] = result
                     state.decode_seconds[slot] = time.monotonic() - started
+                    state.status = f"local decoder found {len(result)} messages; streaming next slot"
                     state.trim()
             except Exception as error:
                 with state.lock:
@@ -845,7 +1109,8 @@ def run_comparison(screen: Any, entry: dict[str, Any], args: argparse.Namespace)
 
     worker = threading.Thread(target=decode_loop, name="ft8nn", daemon=True)
     worker.start()
-    client = OpenWebRXClient(entry["receiver"]["url"], entry["band"], assembler.push, add_remote, status, args.timeout)
+    client_class = UberSDRClient if entry["receiver"].get("type") == "UberSDR" else OpenWebRXClient
+    client = client_class(entry["receiver"]["url"], entry["band"], assembler.push, add_remote, status, args.timeout)
     try:
         try:
             client.start()
@@ -879,17 +1144,28 @@ def fallback_picker(entries: list[dict[str, Any]]) -> dict[str, Any] | None:
     return matches[selected] if 0 <= selected < len(matches) else None
 
 
+def receiver_ui(screen: Any, entries: list[dict[str, Any]], args: argparse.Namespace) -> bool:
+    """Run the picker until dismissed; q in a comparison returns to the picker."""
+    opened_comparison = False
+    while True:
+        selected = pick_receiver(screen, entries)
+        if selected is None:
+            return opened_comparison
+        opened_comparison = True
+        run_comparison(screen, selected, args)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--directory", type=Path, default=DEFAULT_DIRECTORY)
+    parser.add_argument("--directory", default=DEFAULT_DIRECTORY, help="UberSDR API URL or local directory JSON")
     parser.add_argument("--model", type=Path, default=DEFAULT_MODEL)
     parser.add_argument("--library", type=Path, default=default_library())
     parser.add_argument("--threads", type=int, default=0, help="local decoder threads; 0 uses performance cores")
     parser.add_argument("--timeout", type=float, default=10.0)
     parser.add_argument("--audio-delay", type=float, default=0.0, help="seconds from UTC boundary until its audio arrives")
     args = parser.parse_args(argv)
-    document = json.loads(args.directory.read_text())
-    entries = [entry for entry in document["entries"] if entry.get("band") in FT8_FREQUENCIES]
+    document = load_directory(args.directory, args.timeout)
+    entries = [entry for entry in directory_entries(document) if entry.get("band") in FT8_FREQUENCIES]
     if not entries:
         parser.error("receiver directory contains no supported entries")
     if curses is None:
@@ -902,16 +1178,8 @@ def main(argv: list[str] | None = None) -> int:
         print("The live comparison requires an interactive terminal.", file=sys.stderr)
         return 2
 
-    selected: dict[str, Any] | None = None
-
-    def ui(screen: Any) -> None:
-        nonlocal selected
-        selected = pick_receiver(screen, entries)
-        if selected is not None:
-            run_comparison(screen, selected, args)
-
-    curses.wrapper(ui)
-    return 0 if selected is not None else 1
+    opened_comparison = curses.wrapper(lambda screen: receiver_ui(screen, entries, args))
+    return 0 if opened_comparison else 1
 
 
 if __name__ == "__main__":

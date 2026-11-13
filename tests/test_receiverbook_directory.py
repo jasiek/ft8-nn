@@ -25,6 +25,25 @@ def test_parse_receiverbook_flattens_only_openwebrx():
     ]
 
 
+def test_default_source_is_ubersdr_directory():
+    assert MODULE.SOURCE_URL == "https://instances.ubersdr.org/api/instances?conditions=true"
+
+
+def test_build_accepts_ubersdr_api_json(tmp_path):
+    source = tmp_path / "instances.json"
+    source.write_text('''{"instances":[{
+      "is_online":true,"digital_decodes":true,
+      "public_url":"https://example.tunnel.ubersdr.org/","callsign":"K1ABC",
+      "tuning_range":{"min_frequency":10000,"max_frequency":30000000},
+      "band_conditions":{"40m":12.5},
+      "pskreporter_rank":{"reports":{"40m":{"day":42}}}
+    }]}''')
+    document, errors = MODULE.build(str(source), 1.0, 1)
+    assert errors == []
+    assert document["entries"][0]["receiver"]["type"] == "UberSDR"
+    assert document["entries"][0]["band"] == "40m"
+
+
 def test_ft8_bands_require_band_and_ft8_metric():
     metrics = {
         "wsjt": {
