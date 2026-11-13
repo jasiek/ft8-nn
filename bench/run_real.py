@@ -73,11 +73,11 @@ def _init(model, also_classical, n_hyp, early_nn="", ckw=None, erase_gate=15.0, 
 
 
 def _cc_arg(v):
-    """--cochannel NEAR_PEAKS,FAR_PEAKS,DF_SPAN,NEAR_DT,FAR_DT,MIN_SCORE or 'off' -> decode_slot(cochannel=)."""
+    """--cochannel NEAR_PEAKS,FAR_PEAKS,DF_SPAN,NEAR_DT,FAR_DT,MIN_SCORE[,NB_GATE] or 'off' -> decode_slot(cochannel=)."""
     if v == "off":
         return None
-    kn, kf, span, tn, tf, thr = v.split(",")
-    return int(kn), int(kf), float(span), int(tn), int(tf), float(thr)
+    kn, kf, span, tn, tf, thr, nb = (v.split(",") + ["inf"])[:7]
+    return int(kn), int(kf), float(span), int(tn), int(tf), float(thr), float(nb)
 
 
 def _slot_time(stem):
@@ -239,7 +239,7 @@ def main():
     ap.add_argument("--repeat", default="0.4,0.15,2", help="repeat stage RHO,MARGIN,CLIP; 'off' to disable")
     ap.add_argument("--repeat-competitors", default="sendable", choices=["sendable", "shipped"],
                     help="repeat-stage competitors: only messages a station could send, or the plan-12 set")
-    ap.add_argument("--cochannel", default="2,1,8,24,50,3", help="co-channel retry NEAR_PEAKS,FAR_PEAKS,DF_SPAN,NEAR_DT,FAR_DT,MIN_SCORE (dt in 5 ms baseband samples); 'off' to disable")
+    ap.add_argument("--cochannel", default="2,1,8,24,50,3,66", help="co-channel retry NEAR_PEAKS,FAR_PEAKS,DF_SPAN,NEAR_DT,FAR_DT,MIN_SCORE[,NB_GATE] (dt in 5 ms baseband samples; NB_GATE: the peak's NN expected errors below which its 8 neighbours are tried, inf = always); 'off' to disable")
     ap.add_argument("--truncate", type=int, default=None, help="zero the audio from this sample on (an early pass: "
                     "WSJT-X asks at 41 or 47 half-symbols, 141696 or 162432 samples)")
     ap.add_argument("--early-final", type=int, default=None, help="N: early pass on the first N samples, then the final "

@@ -39,8 +39,8 @@ def _init(args):
 def _cc_arg(v):
     if v == "off":
         return None
-    kn, kf, span, tn, tf, thr = v.split(",")
-    return int(kn), int(kf), float(span), int(tn), int(tf), float(thr)
+    kn, kf, span, tn, tf, thr, nb = (v.split(",") + ["inf"])[:7]
+    return int(kn), int(kf), float(span), int(tn), int(tf), float(thr), float(nb)
 
 
 def _decode_file(path):
@@ -77,7 +77,7 @@ def main():
     ap.add_argument("--passes", type=int, default=4, help="decode-subtract passes per slot")
     ap.add_argument("--reuse-df", type=float, default=62.5, help="skip candidates tried before with no subtraction within this many Hz (0 = off)")
     ap.add_argument("--dt-recenter", type=float, default=0.8, help="shift the DT search window by the median DT of the decodes so far when it is at least this far from 0 (0 = off)")
-    ap.add_argument("--cochannel", default="2,1,8,24,50,3", help="co-channel retry NEAR_PEAKS,FAR_PEAKS,DF_SPAN,NEAR_DT,FAR_DT,MIN_SCORE (dt in 5 ms baseband samples); 'off' to disable")
+    ap.add_argument("--cochannel", default="2,1,8,24,50,3,66", help="co-channel retry NEAR_PEAKS,FAR_PEAKS,DF_SPAN,NEAR_DT,FAR_DT,MIN_SCORE[,NB_GATE] (dt in 5 ms baseband samples; NB_GATE: the peak's NN expected errors below which its 8 neighbours are tried, inf = always); 'off' to disable")
     ap.add_argument("--repeat", default="", help="accepted for run_real.py parity; inert here (slots have no context)")
     ap.add_argument("--repeat-competitors", default="sendable", choices=["sendable", "shipped"],
                     help="accepted for run_real.py parity; inert here (slots have no context)")

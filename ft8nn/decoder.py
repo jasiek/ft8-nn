@@ -66,8 +66,12 @@ REPEAT_SENDABLE = True
 # ~2.1 / 2.3 s and the co-channel and repeat stages at ~2.7 s; the final pass (prior=) finds what the early one left.
 EARLY_PASSES = 2
 # Co-channel retry (_cochannel_stage, plan 7.1 item 1c): (peaks per cell within the near dt span, peaks in the far dt
-# band, df span Hz, near and far dt spans in baseband samples, minimum data-sync score), chosen on validation run 1.
-COCHANNEL = (2, 1, 8.0, 24, 50, 3.0)
+# band, df span Hz, near and far dt spans in baseband samples, minimum data-sync score, neighbour gate), chosen on
+# validation run 1. Neighbour gate: each peak's own hypothesis goes to the NN first and its 8 neighbours only if that
+# one's expected errors (sum of 1/(1+e^|LLR|)) are below it. On run 1 the stage's 322 decodes came 206 from the peak
+# itself (expected errors <= 39.3) and 116 from a neighbour of a peak at <= 61.8, while 65% of the 53,221 peaks were
+# at >= 66; so 66 skips 58% of the stage's NN hypotheses and loses none of them.
+COCHANNEL = (2, 1, 8.0, 24, 50, 3.0, 66.0)
 
 
 def context_patterns(context, f0, dt):
@@ -137,7 +141,7 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
     (find_candidates(dt_shift=)). 0 disables.
     repeat: (rho_min, margin, clip) for the repeat stage (_repeat_stage) after the last pass, which tests each context
     message whose sender has no decode in the slot as a whole known message (needs context); None: off.
-    cochannel: (near peaks, far peaks, df span, near dt span, far dt span, min score) for the co-channel retry
+    cochannel: (near peaks, far peaks, df span, near dt span, far dt span, min score, neighbour gate) for the co-channel retry
     (_cochannel_stage) after the last pass, which searches every decode's own cell in the residual for a second
     signal hidden under it; None: off.
     prior: decodes this slot already has, from an early pass on the first part of the audio (WSJT-X asks at ~11.8 s).
@@ -297,7 +301,8 @@ def _repeat_stage(x, llr_fn, found, context, n_hyp, rho_min, margin, clip, log=N
 # carry another message and survive. No candidate search or Costas fine sync finds it afterwards. So after the last
 # pass, at every decode's own cell the residual is searched with a data-symbol metric (frontend.data_sync) over df +-8
 # Hz x dt +-50 baseband samples (+-0.25 s; 0.5 Hz x 2-sample grid). The best local maxima scoring at least min_score
-# go to the NN as 3x3 hypotheses (COCHANNEL_REFINE): `near` of them within +-24 samples, `far` beyond. Two zones,
+# go to the NN as 3x3 hypotheses (COCHANNEL_REFINE; the 8 around the peak only when the peak's own NN expected errors
+# are below nb_gate, see COCHANNEL): `near` of them within +-24 samples, `far` beyond. Two zones,
 # because one +-50 window with 2 peaks lost 6 near recoveries to far peaks while gaining 7 far ones (run 1). NN
 # metric, BP, OSD and OSD on BP sums as in a pass; plausibility rules; a result that is a decode we already have, or
 # a ghost of any decode in the slot, is skipped.
@@ -316,7 +321,7 @@ def _nn_only(llr_fn):
     return getattr(llr_fn, "nn", llr_fn)
 
 
-def _cochannel_stage(x, llr_fn, found, near, far, span, tnear, tfar, min_score, osd_order, osd_max_hard, osd_gate, osd_snaps, log=None):
+def _cochannel_stage(x, llr_fn, found, near, far, span, tnear, tfar, min_score, nb_gate, osd_order, osd_max_hard, osd_gate, osd_snaps, log=None):
     """Decodes hidden under the cells of the decodes in `found` (see the comment above). log: list to append
     (cell index, best data-sync score, outcome) to for every cell."""
     bb = fe.Baseband(x)
@@ -344,12 +349,24 @@ def _cochannel_stage(x, llr_fn, found, near, far, span, tnear, tfar, min_score, 
                     group.append((ci, z, rank))
     out, outcome = {}, {}
     if hyps:
-        L = np.stack([l[0] for l in _nn_only(llr_fn)(hyps)])
-        bits, ok, nh = ldpc.bp_decode(L)
+        # the peak itself first (offs[0]); its 8 neighbours only where the NN finds the peak's own bits clean enough
+        nn = _nn_only(llr_fn)
+        L = np.zeros((len(hyps), 174))
+        L[::9] = np.stack([l[0] for l in nn(hyps[::9])])
         exp_err = (1.0 / (1.0 + np.exp(np.abs(L)))).sum(1)
+        run = np.zeros(len(hyps), bool)
+        run[::9] = True
+        for k in np.nonzero(exp_err[::9] < nb_gate)[0]:
+            run[9 * k + 1 : 9 * k + 9] = True
+        nb = np.nonzero(run & (np.arange(len(hyps)) % 9 != 0))[0]
+        if len(nb):
+            L[nb] = np.stack([l[0] for l in nn([hyps[i] for i in nb])])
+            exp_err[nb] = (1.0 / (1.0 + np.exp(np.abs(L[nb])))).sum(1)
+        bits, ok, nh = (np.zeros((len(hyps), 174), np.uint8), np.zeros(len(hyps), bool), np.zeros(len(hyps), int))
+        bits[run], ok[run], nh[run] = ldpc.bp_decode(L[run])
         done = set()
         for i, (h, g) in enumerate(zip(hyps, group)):
-            if g in done:
+            if g in done or not run[i]:
                 continue
             a91 = None
             if ok[i] and ft8.crc_ok(bits[i, :91]):

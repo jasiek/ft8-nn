@@ -112,6 +112,7 @@ static int prof = -1;
 #define CC_NF 37 /* -(CC_SPAN + 2 CC_GF) .. CC_SPAN + 2 CC_GF */
 #define CC_NT 53 /* -(CC_TFAR + CC_GT) .. CC_TFAR + CC_GT */
 #define CC_MAXH ((CC_NEAR + CC_FAR) * 9)
+#define CC_NB_GATE 66.0 /* the peak's own hypothesis first; its 8 neighbours only below this NN expected errors */
 #define DEC_CAP 512 /* decodes per slot */
 #define ERASE_GATE 15.0 /* burst-erasure retry for confident NN metrics that still fail */
 /* osd_er ghost test (decoder._is_ghost): neighbour within GHOST_MAX_DF Hz whose tones, shifted by whole symbols and
@@ -865,7 +866,8 @@ done:
 /* Co-channel retry (decoder._cochannel_stage). Two stations within a few Hz and tens of ms of each other share one
  * candidate cell (every FT8 signal carries the same Costas arrays); subtracting the stronger takes most of the weaker
  * one's sync with it, while its data symbols survive. So after the last pass, at every decode's own cell, the residual
- * is searched with the data-symbol sync metric and the best peaks go to the NN as 3 x 3 hypotheses: NN metric -> BP ->
+ * is searched with the data-symbol sync metric and the best peaks go to the NN as 3 x 3 hypotheses (the peak itself
+ * first, its 8 neighbours only if the NN finds the peak's bits clean enough: CC_NB_GATE): NN metric -> BP ->
  * OSD-2 (gated) -> OSD on BP sums, plausibility rules. In order: one decode per peak; skip a payload already decoded and
  * a ghost of any decode in the slot. Three steps as decode_pass: the grid search per cell and the per-hypothesis
  * decoding in parallel, then a serial merge in the order the Python loop takes. */
@@ -874,10 +876,11 @@ typedef struct {
     int start, cell, group;
 } cc_spec;
 
-static void cc_decode_hyp(const sync_hyp *hy, const double *l, int cons, hyp_res *r) {
+static void cc_decode_hyp(const sync_hyp *hy, const double *l, int cons, hyp_res *r, double *ee) {
     r->status = 0;
     double exp_err = 0, dist;
     for (int i = 0; i < 174; i++) exp_err += 1.0 / (1.0 + exp(fabs(l[i])));
+    *ee = exp_err;
     uint8_t bits[174], a91[91];
     int nhard, method = -1;
     if (bp_decode(l, 30, bits, &nhard) && crc_ok(bits)) {
@@ -912,7 +915,10 @@ typedef struct {
     int *nspec, *npeak;
     const cc_spec **flat;
     int nflat;
+    const int *idx; /* this round's hypotheses, indices into flat */
+    int nidx;
     hyp_res *res;
+    double *ee; /* per flat hypothesis: NN expected errors */
     atomic_int next, err;
     double dfs[CC_NF];
     int dts[CC_NT];
@@ -981,10 +987,10 @@ static void cc_worker(void *arg, int w) {
     sync_hyp *hy = malloc(sizeof(sync_hyp) * NN_CHUNK), *hp[NN_CHUNK];
     for (;;) {
         int i0 = atomic_fetch_add(&j->next, NN_CHUNK);
-        if (i0 >= j->nflat || atomic_load(&j->err)) break;
-        int b = j->nflat - i0 < NN_CHUNK ? j->nflat - i0 : NN_CHUNK;
+        if (i0 >= j->nidx || atomic_load(&j->err)) break;
+        int b = j->nidx - i0 < NN_CHUNK ? j->nidx - i0 : NN_CHUNK;
         for (int i = 0; i < b; i++) {
-            const cc_spec *s = j->flat[i0 + i];
+            const cc_spec *s = j->flat[j->idx[i0 + i]];
             memcpy(hy[i].y, j->y0 + (size_t)s->cell * NBB, sizeof hy[i].y);
             bb_rotate(hy[i].y, s->df);
             hy[i].start = s->start;
@@ -997,7 +1003,10 @@ static void cc_worker(void *arg, int w) {
             atomic_store(&j->err, 1);
             break;
         }
-        for (int i = 0; i < b; i++) cc_decode_hyp(&hy[i], llr + (size_t)i * 174, j->c->cons, &j->res[i0 + i]);
+        for (int i = 0; i < b; i++) {
+            int f = j->idx[i0 + i];
+            cc_decode_hyp(&hy[i], llr + (size_t)i * 174, j->c->cons, &j->res[f], &j->ee[f]);
+        }
     }
     free(feat);
     free(llr);
@@ -1030,9 +1039,24 @@ static int cochannel_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int n
     for (int ci = 0, q = 0; ci < nall; ci++)
         for (int s = 0; s < j->nspec[ci]; s++) j->flat[q++] = &j->spec[(size_t)ci * CC_MAXH + s];
     j->res = malloc(sizeof(hyp_res) * (size_t)(j->nflat + 1));
+    j->ee = malloc(sizeof(double) * (size_t)(j->nflat + 1));
+    int *idx = malloc(sizeof(int) * (size_t)(j->nflat + 1)), nrun = 0;
+    for (int i = 0; i < j->nflat; i++) j->res[i].status = 0;
     atomic_init(&j->next, 0);
     atomic_init(&j->err, 0);
-    if (j->nflat) par_run(c->pool, cc_worker, j);
+    /* each peak's own hypothesis (offset 0, first of its 9) first; then the 8 neighbours of the peaks the NN found
+     * clean enough (decoder._cochannel_stage nb_gate) */
+    for (int round = 0; round < 2 && !atomic_load(&j->err); round++) {
+        j->nidx = 0;
+        for (int i = 0; i < j->nflat; i += 9)
+            if (!round) idx[j->nidx++] = i;
+            else if (j->ee[i] < CC_NB_GATE)
+                for (int o = 1; o < 9; o++) idx[j->nidx++] = i + o;
+        j->idx = idx;
+        nrun += j->nidx;
+        atomic_store(&j->next, 0);
+        if (j->nidx) par_run(c->pool, cc_worker, j);
+    }
     int rc = atomic_load(&j->err) ? -1 : nall;
     uint8_t *done = calloc((size_t)ngroup + 1, 1);
     for (int i = 0; rc >= 0 && i < j->nflat; i++) {
@@ -1051,7 +1075,7 @@ static int cochannel_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int n
         all[rc++] = d;
         done[g] = 1;
     }
-    if (prof) fprintf(stderr, "cochannel: cells %d hyp %d -> %d, %.2fs\n", nall, j->nflat, rc - nall, tnow() - t0);
+    if (prof) fprintf(stderr, "cochannel: cells %d hyp %d of %d -> %d, %.2fs\n", nall, nrun, j->nflat, rc - nall, tnow() - t0);
     free(done);
     free(goff);
     free(j->y0);
@@ -1060,6 +1084,8 @@ static int cochannel_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int n
     free(j->npeak);
     free(j->flat);
     free(j->res);
+    free(j->ee);
+    free(idx);
     free(j);
     baseband_free(&bb);
     return rc;
