@@ -4,10 +4,11 @@
 
 Decode count is no longer the target: what other decoders still find and we miss is ~2,500 slot-confirmed pairs
 on runs 2–4 (~3% of ours, mostly too weak), and the best remaining lever is worth +0.3% (see "Decided against"
-below). The work is now live operating and CPU, in this order:
+below). The work is now live operating and CPU, in this order (item 1 is done; start with item 2, or a live run in
+WSJT-X of item 1):
 
-1. **Early pass (plan 6a) - DONE in Python, C and the sidecar 2026-11-13, on the worktree branch (not on
-   `main` yet).** WSJT-X asks for decodes at ~11.8 s, ~13.5 s and 14.4 s into the period; the user wants some
+1. **Early pass (plan 6a) - DONE in Python, C and the sidecar 2026-11-13, merged to `main` (`b6b3a4d`
+   measurements, `bc956b9` C + sidecar).** WSJT-X asks for decodes at ~11.8 s, ~13.5 s and 14.4 s into the period; the user wants some
    decodes early provided it costs no time. Now: the 11.8 s request gets a short early pass
    (`ft8nn_decode_early` / Python `run_real.py --early-final`: two subtraction passes on the audio so far, no
    co-channel or repeat stage, NN feature median over the arrived symbols, no CQ AP / OSD on BP sums / wide-window
@@ -26,7 +27,9 @@ below). The work is now live operating and CPU, in this order:
    no message twice). The user chose a fixed two-pass early pass over a time deadline (deterministic, ~1 s
    margin). A four-pass early pass with the co-channel and repeat stages found more (runs 2–4 108,058 / 79,397 / 1,
    measured with the early decodes and context taken from separate runs) but takes 2.7 s, past the final request.
-   Next: merge to `main` when the user OKs it; a live run in WSJT-X.
+   Next: a live run in WSJT-X (rebuild first: `make -C c ORT_PREFIX=$PWD/third_party/onnxruntime` and
+   `make -C wsjtx ORT_PREFIX=$PWD/third_party/onnxruntime`; early passes are on by default, `--no-early` turns
+   them off, `-v` logs each pass's timing and the sidecar warns when an early pass outlasts the 2.6 s).
 2. **Win back the C cost of today's two stages without losing decodes.** `nn_v3_ccrpc` costs **+17% CPU** per
    busy slot against `nn_v3_dtcrp` (timing below). Profile first: the co-channel stage's `data_sync` search
    (`c/src/frontend.c`, sliding DFT), its NN hypotheses (~10 per decode cell, ~280 per busy slot), and the last
@@ -196,11 +199,12 @@ decodes verified identical to the main machine.
   a non-JSON line, exit on `quit`, and a missing model. The first attempt, a `jt9` shared-memory shim (`jt9nn`,
   Qt 5 + the 46 MiB `dec_data` segment, so stock WSJT-X would work too), was dropped: the fork has the sidecar
   interface and stock WSJT-X is not a target.
-- Last commit: the repeat stage with only competitors a station could send, tag `nn_v3_ccrpc` (plan 12), on top of
-  the co-channel retry (`nn_v3_cc`, plan 7.1 item 1c); Python + C, golden PASS, `validate_full.sh nn_v3_ccrpc` PASS;
-  plus the runs 2-4 miss profile that ranked it (`docs/miss-profile-dtcrp.md`).
-  Then the idle C timing (+17% CPU, table at the top). Next: see "Next (agreed with the user 2026-11-12)" at the
-  top - early pass, then win back the CPU, then stream context/repeat decodes with their pass.
+- Last commits (2026-11-13, merged to `main` with the user's OK): the early pass - `b6b3a4d` the Python
+  measurements and bench tools (plan 6a), `bc956b9` `ft8nn_decode_early` / `ft8nn_decode_final` in C, the sidecar
+  decoding WSJT-X's 11.8 s request, and the tests (Next item 1). Decodes of a plain (non-early) decode are
+  unchanged, so `nn_v3_ccrpc` stays the reference tag. Before that: the repeat stage with only competitors a
+  station could send (`nn_v3_ccrpc`, plan 12) and its idle C timing (+17% CPU, table at the top). Next: see "Next"
+  at the top - win back the CPU, then stream context/repeat decodes with their pass.
 - Architecture study finished 2026-11-07 (plan 7.3d): keep the transformer. Its code (`train.py --kind conv|gru`,
   `--teacher`, `model.build`) is merged; models in `runs/{tf,conv,gru,tf_l2,tf_l2kd}_v{1,2}`, scripts `data/tmp/` (gitignored).
 - Loop log (finished): `nn_v2_eh` pass, `nn_v2_ob` fail (1 ghost), `nn_v2_og` pass, `nn_v2_p4` pass → run 2
@@ -973,8 +977,9 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
       control fine-tune without truncation as in 7.5. Measure on truncated audio: run-2 decodes at 11.8 s,
       slot-confirmed and unconfirmed, noise-only false decodes, AWGN 50% threshold at 11.8 s. Also check that (b)
       loses nothing on full-length signals (the usual A/B + AWGN); if so, ship one network for both passes.
-      **Measured 2026-11-12/13 (Python, Mac mini, uncommitted until the user OKs it).** Tools: `bench/run_real.py
-      --truncate 141696` (audio zeroed from WSJT-X's 41st half-symbol, 11.81 s), `--context-from nn_v3_ccrpc` (the
+      **Measured 2026-11-12/13 (Python, Mac mini; committed `b6b3a4d`).** Tools: `bench/run_real.py
+      --truncate 141696` (audio cut at WSJT-X's 41st half-symbol, 11.81 s; the `e118_*` runs below zero-padded it
+      to 15 s, and since `bc956b9` the decoder gets only the samples that arrived, as the C library does), `--context-from nn_v3_ccrpc` (the
       early pass gets the *final* decodes of 30/60 s earlier as context, as live), `--prior TAG` (the final pass
       subtracts that tag's early decodes first and keeps them: `decoder.decode_slot(prior=)`), `--early-nn median`,
       `--no-ap`; `bench/run_ours.py --truncate/--early-nn`; `tools/early_miss.py` (why each lost decode is lost).
@@ -1002,13 +1007,18 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
         (`TNX 73 GL`, also in the full decode); full `nn_v3_ccrpc` 29,691 / 21,820 / 1, 28,418 / 21,421 / 1,
         48,999 / 35,541 / 2. No early decode is ever dropped by the final pass (nothing to retract).
       - **CPU (Python, shared machine, rough):** early pass ≈ a full decode, final with prior ≈ 0.55 of one, so
-        ≈ 1.5x today's work per slot. Measure in C on an idle machine before deciding the deadline.
+        ≈ 1.5x today's work per slot. In C (idle M4, 40 busy slots) this four-pass early pass took 2.73 s mean /
+        3.25 max after the 11.8 s request, past WSJT-X's final request 2.6 s later, so it ended at the end-of-slot
+        stages (co-channel, repeat, deferred context decodes) at 2.69 s median.
+      - **Shipped (user's choice, 2026-11-13): a fixed two-pass early pass** with no co-channel or repeat stage
+        (`EARLY_PASSES`), done 1.53 s after the request; results, timing and checks in Next item 1.
 9. **WSJT-X integration (`wsjtx/`) — first version DONE 2026-11-09.** `ft8nn_sidecar` speaks the
    fork's external-FT8-decoder protocol (`WSJTX_FT8_DECODER`, `doc/ft8-sidecar-protocol.md`): JSON lines and the
    period's audio on stdin, JSON decode lines and `done` on stdout, stderr into the WSJT-X log. Decided along the
    way: early passes (`final: false`, about 11.8 s and 13.2 s into the period) answer at once with no decodes,
    because WSJT-X skips a request that arrives while the decoder is busy and a slow early pass would cost the full
-   pass (`--early` to decode them); a re-decode (`samples: 0`) replays the last period's audio; `[nfa, nfb]` is
+   pass (`--early` to decode them) - superseded 2026-11-13: the 11.8 s request now gets a short two-pass early
+   pass and the final pass reports only what it adds (Next item 1; `--no-early` restores the empty answer); a re-decode (`samples: 0`) replays the last period's audio; `[nfa, nfb]` is
    honoured and decodes are reported in frequency order; our CQ a-priori decodes report `ap: 1` and context ones
    `ap: 2`, which WSJT-X shows as `a1`/`a2`; a missing model exits so WSJT-X falls back to its own `jt9`. Measured
    9-12 s per slot on the plain M1 for the busiest 40 m station (M4 mini: 6.9-8.0 s), against WSJT-X's 15 s
