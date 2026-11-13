@@ -1,6 +1,54 @@
 # Status and plan (resume here)
 
-Last updated 2026-11-12 (**repeat stage scores only competitors a station could send, tag `nn_v3_ccrpc`** (plan
+## Next (agreed with the user 2026-11-12) — start here
+
+Decode count is no longer the target: what other decoders still find and we miss is ~2,500 slot-confirmed pairs
+on runs 2–4 (~3% of ours, mostly too weak), and the best remaining lever is worth +0.3% (see "Decided against"
+below). The work is now live operating and CPU, in this order:
+
+1. **Early pass (plan 6a).** WSJT-X asks for decodes at ~11.8 s (and ~13.2 s) into the period, before the
+   transmission ends; replying in the next slot needs decodes by then. Today `wsjtx/ft8nn_sidecar` answers early
+   requests with no decodes unless `--early`. Plan 6a has the design: compare (a) the classical metric with the
+   missing tail symbols at LLR 0 against (b) `models/v3` fine-tuned with random tail truncation (plus a control
+   fine-tune without), on truncated run-2 audio (decodes, slot-confirmed, unconfirmed), noise-only false decodes
+   and the AWGN threshold at 11.8 s; (b) must lose nothing on full-length signals (usual A/B + AWGN) to ship as
+   the one network. Retraining moves the false-decode gates (CLAUDE.md), so re-check them on runs 2–4 pooled and
+   `noise10k` (regenerate it: README, seed 19). A fine-tune is ~21 min on the M4 (plan 7.5).
+2. **Win back the C cost of today's two stages without losing decodes.** `nn_v3_ccrpc` costs **+17% CPU** per
+   busy slot against `nn_v3_dtcrp` (timing below). Profile first: the co-channel stage's `data_sync` search
+   (`c/src/frontend.c`, sliding DFT), its NN hypotheses (~10 per decode cell, ~280 per busy slot), and the last
+   pass now always being subtracted (~11 ms per decode under load, ~53 decodes per slot here). Then cut what is
+   cheap to cut (e.g. skip cells whose residual near f0 is at the noise floor, fewer refinement points, cheaper
+   subtraction of the last pass), Python first, accepting a change only if decodes stay identical or the A/B
+   still passes. Python: `ft8nn/decoder.py` `_cochannel_stage`, `COCHANNEL*`; `ft8nn/frontend.py` `data_sync`.
+3. **Send context, repeat and co-channel decodes with their pass, not at the end of the slot.** They go out in the
+   stream's `pass = -1` batch today (plan 6 step (1) (a)); they are the QSO-relevant ones (a station answering).
+   First measure how often the final `drop_ctx_dupes` actually drops one, then decide whether streaming them
+   earlier is worth that risk (the sidecar protocol cannot retract a decode).
+
+**Decided against (user, 2026-11-12):** more lag tracks per frequency in the candidate search (+0.26–0.37% decodes
+pooled, more CPU per pass) and a look-back repeat stage (+0.53%, offline only, no use live). Numbers:
+`docs/miss-profile-dtcrp.md`.
+
+**C timing of `nn_v3_ccrpc` (2026-11-12 18:39–18:52, Mac mini M4, idle, `caffeinate -dims`, no pmset sleep
+events).** `ft8nn_cli --time`, run 1 `01_40m` first 40 slots in time order, `7d17447` (`nn_v3_dtcrp`) vs
+`6a55f27` (`nn_v3_ccrpc`) built side by side in scratch worktrees, run before/after/after/before; s per slot:
+
+| | `nn_v3_dtcrp` | `nn_v3_ccrpc` | change |
+|---|---|---|---|
+| 1 thread mean / max | 6.58 / 7.49 | 7.71 / 8.58 | +17% |
+| 1 thread user CPU (40 slots) | 262.8 s | 307.8 s | +17% |
+| all performance cores (`--threads 0`) mean / max | 2.42 / 2.73 | 2.80 / 3.09 | +16% |
+| all cores user CPU | 349.9 s | 408.6 s | +17% |
+| decodes | 2,110 | 2,157 | +2.2% |
+| peak RSS 1 thread / all cores | 438 / 711 MB | 483 / 717 MB | |
+
+Decodes are identical at 1 thread and at all cores for each version. Every slot stays far inside WSJT-X's 15 s.
+Reproduce: `git worktree add --detach <dir> <rev>`, `make -C <dir>/c ORT_PREFIX=$PWD/third_party/onnxruntime`,
+then `/usr/bin/time -l <dir>/c/build/ft8nn_cli --threads N --time models/v3/ft8nn.onnx <first 40 wavs of
+datasets/ft8-validation-set/recordings/01_40m_*/slots>` (per-slot `time` lines on stderr).
+
+Last updated 2026-11-12 (**C timing of `nn_v3_ccrpc` and the next plan**, above). Before that (**repeat stage scores only competitors a station could send, tag `nn_v3_ccrpc`** (plan
 12): a CQ's competitors no longer include `CQ K1ABC R FN42` or `CQ K1ABC RR73/-12`, which had beaten the margin on
 226 of the 320 repeats lost that way; a CQ-only sender then needs ρ ≥ 0.50 (`REPEAT_SOLO` 0.35), set on the run-1
 wrong-receiver null (0 of 223,643, as before); runs 2–4 pooled **107,108 / 78,782 / 4** (+557 decodes / +458
@@ -125,10 +173,8 @@ decodes verified identical to the main machine.
 - Last commit: the repeat stage with only competitors a station could send, tag `nn_v3_ccrpc` (plan 12), on top of
   the co-channel retry (`nn_v3_cc`, plan 7.1 item 1c); Python + C, golden PASS, `validate_full.sh nn_v3_ccrpc` PASS;
   plus the runs 2-4 miss profile that ranked it (`docs/miss-profile-dtcrp.md`).
-  Next: idle C timing (nothing else running; the user schedules it), then the miss profile's other levers - more
-  lag tracks per frequency in the candidate search (396 misses decode when forced at the true lag, which the
-  per-frequency tracks lose to alias lags), and a look-back repeat stage (offline only: 564 misses are a station's
-  first overs that we decode 30/60 s later) - and the early pass (plan 6a).
+  Then the idle C timing (+17% CPU, table at the top). Next: see "Next (agreed with the user 2026-11-12)" at the
+  top - early pass, then win back the CPU, then stream context/repeat decodes with their pass.
 - Architecture study finished 2026-11-07 (plan 7.3d): keep the transformer. Its code (`train.py --kind conv|gru`,
   `--teacher`, `model.build`) is merged; models in `runs/{tf,conv,gru,tf_l2,tf_l2kd}_v{1,2}`, scripts `data/tmp/` (gitignored).
 - Loop log (finished): `nn_v2_eh` pass, `nn_v2_ob` fail (1 ghost), `nn_v2_og` pass, `nn_v2_p4` pass → run 2
