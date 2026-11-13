@@ -10,6 +10,9 @@
  * --time also writes "time\t<slot>\t<decode wall s %.3f>\t<decodes>" per slot to stderr.
  * --stream decodes with ft8nn_decode_stream and prints the decodes in the order they are handed out, writing
  * "batch\t<slot>\t<pass>\t<s since the decode started %.3f>\t<decodes>" to stderr for every callback.
+ * --early N: per slot, an early pass on the first N samples (ft8nn_decode_early; WSJT-X's 11.8 s request is
+ * 141696), then the final pass on the whole file with those decodes as prior (ft8nn_decode_final); prints the early
+ * decodes, then the new ones. With --time, "time" covers both and "early\t<slot>\t<s %.3f>\t<decodes>" the early pass.
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -122,7 +125,7 @@ static int64_t slot_time(const char *slot) {
 }
 
 int main(int argc, char **argv) {
-    int threads = 1, timing = 0, stream = 0, a = 1;
+    int threads = 1, timing = 0, stream = 0, early = 0, a = 1;
     for (;;) {
         if (a + 1 < argc && !strcmp(argv[a], "--threads")) {
             threads = atoi(argv[a + 1]);
@@ -130,6 +133,9 @@ int main(int argc, char **argv) {
         } else if (a < argc && !strcmp(argv[a], "--time")) {
             timing = 1;
             a++;
+        } else if (a + 1 < argc && !strcmp(argv[a], "--early")) {
+            early = atoi(argv[a + 1]);
+            a += 2;
         } else if (a < argc && !strcmp(argv[a], "--stream")) {
             stream = 1;
             a++;
@@ -137,12 +143,12 @@ int main(int argc, char **argv) {
             break;
     }
     if (argc - a < 2) {
-        fprintf(stderr, "usage: %s [--threads N] [--time] [--stream] model.onnx slot.wav...\n", argv[0]);
+        fprintf(stderr, "usage: %s [--threads N] [--time] [--stream] [--early N] model.onnx slot.wav...\n", argv[0]);
         return 2;
     }
     ft8nn_ctx *ctx = ft8nn_open(argv[a], threads);
     if (!ctx) return 1;
-    ft8nn_decode_t out[256];
+    ft8nn_decode_t out[256], pri[256];
     for (int i = a + 1; i < argc; i++) {
         int n = 0, rate = 0;
         float *x = read_wav(argv[i], &n, &rate);
@@ -167,6 +173,25 @@ int main(int argc, char **argv) {
         struct timespec t0, t1;
         mono_now(&t0);
         stream_st st = {slot, t0};
+        if (early > 0) {
+            int ne = ft8nn_decode_early(ctx, x, early < n ? early : n, t, stream ? on_batch : NULL, &st, pri, 256);
+            struct timespec te;
+            mono_now(&te);
+            if (timing) fprintf(stderr, "early\t%s\t%.3f\t%d\n", slot, secs(&t0, &te), ne);
+            if (ne > 256) ne = 256;
+            for (int k = 0; !stream && k < ne; k++) print_decode(slot, &pri[k]);
+            int nd = ne < 0 ? -1 : ft8nn_decode_final(ctx, x, n, t, pri, ne, stream ? on_batch : NULL, &st, out, 256);
+            mono_now(&t1);
+            if (timing) fprintf(stderr, "time\t%s\t%.3f\t%d\n", slot, secs(&t0, &t1), nd < 0 ? nd : ne + nd);
+            free(x);
+            if (nd < 0) {
+                fprintf(stderr, "%s: decode failed\n", argv[i]);
+                continue;
+            }
+            for (int k = 0; !stream && k < nd && k < 256; k++) print_decode(slot, &out[k]);
+            fflush(stdout);
+            continue;
+        }
         int nd = stream ? ft8nn_decode_stream(ctx, x, n, t, on_batch, &st, NULL, 0)
                  : t == INT64_MIN ? ft8nn_decode(ctx, x, n, out, 256)
                                   : ft8nn_decode_at(ctx, x, n, t, out, 256);

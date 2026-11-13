@@ -75,6 +75,23 @@ typedef void (*ft8nn_pass_cb)(const ft8nn_decode_t *decodes, int n, int pass, vo
 int ft8nn_decode_stream(ft8nn_ctx *ctx, const float *audio12k, int n, int64_t slot_time, ft8nn_pass_cb cb,
                         void *user, ft8nn_decode_t *out, int max_out);
 
+/* Early pass: WSJT-X asks for a decode at about 11.8 s into the period, before the transmissions end. audio12k holds
+ * the n samples received so far. As ft8nn_decode_stream, except: two subtraction passes and no co-channel or repeat
+ * stage, so a busy slot is done well before WSJT-X's final request at 14.4 s (~1.6 s on an M4's performance cores);
+ * the NN features are normalised over the symbols that have arrived; CQ a-priori decoding, OSD on BP sums and the
+ * wide-window erasure OSD are off (on cut signals they made the early pass's false decodes). The final pass finds
+ * what this one leaves. The slot's decodes are not remembered as context - pass them to ft8nn_decode_final, which
+ * does. */
+int ft8nn_decode_early(ft8nn_ctx *ctx, const float *audio12k, int n, int64_t slot_time, ft8nn_pass_cb cb, void *user,
+                       ft8nn_decode_t *out, int max_out);
+
+/* The final pass after ft8nn_decode_early: as ft8nn_decode_stream on the whole slot, but the early pass's decodes
+ * (prior, n_prior; all of them, as handed out) are subtracted first and count as found. They are never reported
+ * again, only the new decodes go to cb and out (the return value counts those), and the slot is remembered as
+ * context with both. */
+int ft8nn_decode_final(ft8nn_ctx *ctx, const float *audio12k, int n, int64_t slot_time, const ft8nn_decode_t *prior,
+                       int n_prior, ft8nn_pass_cb cb, void *user, ft8nn_decode_t *out, int max_out);
+
 /* Forget all learned callsign hashes. */
 void ft8nn_reset_hashes(ft8nn_ctx *ctx);
 

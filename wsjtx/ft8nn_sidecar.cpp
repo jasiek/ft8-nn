@@ -40,6 +40,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include <time.h>
@@ -55,6 +56,9 @@ extern "C" {
 
 static int const SAMPLE_RATE = 12000;
 static int const SLOT_SAMPLES = 15 * SAMPLE_RATE;        // a full FT8 T/R period
+static int const EARLY_SAMPLES = 41 * 3456;              // WSJT-X's first early request (nzhsym 41, 11.8 s)
+static int const FINAL_SAMPLES = 50 * 3456;              // and its final one (nzhsym 50, 14.4 s)
+static double const EARLY_BUDGET = (FINAL_SAMPLES - EARLY_SAMPLES) / (double) SAMPLE_RATE;  // 2.6 s
 
 static bool verbose = false;
 
@@ -95,7 +99,8 @@ struct Options
   std::string model;                    // --model, else $FT8NN_MODEL, else searched (find_model)
   int threads = 0;                      // --threads: decode threads, 0 = one per performance core
   int max_decodes = 200;                // --max-decodes per pass
-  bool early = false;                   // --early: decode WSJT-X's early passes too
+  bool early = true;                    // --no-early: answer WSJT-X's early passes with no decodes
+  bool sequence = false;                // file mode --sequence: early pass, then final, as WSJT-X asks
   bool range = true;                    // --no-range: keep decodes outside [nfa, nfb]
   bool help = false;
   std::vector<std::string> files;       // file mode: decode these instead of talking to WSJT-X
@@ -111,8 +116,11 @@ static char const * const usage_text =
   "  --model PATH      ft8nn.onnx (default: $FT8NN_MODEL, then ft8nn.onnx next to this\n"
   "                    binary, in $WSJTX_DATA_DIR / $WSJTX_SHARE_DIR, or ../models/v3)\n"
   "  --threads N       decode threads (default 0: one per performance core)\n"
-  "  --early           also decode WSJT-X's early passes (default: answer them at once with\n"
-  "                    no decodes, see README: a slow early pass costs the full one)\n"
+  "  --no-early        answer WSJT-X's early passes at once with no decodes (default: decode\n"
+  "                    the first, at 11.8 s, with a short early pass, and the final pass\n"
+  "                    reports only what it adds; see README)\n"
+  "  --sequence        file mode: per file an early pass on the first 11.8 s, then the final\n"
+  "                    pass on 14.4 s, as WSJT-X asks (what the sidecar does live)\n"
   "  --max-decodes N   report at most N decodes per WSJT-X pass (default 200)\n"
   "  --no-range        report decodes outside WSJT-X's [nfa, nfb] too\n"
   "  -v, --verbose     log every pass to stderr (WSJT-X copies it into its log)\n"
@@ -135,7 +143,9 @@ static bool parse_args (int argc, char ** argv, Options & o)
       if (a == "--model") o.model = next ();
       else if (a == "--threads") o.threads = std::max (0, atoi (next ().c_str ()));
       else if (a == "--max-decodes") o.max_decodes = std::max (1, atoi (next ().c_str ()));
-      else if (a == "--early") o.early = true;
+      else if (a == "--early") o.early = true;            // the default now; kept for old command lines
+      else if (a == "--no-early") o.early = false;
+      else if (a == "--sequence") o.sequence = true;
       else if (a == "--no-range") o.range = false;
       else if (a == "-v" || a == "--verbose") verbose = true;
       else if (a == "-h" || a == "--help") o.help = true;
@@ -230,15 +240,19 @@ struct Decoder
    * [nfa, nfb] allows, in frequency order like a jt9 pass; at most --max-decodes in all, counted in
    * the order the decoder finds them. slot_time is the period's start as epoch seconds, which the
    * decoder needs for its context a-priori decoding (it looks at this station's own decodes 30 and
-   * 60 s earlier); INT64_MIN if it is not known. Returns the number reported, -1 if decoding failed. */
+   * 60 s earlier); INT64_MIN if it is not known. Returns the number reported, -1 if decoding failed.
+   * kind: Plain (ft8nn_decode_stream), Early (ft8nn_decode_early; every decode it makes, reported or not,
+   * goes into *prior) or Final (ft8nn_decode_final with *prior: only the new decodes are reported). */
+  enum Kind { Plain, Early, Final };
   template <class Sink>
-  int run (Options const & o, int n, int64_t slot_time, int nfa, int nfb, Sink && sink)
+  int run (Options const & o, int n, int64_t slot_time, int nfa, int nfb, Sink && sink, Kind kind = Plain,
+           std::vector<ft8nn_decode_t> * prior = nullptr)
   {
     struct State
     {
       Options const * o;
       int nfa, nfb, seen, reported;
-      Sink * sink;
+      std::remove_reference_t<Sink> * sink;
       std::vector<ft8nn_decode_t const *> keep;
     } st {&o, nfa, nfb, 0, 0, &sink, {}};
     ft8nn_pass_cb cb = [] (ft8nn_decode_t const * d, int nd, int pass, void * user) {
@@ -255,7 +269,19 @@ struct Decoder
       (*s.sink) (s.keep, pass);
     };
     /* INT64_MIN is FT8NN_NO_SLOT_TIME: no context decoding, as ft8nn_decode */
-    if (ft8nn_decode_stream (ctx, audio.data (), n, slot_time, cb, &st, nullptr, 0) < 0)
+    int r;
+    if (kind == Early)
+      {
+        prior->resize (512);
+        r = ft8nn_decode_early (ctx, audio.data (), n, slot_time, cb, &st, prior->data (), (int) prior->size ());
+        prior->resize ((size_t) std::max (0, std::min (r, 512)));
+      }
+    else if (kind == Final)
+      r = ft8nn_decode_final (ctx, audio.data (), n, slot_time, prior->data (), (int) prior->size (), cb, &st,
+                              nullptr, 0);
+    else
+      r = ft8nn_decode_stream (ctx, audio.data (), n, slot_time, cb, &st, nullptr, 0);
+    if (r < 0)
       {
         say ("decode failed");
         return -1;
@@ -357,6 +383,8 @@ static int sidecar_mode (Options const & o, char const * argv0)
   std::vector<short> pcm;
   int have = 0;                                 // samples of the last request that carried audio
   int64_t have_slot = INT64_MIN;
+  std::vector<ft8nn_decode_t> early;            // the early pass's decodes, for the final pass of early_slot
+  int64_t early_slot = INT64_MIN;
   std::string line;
 
   for (;;)
@@ -448,16 +476,27 @@ static int sidecar_mode (Options const & o, char const * argv0)
           continue;
         }
 
-      /* WSJT-X asks for a decode at about 11.8 s and 13.2 s into the period as well as at the end,
-       * and skips a pass that arrives while we are still busy - so a slow early pass costs the full
-       * one. This decoder needs seconds per slot, so early passes are answered at once, with no
-       * decodes; the full pass finds those signals anyway. */
-      if (!final_pass && !o.early)
+      /* WSJT-X asks for a decode at about 11.8 s and 13.5 s into the period as well as at 14.4 s, and
+       * skips a request that arrives while we are still busy. The first early request gets a short early
+       * pass (two subtraction passes, ~1.6 s for a busy slot on an M4), well before the final request;
+       * the final pass subtracts its decodes first and reports only what it adds. The second early
+       * request is answered at once with nothing, as is every early one with --no-early or when the
+       * period's start is unknown (its final pass could not be matched to it). */
+      Decoder::Kind kind = Decoder::Plain;
+      if (!final_pass)
         {
-          vsay ("seq %lld: early pass %d (%d samples) skipped", seq, pass, nsamp);
-          send_done (seq);
-          continue;
+          if (!o.early || nsamp == 0 || have_slot == INT64_MIN || have_slot == early_slot)
+            {
+              vsay ("seq %lld: early pass %d (%d samples) skipped", seq, pass, nsamp);
+              send_done (seq);
+              continue;
+            }
+          kind = Decoder::Early;
+          early_slot = have_slot;
         }
+      else if (nsamp > 0 && have_slot != INT64_MIN && have_slot == early_slot)
+        kind = Decoder::Final;
+      if (final_pass) early_slot = INT64_MIN;   // a re-decode after it is a plain decode of everything
 
       double t0 = monotonic ();
       int k = dec.run (o, have, have_slot, nfa, nfb, [&] (auto const & keep, int p) {
@@ -465,12 +504,16 @@ static int sidecar_mode (Options const & o, char const * argv0)
           fflush (stdout);
           if (p >= 0) vsay ("seq %lld:   decoder pass %d: %d decode(s) sent at %.2f s", seq, p, (int) keep.size (), monotonic () - t0);
           else vsay ("seq %lld:   context decodes: %d sent at %.2f s", seq, (int) keep.size (), monotonic () - t0);
-        });
+        }, kind, &early);
       send_done (seq);
       double took = monotonic () - t0;
-      vsay ("seq %lld: utc %06d pass %d (%d samples) -> %d decode(s) in %.1f s",
-            seq, req.integer ("utc", 0) % 1000000, pass, have, std::max (k, 0), took);
-      if (took > budget)
+      vsay ("seq %lld: utc %06d pass %d (%d samples, %s) -> %d decode(s) in %.1f s",
+            seq, req.integer ("utc", 0) % 1000000, pass, have,
+            kind == Decoder::Early ? "early" : kind == Decoder::Final ? "final" : "plain", std::max (k, 0), took);
+      if (kind == Decoder::Early && took > EARLY_BUDGET)
+        say ("seq %lld: the early pass took %.1f s, longer than the %.1f s until WSJT-X's final request,"
+             " which it skips while we are busy; see wsjtx/README.md on decode speed", seq, took, EARLY_BUDGET);
+      else if (took > budget)
         say ("seq %lld: %.1f s is longer than WSJT-X waits (%.0f s), so this pass was dropped;"
              " see wsjtx/README.md on decode speed", seq, took, budget);
     }
@@ -521,9 +564,21 @@ static int file_mode (Options const & o, char const * argv0)
       n = std::min (n, SLOT_SAMPLES);
       std::copy (x, x + n, dec.audio.begin ());
       free (x);
-      int k = dec.run (o, n, t, 0, 0, [&] (auto const & keep, int) {
+      auto print = [&] (auto const & keep, int) {
           for (auto * d : keep) print_jt9_line (nutc, *d);
-        });
+        };
+      int k;
+      if (o.sequence)
+        {
+          /* what sidecar mode does with WSJT-X's requests: early on 11.8 s, nothing at 13.5 s, final on 14.4 s */
+          std::vector<ft8nn_decode_t> early;
+          k = dec.run (o, std::min (n, EARLY_SAMPLES), t, 0, 0, print, Decoder::Early, &early);
+          printf ("<DecodeFinished>%4d%4d%9d\n", 0, std::max (k, 0), 0);
+          printf ("<DecodeFinished>%4d%4d%9d\n", 0, 0, 0);
+          k = dec.run (o, std::min (n, FINAL_SAMPLES), t, 0, 0, print, Decoder::Final, &early);
+        }
+      else
+        k = dec.run (o, n, t, 0, 0, print);
       /* '<DecodeFinished>', 2i4, i9 (lib/decoder.f90 format 1010): WSJT-X writes this itself when
        * our "done" arrives, so file mode prints it only to look like a jt9 pass. */
       printf ("<DecodeFinished>%4d%4d%9d\n", 0, std::max (k, 0), 0);

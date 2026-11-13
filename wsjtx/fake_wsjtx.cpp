@@ -8,7 +8,9 @@
  *   fake_wsjtx [options] FILE.wav...
  *     --decoder CMD    the decoder and its arguments, one string (default "build/ft8nn_sidecar")
  *     --pass N         the pass number to report (nzhsym; default 50)
- *     --early          report final=false, as WSJT-X does for its 11.8 s and 13.2 s passes
+ *     --early          report final=false, as WSJT-X does for its 11.8 s and 13.5 s passes
+ *     --sequence       per slot the three requests WSJT-X sends live: nzhsym 41 (11.8 s of audio) and 47
+ *                      (13.5 s), final=false, then 50 (14.4 s), final=true
  *     --live           live audio: period_start set, disk=false (default: a .wav the user opened)
  *     --redecode       after each slot, a second request with samples=0 (the user clicked Decode)
  *     --garbage        send a junk line before each decode, to check it is ignored
@@ -104,7 +106,7 @@ struct Options
 {
   std::string decoder = "build/ft8nn_sidecar";
   int pass = 50;
-  bool early = false, live = false, redecode = false, garbage = false;
+  bool early = false, live = false, redecode = false, garbage = false, sequence = false;
   int nfa = 200, nfb = 4000;
   double timeout = 120.;
   std::string times;
@@ -131,6 +133,7 @@ int main (int argc, char ** argv)
       if (a == "--decoder") o.decoder = next ();
       else if (a == "--pass") o.pass = atoi (next ().c_str ());
       else if (a == "--early") o.early = true;
+      else if (a == "--sequence") o.sequence = true;
       else if (a == "--live") o.live = true;
       else if (a == "--redecode") o.redecode = true;
       else if (a == "--garbage") o.garbage = true;
@@ -140,7 +143,7 @@ int main (int argc, char ** argv)
       else if (a == "--timeout") o.timeout = atof (next ().c_str ());
       else if (a == "-h" || a == "--help")
         {
-          fputs ("fake_wsjtx [--decoder CMD] [--pass N] [--early] [--live] [--redecode] [--garbage]\n"
+          fputs ("fake_wsjtx [--decoder CMD] [--pass N] [--early] [--sequence] [--live] [--redecode] [--garbage]\n"
                  "           [--nfa N] [--nfb N] [--timeout S] [--times FILE] FILE.wav...\n", stdout);
           return 0;
         }
@@ -228,10 +231,19 @@ int main (int argc, char ** argv)
           strftime (iso, sizeof iso, "%Y-%m-%dT%H:%M:%S.000Z", &tm);
         }
 
-      for (int attempt = 0; attempt < (o.redecode ? 2 : 1); ++attempt)
+      struct Ask { int pass; bool final; int nsamp; };
+      std::vector<Ask> asks;
+      if (o.sequence)
+        asks = {{41, false, std::min (n, 41 * 3456)}, {47, false, std::min (n, 47 * 3456)}, {50, true, std::min (n, 50 * 3456)}};
+      else
+        asks = {{o.pass, !o.early, n}};
+      if (o.redecode) asks.push_back ({asks.back ().pass, asks.back ().final, 0});
+      for (size_t attempt = 0; attempt < asks.size (); ++attempt)
         {
-          bool again = attempt > 0;             // the user clicked Decode: no audio, same period
-          int nsamp = again ? 0 : n;
+          bool again = asks[attempt].nsamp == 0;    // the user clicked Decode: no audio, same period
+          int nsamp = asks[attempt].nsamp;
+          int apass = asks[attempt].pass;
+          bool afinal = asks[attempt].final;
           ++seq;
           if (o.garbage)
             {
@@ -252,9 +264,9 @@ int main (int argc, char ** argv)
             "\"b_even_seq\":%s,\"yymmdd\":%d,\"listutc\":[0,0,0,0,0,0,0,0,0,0],"
             "\"datetime\":\"2026-Nov-09 00:00\",\"mycall\":\"K1ABC\",\"mygrid\":\"FN42\","
             "\"hiscall\":\"\",\"hisgrid\":\"\",\"mybcall\":\"K1ABC\",\"hisbcall\":\"\"}}\n",
-            seq, nutc, o.pass, o.early ? "false" : "true", o.live ? "false" : "true",
+            seq, nutc, apass, afinal ? "true" : "false", o.live ? "false" : "true",
             o.live ? iso : "", SAMPLE_RATE, nsamp, nutc, o.live ? "false" : "true",
-            again ? "false" : "true", again ? "true" : "false", o.nfa, o.nfb, n, o.pass,
+            again ? "false" : "true", again ? "true" : "false", o.nfa, o.nfb, again ? n : nsamp, apass,
             nutc % 30 < 15 ? "true" : "false", o.live ? -1 : yymmdd);
           if (k <= 0 || k >= (int) sizeof req)
             {

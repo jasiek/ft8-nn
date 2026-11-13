@@ -81,11 +81,19 @@ per WSJT-X pass (`seq 7:   decoder pass 0: 28 decode(s) sent at 2.41 s` …
 
 ## What it does and does not do
 
-- **Early passes answer empty.** WSJT-X asks for a decode at about 11.8 s and 13.2 s into the period
-  as well as at the end, and a pass that arrives while we are still busy is skipped — so a slow
-  early pass costs the *full* pass. This decoder needs seconds per slot, so a request with
-  `final: false` is answered at once with no decodes; the full pass finds those signals anyway.
-  `--early` decodes them too (use it with `--threads` on a fast machine).
+- **A short early pass, then the final one.** WSJT-X asks for a decode at about 11.8 s and 13.5 s
+  into the period as well as at 14.4 s, and skips a request that arrives while we are still busy —
+  so an early pass must be done before the final request. The 11.8 s request gets a short early
+  pass (`ft8nn_decode_early`: two subtraction passes on the audio so far, no co-channel or repeat
+  stage, no CQ a-priori or the OSD stages that made false decodes on cut signals): on the busiest
+  receiver tested (40 m, 40 slots, the M4 mini's 4 performance cores, idle) it takes 1.5 s (1.6 s at
+  most) and reports 78% of the decodes a single decode at 14.4 s would make, its first ones 0.2 s
+  after the request. The 13.5 s request is answered at once with nothing. The final pass
+  (`ft8nn_decode_final`) subtracts the early decodes first, reports only what it adds, and takes
+  1.9 s instead of 2.8 s; together they find 1.5% more than a single decode and cost 18% more CPU.
+  An early pass that took longer than the 2.6 s until the final request is logged. `--no-early`
+  answers early requests with no decodes, as before. A period whose start time is unknown gets no
+  early pass (its final pass could not be matched to it).
 - **Decode speed matters.** WSJT-X gives up on a request after 15 s for FT8, and the next period's
   request arrives at the same time. A decode uses every performance core: on the busiest receiver
   tested (40 m, about 48 decodes per slot, 40 slots) the first decodes reach WSJT-X a median 0.33 s
@@ -119,7 +127,8 @@ wsjtx/build/ft8nn_sidecar --model models/v3/ft8nn.onnx slot1.wav slot2.wav   # l
 ```
 
 With `.wav` files on the command line it decodes those instead of talking to WSJT-X, printing the
-same `jt9` lines WSJT-X would build. Slots named `yymmdd_HHMMSS.wav` also get context a-priori
+same `jt9` lines WSJT-X would build (`--sequence`: an early pass on the first 11.8 s, then the final
+pass on 14.4 s, as the sidecar does live). Slots named `yymmdd_HHMMSS.wav` also get context a-priori
 decoding, as in `c/tools/ft8nn_cli`. That is how the tests compare the protocol path against a plain
 decode of the same audio.
 
@@ -136,7 +145,9 @@ with their audio, reads the replies, formats each one into the `jt9` line WSJT-X
 1. the protocol path gives exactly the decodes a plain decode of the same audio gives,
 2. every line WSJT-X builds from our replies has `jt9`'s FT8 column layout,
 3. `[nfa, nfb]` keeps exactly the decodes inside the range,
-4. an early pass (`final: false`) decodes nothing by default, and does decode with `--early`,
+4. an early pass (`final: false`) decodes by default, and nothing with `--no-early`; and WSJT-X's
+   live sequence of requests (`fake_wsjtx --sequence`: 11.8 s, 13.5 s, 14.4 s) gives exactly what
+   file mode `--sequence` prints, nothing at 13.5 s, and no message twice in a slot,
 5. a re-decode (`samples: 0`) decodes the same audio again, line for line,
 6. a line that is not JSON is logged and skipped instead of breaking the stream,
 7. `quit` makes the decoder exit within 1 s (`fake_wsjtx` kills it, and fails, if it does not),

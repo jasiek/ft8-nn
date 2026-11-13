@@ -78,6 +78,7 @@ static int prof = -1;
 #define EARLY_MIN 3.0  /* its score threshold (2 of 3 Costas arrays in the slot -> noisier score) */
 #define N_HYP 2
 #define PASSES 4 /* decode-subtract passes (decoder.decode_slot passes) */
+#define EARLY_PASSES 2 /* in the early pass, which has no co-channel or repeat stage either (decoder.EARLY_PASSES) */
 #define OSD_ORDER 2
 #define OSD_MAX_HARD 40
 #define OSD_GATE 40.0
@@ -144,6 +145,7 @@ typedef struct {
     int method, metric, pass;
     char text[48]; /* unpacked once the decode is final (ft8nn_decode_stream reports it then) */
     uint8_t final;
+    uint8_t prior; /* from the early pass (ft8nn_decode_final prior): subtracted first, never reported or dropped */
 } dec;
 
 struct ft8nn_ctx {
@@ -159,6 +161,7 @@ struct ft8nn_ctx {
         dec *d;
     } hist[CTX_HIST]; /* this context's own decodes of recent slots (ft8nn_decode_at) */
     int nv_bb;        /* NN features: baseband samples that carry audio during the current decode, 0 = all */
+    int cons;         /* early pass: no CQ a-priori, no OSD on BP sums, no wide-window erasure OSD */
 };
 
 static once_t init_once = ONCE_INIT;
@@ -366,7 +369,7 @@ static int same_sender(const dec *a, const dec *b) {
 static int drop_ctx_dupes(dec *all, int from, int n) {
     uint8_t drop[DEC_CAP] = {0}; /* n <= DEC_CAP (fixed size: not every compiler has variable-length arrays) */
     for (int i = from; i < n; i++) {
-        if (!is_ctx(all[i].method)) continue;
+        if (!is_ctx(all[i].method) || all[i].prior) continue; /* a prior has been sent already */
         for (int j = 0; j < n && !drop[i]; j++)
             if (j != i && (!is_ctx(all[j].method) || (j >= from && j < i && !drop[j])) && same_sender(&all[i], &all[j])) drop[i] = 1;
     }
@@ -444,7 +447,7 @@ static void erase_init(void) {
  * window of data-symbol LLRs in turn, BP; first CRC pass wins. Then OSD-0 on each wide window
  * (too many erasures for BP); the smallest-distance CRC pass wins if below ERASE_OSD_DMAX.
  * Returns FT8NN_BP_ERASE, FT8NN_OSD_ERASE or -1. */
-static int try_erase(const double *llr, uint8_t *a91) {
+static int try_erase(const double *llr, uint8_t *a91, int osd) {
     double l2[174];
     uint8_t bits[174];
     int nh;
@@ -457,7 +460,7 @@ static int try_erase(const double *llr, uint8_t *a91) {
         }
     }
     double best = -1.0, dist;
-    for (int w = 0; w < n_erase_osd; w++) {
+    for (int w = 0; osd && w < n_erase_osd; w++) {
         memcpy(l2, llr, sizeof l2);
         for (int i = 3 * erase_osd_win[w][0]; i < 3 * erase_osd_win[w][1]; i++) l2[i] = 0.0;
         if (osd_decode(l2, 0, bits, &dist, &nh) && dist < ERASE_OSD_DMAX && (best < 0 || dist < best)) {
@@ -495,7 +498,7 @@ static int reuse_skip(const candidate *cd, const signed char *tried, const dec *
     int i = tried_idx(cd);
     if (i < 0 || tried[i] < 0) return 0;
     for (int q = 0; q < nall; q++)
-        if (all[q].pass >= tried[i] && fabs(all[q].f0 - cd->f0) < REUSE_DF) return 0;
+        if (!all[q].prior && all[q].pass >= tried[i] && fabs(all[q].f0 - cd->f0) < REUSE_DF) return 0;
     return 1;
 }
 
@@ -511,7 +514,7 @@ typedef struct {
     int n_bp, n_osd;
 } hyp_res;
 
-static void decode_hyp(const sync_hyp *hy, const double *L, int early, const dec *cx, int ncx, hyp_res *r) {
+static void decode_hyp(const sync_hyp *hy, const double *L, int early, int cons, const dec *cx, int ncx, hyp_res *r) {
     r->status = 0;
     r->n_bp = r->n_osd = 0;
     for (int k = 0; k < NMET; k++) {
@@ -533,12 +536,13 @@ static void decode_hyp(const sync_hyp *hy, const double *L, int early, const dec
                 memcpy(a91, bits, 91);
                 method = plausible(FT8NN_OSD, a91);
             }
-            if (method < 0 && OSD_SNAPS > 0 && !early) method = plausible(try_osd_bp(l, a91), a91);
+            if (method < 0 && OSD_SNAPS > 0 && !early && !cons) method = plausible(try_osd_bp(l, a91), a91);
         }
         if (method < 0 && k == 0 && ncx > 0 && !early && exp_err < CTX_GATE)
             method = plausible(try_ctx(l, cx, ncx, hy->f0, hy->dt, a91), a91);
-        if (method < 0 && k == 0 && exp_err < AP_GATE) method = plausible(try_ap(l, a91, early ? -1 : OSD_ORDER), a91);
-        if (method < 0 && k == 0 && exp_err < ERASE_GATE && !early) method = plausible(try_erase(l, a91), a91);
+        if (method < 0 && k == 0 && !cons && exp_err < AP_GATE)
+            method = plausible(try_ap(l, a91, early ? -1 : OSD_ORDER), a91);
+        if (method < 0 && k == 0 && exp_err < ERASE_GATE && !early) method = plausible(try_erase(l, a91, !cons), a91);
         if (method < 0) continue;
         if (!any_bits(a91, 77)) {
             r->status = 2;
@@ -621,7 +625,7 @@ static void hyp_worker(void *arg, int w) {
             for (int k = 1; k < NMET; k++) coherent_llr(cs, k, L + k * 174);
             t1 = tthr();
             j->st[w][ST_CL] += t1 - t0;
-            decode_hyp(hy, L, j->early[i0 + i], j->cx, j->ncx, &j->res[i0 + i]);
+            decode_hyp(hy, L, j->early[i0 + i], j->c->cons, j->cx, j->ncx, &j->res[i0 + i]);
             j->st[w][ST_DEC] += tthr() - t1;
         }
         atomic_store_explicit(&j->cdone[i0 / NN_CHUNK], 1, memory_order_release);
@@ -677,6 +681,7 @@ static void merge_to(merger *m, int upto) {
         if (!known && nall + m->added < m->cap) {
             dec *d = &all[nall + m->added++];
             d->final = 0;
+            d->prior = 0;
             memcpy(d->bits77, r->a91, 77);
             d->f0 = m->hp[h]->f0;
             d->dt = m->hp[h]->dt;
@@ -836,7 +841,7 @@ typedef struct {
     int start, cell, group;
 } cc_spec;
 
-static void cc_decode_hyp(const sync_hyp *hy, const double *l, hyp_res *r) {
+static void cc_decode_hyp(const sync_hyp *hy, const double *l, int cons, hyp_res *r) {
     r->status = 0;
     double exp_err = 0, dist;
     for (int i = 0; i < 174; i++) exp_err += 1.0 / (1.0 + exp(fabs(l[i])));
@@ -851,7 +856,7 @@ static void cc_decode_hyp(const sync_hyp *hy, const double *l, hyp_res *r) {
             memcpy(a91, bits, 91);
             method = plausible(FT8NN_OSD_CC, a91);
         }
-        if (method < 0 && OSD_SNAPS > 0 && try_osd_bp(l, a91) >= 0) method = plausible(FT8NN_OSD_BP_CC, a91);
+        if (method < 0 && OSD_SNAPS > 0 && !cons && try_osd_bp(l, a91) >= 0) method = plausible(FT8NN_OSD_BP_CC, a91);
     }
     if (method < 0) return;
     if (!any_bits(a91, 77)) {
@@ -959,7 +964,7 @@ static void cc_worker(void *arg, int w) {
             atomic_store(&j->err, 1);
             break;
         }
-        for (int i = 0; i < b; i++) cc_decode_hyp(&hy[i], llr + (size_t)i * 174, &j->res[i0 + i]);
+        for (int i = 0; i < b; i++) cc_decode_hyp(&hy[i], llr + (size_t)i * 174, j->c->cons, &j->res[i0 + i]);
     }
     free(feat);
     free(llr);
@@ -1170,6 +1175,7 @@ static int repeat_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int nall
         if (k1 >= 0 && k1 < npri && r1 >= REPEAT_RHO && r1 - r2 >= REPEAT_MARGIN && rc < DEC_CAP) {
             dec *d = &all[rc++];
             d->final = 0;
+            d->prior = 0;
             memcpy(d->bits77, alt[k1], 77);
             d->f0 = best_h.f0;
             d->dt = best_h.dt;
@@ -1242,8 +1248,10 @@ static void report(ft8nn_ctx *c, dec *all, int from, int n, int ctx_too, int pas
     if (cb) cb(batch, nb, pass, user);
 }
 
+/* early: the audio stops before the transmissions do (ft8nn_decode_early); prior: that early pass's decodes, for the
+ * final pass on the whole audio (ft8nn_decode_final). */
 static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_decode_t *out, int max_out,
-                  ft8nn_pass_cb cb, void *user) {
+                  ft8nn_pass_cb cb, void *user, int early, const ft8nn_decode_t *prior, int n_prior) {
     run_once(&ap_once, ap_init);
     run_once(&erase_once, erase_init);
     if (n > SLOT_N) n = SLOT_N;
@@ -1272,7 +1280,27 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
                     ncx += c->hist[i].n;
                 }
     }
-    for (int p = 0; p < PASSES; p++) {
+    if (n_prior > DEC_CAP) n_prior = DEC_CAP;
+    for (int q = 0; q < n_prior; q++) { /* decoder.decode_slot prior: subtracted first, kept as found */
+        dec *d = &all[nall++];
+        memset(d, 0, sizeof *d);
+        for (int i = 0; i < 77; i++) d->bits77[i] = (prior[q].bits77[i / 8] >> (7 - i % 8)) & 1;
+        d->f0 = prior[q].f0;
+        d->dt = prior[q].dt;
+        d->snr = prior[q].snr;
+        d->method = prior[q].method;
+        d->metric = prior[q].metric;
+        d->pass = prior[q].pass;
+        memcpy(d->text, prior[q].text, sizeof d->text);
+        d->final = d->prior = 1;
+        uint8_t cw[174];
+        int tones[NN];
+        encode77(d->bits77, cw, tones);
+        subtract_signal(x, n, tones, d->f0, d->dt, c->pool);
+    }
+    c->nv_bb = early ? (int)((int64_t)n * 200 / 12000) : 0; /* nn_metric.make_llr_fn n_valid, mask_median */
+    c->cons = early;
+    for (int p = 0; p < (early ? EARLY_PASSES : PASSES); p++) {
         double shift = DT_RECENTER > 0 ? dt_recenter_shift(all, nall, cx, ncx) : 0.0;
         int k = decode_pass(c, x, n, all, nall, DEC_CAP, p, cx, ncx, tried, shift, cb, user, batch);
         if (k < 0) {
@@ -1281,12 +1309,14 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
             free(cx);
             free(tried);
             free(batch);
+            c->nv_bb = c->cons = 0;
             return -1;
         }
         /* report first: subtraction only prepares the next pass, and takes ~20 ms per decode */
         report(c, all, nall, nall + k, 0, p, cb, user, batch);
         double ts = tnow();
-        for (int q = nall; q < nall + k; q++) { /* the last pass too: the co-channel and repeat stages work on the residual */
+        /* the last pass too: the co-channel and repeat stages work on the residual (an early pass has neither) */
+        for (int q = nall; q < nall + k && !(early && p == EARLY_PASSES - 1); q++) {
             uint8_t cw[174];
             int tones[NN];
             encode77(all[q].bits77, cw, tones);
@@ -1296,7 +1326,7 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
         nall += k;
         if (!k) break;
     }
-    if (nall > 0) { /* x is now the residual */
+    if (nall > 0 && !early) { /* x is now the residual */
         int r = cochannel_stage(c, x, n, all, nall);
         if (r < 0) {
             free(x);
@@ -1304,6 +1334,7 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
             free(cx);
             free(tried);
             free(batch);
+            c->nv_bb = c->cons = 0;
             return -1;
         }
         for (int q = nall; q < r; q++) {
@@ -1314,7 +1345,7 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
         }
         nall = r;
     }
-    if (ncx > 0) {
+    if (ncx > 0 && !early) {
         int r = repeat_stage(c, x, n, all, nall, cx, ncx);
         if (r < 0) {
             free(x);
@@ -1322,6 +1353,7 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
             free(cx);
             free(tried);
             free(batch);
+            c->nv_bb = c->cons = 0;
             return -1;
         }
         nall = r;
@@ -1331,7 +1363,9 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
     free(batch);
     free(cx);
     free(tried);
-    if (t != INT64_MIN) { /* remember: replace this slot's entry or the oldest */
+    c->nv_bb = c->cons = 0;
+    if (t != INT64_MIN && !early) { /* remember: replace this slot's entry or the oldest (an early pass's decodes come
+                                       back as the final pass's prior, which stores them with its own) */
         int w = 0;
         for (int i = 0; i < CTX_HIST; i++)
             if (c->hist[i].t == t || (c->hist[w].t != t && c->hist[i].t < c->hist[w].t)) w = i;
@@ -1339,21 +1373,33 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
         c->hist[w].n = nall;
         memcpy(c->hist[w].d, all, sizeof(dec) * nall);
     }
-    for (int q = 0; q < nall && q < max_out; q++) to_public(&all[q], &out[q]);
+    int nout = 0; /* this decode's own: the prior ones were handed out by the early pass */
+    for (int q = 0; q < nall; q++)
+        if (!all[q].prior && nout++ < max_out) to_public(&all[q], &out[nout - 1]);
     free(x);
     free(all);
-    return nall;
+    return nout;
 }
 
 int ft8nn_decode(ft8nn_ctx *c, const float *audio, int n, ft8nn_decode_t *out, int max_out) {
-    return decode(c, audio, n, INT64_MIN, out, max_out, NULL, NULL);
+    return decode(c, audio, n, INT64_MIN, out, max_out, NULL, NULL, 0, NULL, 0);
 }
 
 int ft8nn_decode_at(ft8nn_ctx *c, const float *audio, int n, int64_t slot_time, ft8nn_decode_t *out, int max_out) {
-    return decode(c, audio, n, slot_time, out, max_out, NULL, NULL);
+    return decode(c, audio, n, slot_time, out, max_out, NULL, NULL, 0, NULL, 0);
 }
 
 int ft8nn_decode_stream(ft8nn_ctx *c, const float *audio, int n, int64_t slot_time, ft8nn_pass_cb cb, void *user,
                         ft8nn_decode_t *out, int max_out) {
-    return decode(c, audio, n, slot_time, out, max_out, cb, user);
+    return decode(c, audio, n, slot_time, out, max_out, cb, user, 0, NULL, 0);
+}
+
+int ft8nn_decode_early(ft8nn_ctx *c, const float *audio, int n, int64_t slot_time, ft8nn_pass_cb cb, void *user,
+                       ft8nn_decode_t *out, int max_out) {
+    return decode(c, audio, n, slot_time, out, max_out, cb, user, 1, NULL, 0);
+}
+
+int ft8nn_decode_final(ft8nn_ctx *c, const float *audio, int n, int64_t slot_time, const ft8nn_decode_t *prior,
+                       int n_prior, ft8nn_pass_cb cb, void *user, ft8nn_decode_t *out, int max_out) {
+    return decode(c, audio, n, slot_time, out, max_out, cb, user, 0, prior, n_prior);
 }

@@ -6,7 +6,9 @@
 #   1. the sidecar path gives exactly the decodes a plain decode of the same audio gives,
 #   2. every line WSJT-X builds from our replies has jt9's FT8 column layout,
 #   3. [nfa, nfb] keeps exactly the decodes inside WSJT-X's frequency range,
-#   4. an early pass (final=false) decodes nothing by default, and does decode with --early,
+#   4. an early pass (final=false) decodes by default, and nothing with --no-early,
+#   4b. WSJT-X's live sequence (early at 11.8 s, early at 13.5 s, final at 14.4 s) gives what file mode
+#       --sequence prints: the second early request nothing, the final pass only what the early one missed,
 #   5. a re-decode (samples=0, the user clicking Decode) decodes the same audio again,
 #   6. a line that is not JSON is ignored instead of breaking the stream,
 #   7. "quit" makes the decoder exit within 1 s (fake_wsjtx kills it, and fails, if it does not),
@@ -91,17 +93,33 @@ if ! diff -u "$tmp/want.sorted" "$tmp/got.sorted" > "$tmp/diff2.txt"; then
 fi
 echo "ok: [nfa, nfb] honoured ($(grep -vc '^$' "$tmp/got.txt" || true) of $ndec decodes in 200..4000 Hz)"
 
-# 4. WSJT-X's early passes (final=false, at about 11.8 s and 13.2 s into the period) are answered at
-#    once with no decodes -- see README: a slow early pass makes WSJT-X skip the full one -- and
-#    --early makes them decode. --live also exercises dating the slot from period_start rather than
-#    params.yymmdd.
+# 4. WSJT-X's early passes (final=false, at about 11.8 s and 13.5 s into the period): the first is decoded
+#    by default (a short early pass, see README), and --no-early answers it at once with no decodes.
+#    --live also exercises dating the slot from period_start rather than params.yymmdd.
 "$fake" --decoder "$sidecar --model $model" --live --early --pass 41 "$first" > "$tmp/early.txt"
-[ "$(grep -vc '<DecodeFinished>' "$tmp/early.txt" || true)" -eq 0 ] \
-  || { echo "FAIL: an early pass should decode nothing by default"; exit 1; }
-"$fake" --decoder "$sidecar --model $model --early" --live --early --pass 41 "$first" > "$tmp/early2.txt"
-nearly=$(grep -vc '<DecodeFinished>' "$tmp/early2.txt" || true)
-[ "$nearly" -gt 0 ] || { echo "FAIL: --early should decode the early pass"; exit 1; }
-echo "ok: early pass skipped by default ($nearly decodes with --early)"
+nearly=$(grep -vc '<DecodeFinished>' "$tmp/early.txt" || true)
+[ "$nearly" -gt 0 ] || { echo "FAIL: an early pass should decode by default"; exit 1; }
+"$fake" --decoder "$sidecar --model $model --no-early" --live --early --pass 41 "$first" > "$tmp/early2.txt"
+[ "$(grep -vc '<DecodeFinished>' "$tmp/early2.txt" || true)" -eq 0 ] \
+  || { echo "FAIL: --no-early should answer an early pass with no decodes"; exit 1; }
+echo "ok: early pass decoded by default ($nearly decodes), skipped with --no-early"
+
+# 4b. the three requests WSJT-X sends per period: the final pass must report only what the early one did
+#     not (no message twice in a slot), the 13.5 s request nothing, and all of it equal file mode --sequence.
+# shellcheck disable=SC2086
+"$fake" --decoder "$sidecar --model $model --no-range" --live --sequence $wavs > "$tmp/seq.txt"
+# shellcheck disable=SC2086
+"$sidecar" --model "$model" --sequence $wavs > "$tmp/seqfile.txt"
+LC_ALL=C sort "$tmp/seq.txt" > "$tmp/seq.sorted"; LC_ALL=C sort "$tmp/seqfile.txt" > "$tmp/seqfile.sorted"
+if ! diff -u "$tmp/seqfile.sorted" "$tmp/seq.sorted" > "$tmp/diff4.txt"; then
+  echo "FAIL: the live sequence and file mode --sequence differ"; head -20 "$tmp/diff4.txt"; exit 1
+fi
+awk '/<DecodeFinished>/ {n++; if (n % 3 == 2 && $0 !~ /<DecodeFinished>   0   0/) bad = 1; next}
+     {k = substr($0, 1, 6) substr($0, 25, 37); if (seen[k]++) dup = 1}
+     END {exit bad + 2 * dup}' "$tmp/seq.txt" \
+  || { echo "FAIL: a decode at the 13.5 s request, or a message reported twice in a slot"; exit 1; }
+nseq=$(grep -vc '<DecodeFinished>' "$tmp/seq.txt" || true)
+echo "ok: live sequence = file mode --sequence ($nseq decodes), nothing at 13.5 s, no message twice"
 
 # 5. a re-decode: WSJT-X sends newdat=false and samples=0 when the user clicks Decode, meaning "the
 #    audio you were sent last, again", so the second answer must repeat the first.

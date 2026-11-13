@@ -7,7 +7,8 @@ real: decodes the first n slots of one station in time order (one context, so ha
       and compares every output field with data/real/<station>/decodes_nn_v2.txt.
 awgn: compares decoded payload sets per file with data/bench/awgn/results_nn_v2.json.
 --threads N (default 4) runs the C decoder on N threads (results must not depend on it); --stream decodes through
-ft8nn_decode_stream, so the decodes handed out pass by pass are what is compared.
+ft8nn_decode_stream, so the decodes handed out pass by pass are what is compared. --early N: an early pass on the
+first N samples, then the final pass with its decodes as prior (reference: bench/run_real.py --early-final N).
 """
 import argparse
 import json
@@ -96,10 +97,12 @@ def main():
     ap.add_argument("--out", default="data/real", help="root of the Python decodes (real mode), e.g. data/val/run2")
     ap.add_argument("--threads", type=int, default=4, help="C decode threads (0 = one per performance core)")
     ap.add_argument("--stream", action="store_true", help="decode with ft8nn_decode_stream")
+    ap.add_argument("--early", type=int, default=0, help="N: early pass on the first N samples, then the final pass "
+                    "(ft8nn_cli --early; Python reference from bench/run_real.py --early-final N)")
     a = ap.parse_args()
     global ONNX, CLI_OPTS
     ONNX = Path(a.onnx) if a.onnx else ONNX
-    CLI_OPTS = ["--threads", str(a.threads)] + (["--stream"] if a.stream else [])
+    CLI_OPTS = ["--threads", str(a.threads)] + (["--stream"] if a.stream else []) + (["--early", str(a.early)] if a.early else [])
     ok = real(a) if a.mode == "real" else awgn(a)
     print("PASS" if ok else "DIFF")
     sys.exit(0 if ok else 1)

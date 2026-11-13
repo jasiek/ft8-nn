@@ -37,10 +37,12 @@ _TRUNC = None
 _CTXF = None
 _PRIOR = None
 _AP = True
+_EF = None
+_LLR_E = None
 
 
-def _init(model, also_classical, n_hyp, early_nn="", ckw=None, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, passes=4, context=True, reuse_df=62.5, dt_recenter=0.8, repeat=None, cochannel=None, sendable=True, truncate=None, context_from=None, prior=None, ap=True):
-    global _AP, _LLR, _NHYP, _CKW, _EG, _EOD, _OSN, _NP, _CTX, _RDF, _DTR, _RP, _CC, _TRUNC, _CTXF, _PRIOR
+def _init(model, also_classical, n_hyp, early_nn="", ckw=None, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, passes=4, context=True, reuse_df=62.5, dt_recenter=0.8, repeat=None, cochannel=None, sendable=True, truncate=None, context_from=None, prior=None, ap=True, early_final=None):
+    global _EF, _LLR_E, _AP, _LLR, _NHYP, _CKW, _EG, _EOD, _OSN, _NP, _CTX, _RDF, _DTR, _RP, _CC, _TRUNC, _CTXF, _PRIOR
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     import torch
 
@@ -64,6 +66,9 @@ def _init(model, also_classical, n_hyp, early_nn="", ckw=None, erase_gate=15.0, 
     _CTXF = context_from
     _PRIOR = prior
     _AP = ap
+    _EF = early_final
+    if early_final:
+        _LLR_E = nn_metric.make_llr_fn(model, also_classical=also_classical, n_valid=early_final, mask_median=True)
     decoder.REPEAT_SENDABLE = sendable  # repeat-stage competitor set (--repeat-competitors)
 
 
@@ -111,7 +116,7 @@ def _decode_chain(paths):
     for path in paths:
         t = _slot_time(Path(path).stem)
         ctx = [c for b in (30, 60) for c in done.get(t - timedelta(seconds=b), [])] if t and _CTX else []
-        stem, res = _decode(path, ctx, prior.get(Path(path).stem, ()))
+        stem, res = _decode_early_final(path, ctx) if _EF else _decode(path, ctx, prior.get(Path(path).stem, ()))
         if t and not _CTXF:
             done[t] = [(r[1], r[2], r[0]) for r in res]
         out.append((stem, res))
@@ -129,10 +134,28 @@ def _decode(path, context=(), prior=()):
         x = x.mean(1)
     if len(x) < 180000:
         x = np.pad(x, (0, 180000 - len(x)))
-    x = x[:180000]
-    if _TRUNC:
-        x[_TRUNC:] = 0  # an early pass: only the first _TRUNC samples have arrived
-    ds = decoder.decode_slot(x / (np.std(x[: _TRUNC or len(x)]) + 1e-9), llr_fn=_LLR, n_hyp=_NHYP, erase_gate=_EG, erase_osd_dmax=_EOD, osd_snaps=_OSN, passes=_NP, context=context, cand_kw=_CKW, reuse_df=_RDF, dt_recenter=_DTR, repeat=_RP, cochannel=_CC, prior=prior, ap=(decoder.AP_CQ,) if _AP else ())
+    x = x[: _TRUNC or 180000]  # an early pass: only the first _TRUNC samples have arrived (the C library gets just those)
+    ds = decoder.decode_slot(x / (np.std(x) + 1e-9), llr_fn=_LLR, n_hyp=_NHYP, erase_gate=_EG, erase_osd_dmax=_EOD, osd_snaps=_OSN, passes=_NP, context=context, cand_kw=_CKW, reuse_df=_RDF, dt_recenter=_DTR, repeat=_RP, cochannel=_CC, prior=prior, ap=(decoder.AP_CQ,) if _AP else ())
+    return Path(path).stem, [(d.bits77, d.f0, d.dt, d.method, d.info.get("metric"), d.snr) for d in ds]
+
+
+def _decode_early_final(path, context=()):
+    """--early-final N: as ft8nn_cli --early N - an early pass on the first N samples (ft8nn_decode_early: masked NN
+    median, EARLY_PASSES subtraction passes, no co-channel or repeat stage, no CQ AP, no OSD on BP sums, no wide-window
+    erasure OSD), then the whole slot with its decodes as prior (ft8nn_decode_final). Returns the union, early first."""
+    from ft8nn import decoder
+
+    sr, x = wavfile.read(path)
+    x = x.astype(np.float64)
+    if x.ndim > 1:
+        x = x.mean(1)
+    x = np.pad(x, (0, max(0, 180000 - len(x))))[:180000]
+    kw = dict(n_hyp=_NHYP, erase_gate=_EG, context=context, cand_kw=_CKW, reuse_df=_RDF, dt_recenter=_DTR)
+    xe = x[:_EF]
+    early = decoder.decode_slot(xe / (np.std(xe) + 1e-9), llr_fn=_LLR_E, erase_osd_dmax=0, osd_snaps=0, ap=(),
+                                passes=decoder.EARLY_PASSES, repeat=None, cochannel=None, **kw)
+    ds = decoder.decode_slot(x / (np.std(x) + 1e-9), llr_fn=_LLR, erase_osd_dmax=_EOD, osd_snaps=_OSN, prior=early,
+                             passes=_NP, repeat=_RP, cochannel=_CC, **kw)
     return Path(path).stem, [(d.bits77, d.f0, d.dt, d.method, d.info.get("metric"), d.snr) for d in ds]
 
 
@@ -216,6 +239,8 @@ def main():
     ap.add_argument("--cochannel", default="2,1,8,24,50,3", help="co-channel retry NEAR_PEAKS,FAR_PEAKS,DF_SPAN,NEAR_DT,FAR_DT,MIN_SCORE (dt in 5 ms baseband samples); 'off' to disable")
     ap.add_argument("--truncate", type=int, default=None, help="zero the audio from this sample on (an early pass: "
                     "WSJT-X asks at 41 or 47 half-symbols, 141696 or 162432 samples)")
+    ap.add_argument("--early-final", type=int, default=None, help="N: early pass on the first N samples, then the final "
+                    "pass with its decodes as prior, context from the union (as c/build/ft8nn_cli --early N)")
     ap.add_argument("--early-nn", default="", help="with --truncate: 'erase' (LLRs of data symbols past the cut set to "
                     "0) and/or 'median' (NN feature normalisation over the symbols before the cut), comma-separated")
     ap.add_argument("--context-from", default=None, help="TAG: context a-priori from <out>/<station>/decodes_TAG.txt "
@@ -237,7 +262,7 @@ def main():
     outroot = Path(a.out)
 
     if not a.compare_only:
-        with ProcessPoolExecutor(a.workers, initializer=_init, initargs=(a.model, a.also_classical, a.n_hyp, a.early_nn, dict(per_symbol=a.per_symbol, fmax=a.fmax, base=a.base), a.erase_gate, a.erase_osd_dmax, a.osd_snaps, a.passes, not a.no_context, a.reuse_df, a.dt_recenter, None if a.repeat == "off" else tuple(map(float, a.repeat.split(","))), _cc_arg(a.cochannel), a.repeat_competitors == "sendable", a.truncate, (a.out, a.context_from) if a.context_from else None, (a.out, a.prior) if a.prior else None, not a.no_ap)) as ex:
+        with ProcessPoolExecutor(a.workers, initializer=_init, initargs=(a.model, a.also_classical, a.n_hyp, a.early_nn, dict(per_symbol=a.per_symbol, fmax=a.fmax, base=a.base), a.erase_gate, a.erase_osd_dmax, a.osd_snaps, a.passes, not a.no_context, a.reuse_df, a.dt_recenter, None if a.repeat == "off" else tuple(map(float, a.repeat.split(","))), _cc_arg(a.cochannel), a.repeat_competitors == "sendable", a.truncate, (a.out, a.context_from) if a.context_from else None, (a.out, a.prior) if a.prior else None, not a.no_ap, a.early_final)) as ex:
             jobs = []  # (station index, chain): one chain per station and period, or one per file without context
             for si, st in enumerate(stations):
                 files = sorted(str(f) for f in (st / "slots").glob("*.wav"))

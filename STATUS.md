@@ -6,20 +6,27 @@ Decode count is no longer the target: what other decoders still find and we miss
 on runs 2–4 (~3% of ours, mostly too weak), and the best remaining lever is worth +0.3% (see "Decided against"
 below). The work is now live operating and CPU, in this order:
 
-1. **Early pass (plan 6a) - measured in Python 2026-11-13, design for the C port / sidecar awaits the user.**
-   WSJT-X asks for decodes at ~11.8 s (and ~13.5 s) into the period, before the transmission ends; replying in the
-   next slot needs decodes by then. Today `wsjtx/ft8nn_sidecar` answers early requests with no decodes unless
-   `--early`. Result (details in plan 6a): **an early pass at 11.8 s, then a final pass that subtracts the early
-   decodes first and keeps them, decodes more than today's single decode with fewer false decodes**: runs 2–4
-   pooled 108,058 / 79,397 slot-confirmed / 1 unconf vs `nn_v3_ccrpc` 107,108 / 78,782 / 4; the early pass alone
-   already has 101,127 / 74,538 / 1 (94.4% / 94.6% of the full decode, +17% over jt9's full decode). Recipe:
-   `models/v3` unchanged, NN feature normalisation over the symbols that have arrived (`median`), and no CQ
-   a-priori, OSD on BP sums or wide-window erasure OSD in the early pass (`cons`: those stages made all 5 early-only
-   false decodes; the final pass finds their signals anyway). Option (a), classical only, is far worse; option (b),
-   a truncation fine-tune, is not needed (see 6a). Open: the C port (API for prior decodes, the early-pass stage
-   switches; `nn_features` already takes the arrived-sample count), the sidecar, and the deadline - a busy-slot
-   early pass (~2.4-2.8 s on all cores) would still be running at WSJT-X's final request at 14.4 s, which WSJT-X
-   skips when we are busy.
+1. **Early pass (plan 6a) - DONE in Python, C and the sidecar 2026-11-13, on the worktree branch (not on
+   `main` yet).** WSJT-X asks for decodes at ~11.8 s, ~13.5 s and 14.4 s into the period; the user wants some
+   decodes early provided it costs no time. Now: the 11.8 s request gets a short early pass
+   (`ft8nn_decode_early` / Python `run_real.py --early-final`: two subtraction passes on the audio so far, no
+   co-channel or repeat stage, NN feature median over the arrived symbols, no CQ AP / OSD on BP sums / wide-window
+   erasure OSD), the 13.5 s request nothing, and the final request `ft8nn_decode_final`, which subtracts the early
+   decodes first and reports only what it adds. **C timing** (40 busy run-1 `01_40m` slots, M4 performance cores,
+   idle, awake, repeated runs identical): early pass 1.53 s mean / 1.63 max after the request (the final request
+   comes 2.6 s after it, and WSJT-X skips a request that arrives while we are busy), first decodes 0.2 s in, 1,688
+   decodes = 78% of today's 2,157; final pass 1.85 s mean (today 2.80-2.87); total 2,189 (+1.5%), CPU 491 vs ~415
+   s (+18%). So for a busy slot: first decodes at ~12.0 s instead of ~14.6, 78% out by ~13.4 s, the last at ~16.3
+   instead of ~17.2. **Runs 2–4 pooled** (the live flow, context from the union): **107,620 / 79,115
+   slot-confirmed / 1 unconf vs `nn_v3_ccrpc` 107,108 / 78,782 / 4** (the 1 is `TNX 73 GL`, also in the full
+   decode); runs 2 / 3 / 4: 29,855 / 21,935 / 0, 28,489 / 21,471 / 0, 49,276 / 35,709 / 1. Checks: C == Python
+   in every field (`tools/golden_c.py real --early 141696`: run-1 01_40m 1,060/1,060, run-2 02_80m 761/761, also
+   `--threads 0 --stream`), `ci_smoke.py` 51/51 (default path unchanged), `wsjtx/test_sidecar.sh` all checks on
+   training slots and as CI runs it (new 4b: `fake_wsjtx --sequence` = file mode `--sequence`, nothing at 13.5 s,
+   no message twice). The user chose a fixed two-pass early pass over a time deadline (deterministic, ~1 s
+   margin). A four-pass early pass with the co-channel and repeat stages found more (runs 2–4 108,058 / 79,397 / 1,
+   measured with the early decodes and context taken from separate runs) but takes 2.7 s, past the final request.
+   Next: merge to `main` when the user OKs it; a live run in WSJT-X.
 2. **Win back the C cost of today's two stages without losing decodes.** `nn_v3_ccrpc` costs **+17% CPU** per
    busy slot against `nn_v3_dtcrp` (timing below). Profile first: the co-channel stage's `data_sync` search
    (`c/src/frontend.c`, sliding DFT), its NN hypotheses (~10 per decode cell, ~280 per busy slot), and the last
@@ -31,6 +38,17 @@ below). The work is now live operating and CPU, in this order:
    stream's `pass = -1` batch today (plan 6 step (1) (a)); they are the QSO-relevant ones (a station answering).
    First measure how often the final `drop_ctx_dupes` actually drops one, then decide whether streaming them
    earlier is worth that risk (the sidecar protocol cannot retract a decode).
+
+**Idea to explore (user, 2026-11-13): prioritise the decodes addressed to us.** A reply to our call is the one decode
+whose timing matters: WSJT-X's auto-sequencer must see it before our next transmission starts, or it repeats the old
+message and the QSO loses a cycle; everyone else's decodes (band activity, PSK Reporter) can come at the end. WSJT-X
+already sends `mycall` / `hiscall` / `hisgrid` with every request, and the sidecar ignores them (`wsjtx/README.md`).
+Shape: a small targeted early pass at 11.8 s - candidates near the QSO partner's frequency first, plus a MyCall
+a-priori (first call field pinned to our 28 bits, WSJT-X's "a2"; same machinery as context AP, plan 8
+`ft8nn_set_mycall`) - a fraction of a second instead of the ~2.7 s full early pass, so it cannot collide with the
+14.4 s request; the full early pass then becomes optional (band display), under a deadline if at all. Risk: a false
+"reply to us" is the worst false decode (the auto-sequencer acts on it), so gate it like context AP and measure on
+runs 2–4 pooled with each receiver's real QSO partners as "my call" and other receivers' calls as the null.
 
 **Decided against (user, 2026-11-12):** more lag tracks per frequency in the candidate search (+0.26–0.37% decodes
 pooled, more CPU per pass) and a look-back repeat stage (+0.53%, offline only, no use live). Numbers:
@@ -54,7 +72,8 @@ Reproduce: `git worktree add --detach <dir> <rev>`, `make -C <dir>/c ORT_PREFIX=
 then `/usr/bin/time -l <dir>/c/build/ft8nn_cli --threads N --time models/v3/ft8nn.onnx <first 40 wavs of
 datasets/ft8-validation-set/recordings/01_40m_*/slots>` (per-slot `time` lines on stderr).
 
-Last updated 2026-11-13 (**early pass measured in Python**, Next item 1 and plan 6a). Before that (**C timing of
+Last updated 2026-11-13 (**early pass in C and the sidecar: two-pass early pass at 11.8 s, final pass with its
+decodes as prior**, Next item 1). Before that (**early pass measured in Python**, plan 6a). Before that (**C timing of
 `nn_v3_ccrpc` and the next plan**, above). Before that (**repeat stage scores only competitors a station could send, tag `nn_v3_ccrpc`** (plan
 12): a CQ's competitors no longer include `CQ K1ABC R FN42` or `CQ K1ABC RR73/-12`, which had beaten the margin on
 226 of the 320 repeats lost that way; a CQ-only sender then needs ρ ≥ 0.50 (`REPEAT_SOLO` 0.35), set on the run-1

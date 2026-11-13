@@ -61,6 +61,10 @@ REPEAT_SOLO = 0.35
 # Competitor set of the repeat stage: True = only messages a station could send (_sendable); False = the plan-12 set
 # (bench --repeat-competitors shipped), which reproduces the decodes made before this change.
 REPEAT_SENDABLE = True
+# Early pass (WSJT-X asks at ~11.8 s; C ft8nn_decode_early): subtraction passes, so it is done before the final request
+# at 14.4 s. On 40 busy run-1 slots (M4, all performance cores) passes 0-1 end ~1.55 s after the request, 2-3 at
+# ~2.1 / 2.3 s and the co-channel and repeat stages at ~2.7 s; the final pass (prior=) finds what the early one left.
+EARLY_PASSES = 2
 # Co-channel retry (_cochannel_stage, plan 7.1 item 1c): (peaks per cell within the near dt span, peaks in the far dt
 # band, df span Hz, near and far dt spans in baseband samples, minimum data-sync score), chosen on validation run 1.
 COCHANNEL = (2, 1, 8.0, 24, 50, 3.0)
