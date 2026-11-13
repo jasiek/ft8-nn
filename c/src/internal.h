@@ -105,7 +105,9 @@ void data_sync(const cplx *y0, int start0, const double *dfs, int nf, const int 
 void bb_rotate(cplx *y, double df);
 
 /* NN input features (79 x NFEAT floats) from y rounded to float32, as model.features() */
-void nn_features(const cplx *y, int start, float *out);
+/* nv: baseband samples that carry audio (an early pass; the rest is zero), 0 = all. The normalising median is then
+ * taken over the symbols that end within them (model.features n_valid). */
+void nn_features(const cplx *y, int start, int nv, float *out);
 /* symbol_spectra(y, start)[:, :8] */
 void symbol_spectra8(const cplx *y, int start, cplx cs[NN][8]);
 void coherent_llr(cplx cs[NN][8], int nsym, double *llr174);

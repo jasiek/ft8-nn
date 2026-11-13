@@ -509,7 +509,7 @@ static void spectra_init(void) {
         }
 }
 
-void nn_features(const cplx *y, int start, float *out) {
+void nn_features(const cplx *y, int start, int nv, float *out) {
     static const double isq = 0.17677669529663687; /* 1/sqrt(32) */
     double re[NN][NBINS], im[NN][NBINS];
     float p[NN * NBINS];
@@ -530,9 +530,15 @@ void nn_features(const cplx *y, int start, float *out) {
             p[s * NBINS + q] = a * a;
         }
     }
+    int np = NN * NBINS;
+    if (nv > 0) { /* only the symbols that end within the audio (they come first: keep a prefix) */
+        int ns = 0;
+        while (ns < NN && start + SPS_BB * (ns + 1) <= nv) ns++;
+        if (ns > 0) np = ns * NBINS;
+    }
     /* torch.median: lower of the two middle values */
-    qsort(p, NN * NBINS, sizeof(float), cmp_f);
-    double med = p[(NN * NBINS - 1) / 2];
+    qsort(p, np, sizeof(float), cmp_f);
+    double med = p[(np - 1) / 2];
     double scale = sqrt(fmax_d(med, 1e-6));
     for (int s = 0; s < NN; s++)
         for (int q = 0; q < NBINS; q++) {

@@ -100,6 +100,8 @@ class ChannelCfg:
     burst_db: tuple = (10.0, 30.0)  # burst power above the noise floor, dB
     burst_len: tuple = (0.5, 5.0)  # burst duration, s
     real_noise_p: float = 0.0  # prob. of real receiver noise (make_batch noise_bank) instead of Gaussian noise
+    trunc_p: float = 0.0  # prob. that the audio stops mid-frame (an early pass: WSJT-X asks at ~11.8 s)
+    trunc_sym: tuple = (55.0, 79.0)  # where it stops, in symbols after symbol 0 (11.8 s cut, DT -0.5..2.5 s)
 
 
 def v2_cfg():
@@ -232,4 +234,12 @@ def make_batch(B, cfg: ChannelCfg, device, snr=None, payload_bits=None, noise_ba
     if real is not None and real.any():
         pick = np.random.randint(0, len(noise_bank), int(real.sum()))
         y[real] = y[real] + torch.from_numpy(np.asarray(noise_bank[np.sort(pick)])).to(device)
+    if cfg.trunc_p > 0:
+        # the audio ends at a random point of the frame and is zero after it, as the decoder sees an early pass;
+        # the band mask again, because the front end's band selection also rings at the cut
+        cut = torch.rand(B, device=device) < cfg.trunc_p
+        end = (START0 + tau + U(*cfg.trunc_sym) * SPS).long()
+        n = torch.arange(NBB, device=device)[None, :]
+        yc = torch.fft.ifft(torch.fft.fft(torch.where(n < end[:, None], y, torch.zeros_like(y))) * band_mask(device)[None, :])
+        y = torch.where(cut[:, None], yc, y)
     return y, bits_t, snr, tones_t

@@ -103,7 +103,7 @@ def classical_metrics(hyps):
     return out
 
 
-def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=4, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, context=(), ctx_gate=48.0, cand_kw=None, reuse_df=62.5, dt_recenter=0.8, repeat=REPEAT, cochannel=COCHANNEL):
+def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=4, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, context=(), ctx_gate=48.0, cand_kw=None, reuse_df=62.5, dt_recenter=0.8, repeat=REPEAT, cochannel=COCHANNEL, prior=()):
     """Decode one 15 s slot (real audio @12 kHz, any scale), with multi-pass subtraction.
 
     llr_fn(hyps) -> per-hypothesis list of LLR vectors to try in order (first success wins).
@@ -136,9 +136,16 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
     cochannel: (near peaks, far peaks, df span, near dt span, far dt span, min score) for the co-channel retry
     (_cochannel_stage) after the last pass, which searches every decode's own cell in the residual for a second
     signal hidden under it; None: off.
+    prior: decodes this slot already has, from an early pass on the first part of the audio (WSJT-X asks at ~11.8 s).
+    They are subtracted first and count as found (never reported twice, and the co-channel and repeat stages see
+    them), are returned with info["prior"] = True, and are never dropped: they have been sent already.
     """
     x = np.array(x, dtype=np.float64, copy=True)
     found = {}
+    for d in prior:
+        d.info["prior"] = True
+        found[d.key] = d
+        subtract(x, ft8.encode77(d.bits77)[1], d.f0, d.dt)
     tried, subs = {}, []  # candidate key -> pass last tried; (f0, pass) of every subtracted decode
     for p in range(passes):
         skip = None
@@ -491,7 +498,7 @@ def _drop_ctx_dupes(found, known=()):
     have = {_sender_key(d) for d in list(found.values()) + list(known) if d.method not in CTX_METHODS}
     for key in [k for k, d in found.items() if d.method in CTX_METHODS]:
         sk = _sender_key(found[key])
-        if sk in have:
+        if sk in have and not found[key].info.get("prior"):
             del found[key]
         else:
             have.add(sk)

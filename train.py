@@ -91,6 +91,8 @@ def main():
     ap.add_argument("--kd-weight", type=float, default=0.5, help="weight of the soft-target loss (rest: true bits)")
     ap.add_argument("--noise-bank", default=None, help="real-noise segments (.npy, tools/make_noise_bank.py)")
     ap.add_argument("--real-noise-p", type=float, default=0.5, help="share of training rows with real noise (with --noise-bank)")
+    ap.add_argument("--trunc-p", type=float, default=0.0, help="share of training rows whose audio stops mid-frame "
+                    "(an early pass, synth_bb trunc_sym), the rest zero")
     ap.add_argument("--seed", type=int, default=None, help="training-data seed (default: fixed by the validation sets, so reruns are identical)")
     a = ap.parse_args()
 
@@ -121,6 +123,7 @@ def main():
     cfg = synth_bb.v2_cfg() if a.cfg == "v2" else synth_bb.ChannelCfg()
     if a.noise_bank:
         cfg.real_noise_p = a.real_noise_p
+    cfg.trunc_p = a.trunc_p
     if a.seed is not None:
         torch.manual_seed(a.seed)  # DataLoader worker seeds derive from this
     dl = DataLoader(Stream(a.batch, cfg, a.noise_bank), batch_size=None, num_workers=a.workers, prefetch_factor=4, persistent_workers=True)

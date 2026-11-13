@@ -158,6 +158,7 @@ struct ft8nn_ctx {
         int n;
         dec *d;
     } hist[CTX_HIST]; /* this context's own decodes of recent slots (ft8nn_decode_at) */
+    int nv_bb;        /* NN features: baseband samples that carry audio during the current decode, 0 = all */
 };
 
 static once_t init_once = ONCE_INIT;
@@ -235,7 +236,7 @@ static int run_nn(ft8nn_ctx *c, sync_hyp *const *hyps, int nh, double *llr, floa
     int rc = 0;
     for (int i0 = 0; i0 < nh && !rc; i0 += NN_BATCH) {
         int b = nh - i0 < NN_BATCH ? nh - i0 : NN_BATCH;
-        for (int i = 0; i < b; i++) nn_features(hyps[i0 + i]->y, hyps[i0 + i]->start, feat + (size_t)i * NN * NFEAT);
+        for (int i = 0; i < b; i++) nn_features(hyps[i0 + i]->y, hyps[i0 + i]->start, c->nv_bb, feat + (size_t)i * NN * NFEAT);
         int64_t shape[3] = {b, NN, NFEAT};
         OrtValue *in = NULL, *out = NULL;
         if (ort_check(api, api->CreateTensorWithDataAsOrtValue(c->mem, feat, sizeof(float) * b * NN * NFEAT, shape, 3,

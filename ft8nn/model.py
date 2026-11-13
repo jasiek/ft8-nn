@@ -17,8 +17,10 @@ SPS = 32
 START0 = 100
 
 
-def features(y, start=None):
+def features(y, start=None, n_valid=None):
     """y: (B, N) complex baseband (200 Hz), symbol 0 at sample `start` (int or (B,) tensor).
+    n_valid: baseband samples that carry audio (an early pass: the rest is zero); the normalising median is then
+    taken over the symbols that lie wholly within them.
 
     Returns (B, 79, 2*NBINS) float.
     """
@@ -35,7 +37,11 @@ def features(y, start=None):
     bins = torch.arange(NBIN_LO, NBIN_HI, device=y.device) % (2 * SPS)
     Z = Z[..., bins]  # (B,79,24)
     p = Z.abs().pow(2)
-    scale = p.flatten(1).median(1).values.clamp(min=1e-6).sqrt()[:, None, None]
+    if n_valid is None:
+        scale = p.flatten(1).median(1).values.clamp(min=1e-6).sqrt()[:, None, None]
+    else:
+        ok = start[:, None] + SPS * (torch.arange(79, device=y.device)[None, :] + 1) <= n_valid  # (B, 79)
+        scale = torch.stack([p[b][ok[b]].flatten().median() for b in range(B)]).clamp(min=1e-6).sqrt()[:, None, None]
     Z = Z / scale
     return torch.cat([Z.real, Z.imag], -1)
 

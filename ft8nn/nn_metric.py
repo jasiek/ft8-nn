@@ -2,7 +2,8 @@
 import numpy as np
 import torch
 
-from . import decoder, model
+from . import decoder, model, ft8
+from . import frontend as fe
 
 
 def load(path, device="cpu"):
@@ -12,8 +13,11 @@ def load(path, device="cpu"):
     return net
 
 
-def make_llr_fn(path, also_classical=False, device="cpu", batch=128):
+def make_llr_fn(path, also_classical=False, device="cpu", batch=128, n_valid=None, erase=False, mask_median=False):
+    """n_valid: audio samples (12 kHz) that carry signal, for an early pass; with erase, the LLRs of data symbols
+    that end past them are set to 0, with mask_median the feature normalisation ignores those symbols."""
     net = load(path, device)
+    nv_bb = None if n_valid is None else int(n_valid * fe.FS_BB / ft8.FS)
 
     @torch.no_grad()
     def nn_fn(hyps):
@@ -21,8 +25,14 @@ def make_llr_fn(path, also_classical=False, device="cpu", batch=128):
         start = torch.tensor([h.start for h in hyps], device=device)
         out = []
         for i in range(0, len(hyps), batch):
-            out.append(net(model.features(y[i : i + batch], start[i : i + batch])).double().cpu().numpy())
-        return [[l] for l in np.concatenate(out)]
+            f = model.features(y[i : i + batch], start[i : i + batch], nv_bb if mask_median else None)
+            out.append(net(f).double().cpu().numpy())
+        llr = np.concatenate(out)
+        if erase and nv_bb is not None:
+            st = np.array([h.start for h in hyps])[:, None]
+            gone = st + fe.SPS_BB * (ft8.DATA_POS[None, :] + 1) > nv_bb  # (H, 58)
+            llr[np.repeat(gone, 3, axis=1)] = 0
+        return [[l] for l in llr]
 
     def llr_fn(hyps):
         res = nn_fn(hyps)
