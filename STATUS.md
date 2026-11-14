@@ -1,5 +1,16 @@
 # Status and plan (resume here)
 
+## Live comparison update — done 2026-11-14
+
+Added a third column subscribing to the selected band's FT8 PSK Reporter MQTT feed over TLS, with reconnect.
+Reports align by transmitting callsign to either local or remote decodes; unmatched stations stay hidden.
+Exact-slot reports accumulate per station. Later QSO messages can use the latest earlier report for up to five
+minutes, displayed as `prev Ns` rather than a current-slot count. Slot browsing retains 40 slots with `[` / `]`
+and `l` returns to live. Refreshed the UberSDR directory: 719 band entries from 65 receivers across 13 bands.
+Validation: 37 focused tests passed (`tests/test_live_compare.py`, `tests/test_receiverbook_directory.py`);
+live TLS MQTT reception verified. Full audio/decoder UI operation was not exercised for this change.
+Next: observe the context display during a live QSO; the decoder/CPU plan below remains the next decoder work.
+
 ## Next (agreed with the user 2026-11-12) — start here
 
 Decode count is no longer the target: what other decoders still find and we miss is ~2,500 slot-confirmed pairs

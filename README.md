@@ -192,10 +192,34 @@ python3 tools/live_compare.py                             # choose a receiver an
 
 `live_compare.py` presents a curses receiver picker with arrow-key navigation and substring filtering. Once a
 receiver-band pair is selected, it consumes the same UberSDR audio and remote FT8-decoder messages, divides the
-audio into UTC FT8 slots, and decodes it locally with `libft8nn`. Local and remote results are shown in two
-frequency-ordered columns: matching messages share a row, while a decode found by only one side has a blank in
+audio into UTC FT8 slots, and decodes it locally with `libft8nn`. The view has three columns. Local and remote
+results occupy the first two frequency-ordered columns: matching messages share a row, while a decode found by only one side has a blank in
 the other column. The picker shows each receiver's current per-band SNR when supplied by the directory, and the
-streaming header links back to the UberSDR directory. Press `q` to stop the comparison.
+streaming header links back to the UberSDR directory.
+
+The third column subscribes to `pskr/filter/v2/<selected-band>/FT8/#` on
+[mqtt.pskreporter.info](https://www.mqtt.pskreporter.info/) over TLS (port 1884), with automatic reconnect.
+It shows each transmitting station's RF frequency in MHz, running number of received reports, callsign and grid.
+Reports for the same callsign in the same 15-second slot accumulate into one row, even when receivers report
+slightly different frequencies. Counts restart for each slot. These are worldwide reception reports, not full
+FT8 messages or measurements from the selected receiver. PSK reports align with the transmitting callsign in
+our decoded message (or the remote message when ours is absent). Exact-slot reports take priority; otherwise the
+latest earlier report for that sender on the selected band is used for up to five minutes. This keeps station
+context visible through QSO exchanges that do not generate new spots. Prior context displays `prev Ns` (the
+age in seconds) instead of a report count, so it does not imply reception of the current transmission. Expiry
+uses transmit time, not packet arrival time; viewing history never uses reports from a later slot.
+For example, `W2BBB K1ABC -10` matches reports for `K1ABC`, not `W2BBB`. Frequency breaks ties between
+multiple rows from the same sender; proximity alone never attaches a report to an unrelated or unresolved call.
+Only reports matching a transmitting callsign in the first or second column are displayed; unmatched reports
+are hidden. The PSK header counts matched stations, exact-slot reports, and stations using prior context separately. Resolved calls inside angle brackets can
+match; unresolved hashes and free text remain unmatched. Slot browsing includes only local/remote decode slots.
+
+Slot assignment uses `t_tx` when available, otherwise `t` (receiver timing can vary). Live view follows the
+latest local/remote slot; delayed reports update their original slot and can supply recent station context
+for later QSO messages, within the five-minute limit. Use `[` / `]` or left/right arrows to browse retained slots, and `l` to return to live view.
+Forty recent slots (ten minutes at continuous FT8 activity) are retained per source for late updates.
+Connection status is shown separately so a feed outage does not interrupt local decoding. No additional Python
+packages are needed. Press `q` to return to the picker.
 
 ### Script reference
 

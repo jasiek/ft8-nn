@@ -4,8 +4,8 @@
 The receiver picker supports arrow keys and live substring filtering.  After a
 receiver/band pair is selected, this client tunes its UberSDR stream to the
 standard FT8 dial frequency, receives the server's 12 kHz audio and FT8
-decodes, decodes each UTC slot with libft8nn, and displays the results in two
-frequency-ordered columns.
+decodes, decodes each UTC slot with libft8nn, and displays the results alongside
+band-filtered PSK Reporter reception reports in three columns.
 
 Build the C library first if needed:
 
@@ -25,6 +25,7 @@ import ctypes
 import ctypes.util
 import hashlib
 import json
+import math
 import os
 import queue
 import re
@@ -37,7 +38,6 @@ import threading
 import time
 import urllib.parse
 import urllib.request
-import uuid
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -76,6 +76,8 @@ FT8_FREQUENCIES = {
     "6cm": 5_760_174_000,
     "3cm": 10_368_174_000,
 }
+PSK_CONTEXT_SECONDS = 5 * 60
+SLOT_HISTORY = 40  # Ten minutes of 15-second slots for delayed reception reports.
 METHODS = ("bp", "osd", "bp_ap", "osd_ap", "bp_er", "osd_er", "osd_bp", "bp_cx", "osd_cx", "rp")
 
 
@@ -86,6 +88,163 @@ class Decode:
     snr: float
     text: str
     method: str = ""
+
+
+@dataclass
+class PskSignal:
+    call: str
+    grid: str
+    freq: float
+    reports: int = 0
+    slot: int | None = None
+
+
+def parse_psk_report(value: Any, band: str) -> tuple[int, PskSignal] | None:
+    """Use transmission time when supplied; raw receiver time is the fallback."""
+    if not isinstance(value, dict) or value.get("md") != "FT8" or value.get("b") != band:
+        return None
+    try:
+        stamp = float(value.get("t_tx") if value.get("t_tx") is not None else value["t"])
+        freq = float(value["f"])
+        call = value["sc"].strip().upper()
+        if not call or not math.isfinite(stamp) or stamp < 0 or not math.isfinite(freq) or freq <= 0:
+            return None
+        grid = str(value.get("sl", ""))
+        slot = int(stamp // 15) * 15
+        return slot, PskSignal(call, grid, freq, 1, slot)
+    except (KeyError, TypeError, ValueError, OverflowError, AttributeError):
+        return None
+
+
+class PskReporterClient:
+    """Small MQTT 3.1.1 QoS-0 subscriber over TLS, with reconnect and keepalive."""
+
+    def __init__(self, band: str, on_report: Callable[[Any], None],
+                 on_status: Callable[[str], None], timeout: float = 10.0):
+        self.topic = f"pskr/filter/v2/{band}/FT8/#"
+        self.on_report = on_report
+        self.on_status = on_status
+        self.timeout = timeout
+        self.stop = threading.Event()
+        self.sock: socket.socket | None = None
+        self.thread = threading.Thread(target=self._run, name="pskreporter", daemon=True)
+
+    @staticmethod
+    def _packet(header: int, payload: bytes) -> bytes:
+        size = len(payload)
+        encoded = bytearray([header])
+        while True:
+            size, digit = divmod(size, 128)
+            encoded.append(digit | (128 if size else 0))
+            if not size:
+                return bytes(encoded) + payload
+
+    def start(self) -> None:
+        self.thread.start()
+
+    def _run(self) -> None:
+        while not self.stop.is_set():
+            try:
+                self.on_status("connecting")
+                raw = socket.create_connection(("mqtt.pskreporter.info", 1884), self.timeout)
+                self.sock = raw
+                try:
+                    self.sock = ssl.create_default_context().wrap_socket(
+                        raw, server_hostname="mqtt.pskreporter.info")
+                except Exception:
+                    raw.close()
+                    raise
+                self.sock.settimeout(1.0)
+                client_id = ("ft8nn-" + uuid.uuid4().hex[:16]).encode()
+                connect = b"\x00\x04MQTT\x04\x02\x00\x3c" + struct.pack("!H", len(client_id)) + client_id
+                self.sock.sendall(self._packet(0x10, connect))
+                buffer = bytearray()
+                connected = False
+                subscribed = False
+                last_ping = time.monotonic()
+                deadline = last_ping + self.timeout
+                ping_pending = False
+                while not self.stop.is_set():
+                    now = time.monotonic()
+                    if not subscribed and now > deadline:
+                        raise TimeoutError("MQTT handshake timed out")
+                    if connected and now - last_ping >= 30:
+                        if ping_pending:
+                            raise TimeoutError("MQTT keepalive timed out")
+                        self.sock.sendall(b"\xc0\x00")
+                        last_ping = now
+                        ping_pending = True
+                    try:
+                        data = self.sock.recv(65536)
+                    except socket.timeout:
+                        continue
+                    if not data:
+                        raise ConnectionError("MQTT connection closed")
+                    buffer.extend(data)
+                    while len(buffer) >= 2:
+                        size, multiplier, offset = 0, 1, 1
+                        while True:
+                            if offset >= len(buffer):
+                                break
+                            digit = buffer[offset]
+                            offset += 1
+                            size += (digit & 127) * multiplier
+                            if not digit & 128:
+                                break
+                            if offset >= 5:
+                                raise ValueError("invalid MQTT packet length")
+                            multiplier *= 128
+                        if buffer[offset - 1] & 128:
+                            break
+                        if size > 1_048_576:
+                            raise ValueError("MQTT packet too large")
+                        if len(buffer) < offset + size:
+                            break
+                        header = buffer[0]
+                        payload = bytes(buffer[offset:offset + size])
+                        del buffer[:offset + size]
+                        kind = header >> 4
+                        if kind == 2:
+                            if payload != b"\x00\x00":
+                                raise ConnectionError("MQTT connection refused")
+                            connected = True
+                            topic = self.topic.encode()
+                            self.sock.sendall(self._packet(0x82, b"\x00\x01" + struct.pack("!H", len(topic)) + topic + b"\x00"))
+                        elif kind == 9:
+                            if payload != b"\x00\x01\x00":
+                                raise ConnectionError("MQTT subscription refused")
+                            subscribed = True
+                            self.on_status("connected")
+                        elif kind == 13:
+                            ping_pending = False
+                        elif kind == 3 and subscribed and len(payload) >= 2:
+                            # Subscription requests QoS 0, so no packet identifier follows the topic.
+                            topic_size = int.from_bytes(payload[:2], "big")
+                            if (header >> 1) & 3 or len(payload) < 2 + topic_size:
+                                continue
+                            try:
+                                self.on_report(json.loads(payload[2 + topic_size:]))
+                            except (ValueError, UnicodeError):
+                                continue
+            except Exception as error:
+                if not self.stop.is_set():
+                    self.on_status(f"{error}; retrying")
+            finally:
+                if self.sock is not None:
+                    self.sock.close()
+                    self.sock = None
+            self.stop.wait(3)
+
+    def close(self) -> None:
+        self.stop.set()
+        sock = self.sock
+        if sock is not None:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+        if self.thread.is_alive():
+            self.thread.join(timeout=self.timeout + 2)
 
 
 def normalize_message(text: str) -> str:
@@ -118,6 +277,59 @@ def match_decodes(
             normalize_message(next(d.text for d in pair if d is not None)),
         ),
     )
+
+
+def transmitting_call(text: str) -> str | None:
+    """Extract the sender, never the addressed station, from structured FT8 text."""
+    fields = text.upper().split()
+    if not fields:
+        return None
+    if fields[0] == "TU;":  # RTTY Roundup prefix
+        fields = fields[1:]
+    elif ";" in text:
+        # DXpedition: recipient RR73; recipient <sender> report
+        fields = text.upper().split(";", 1)[1].split()
+    if len(fields) < 2:
+        return None
+
+    def call(token: str) -> str | None:
+        token = token.strip("<>")
+        if (re.fullmatch(r"[A-Z0-9/]+", token)
+                and re.search(r"[A-Z]", token) and re.search(r"[0-9]", token)
+                and not re.fullmatch(r"[A-R]{2}[0-9]{2}(?:[A-X]{2})?", token)
+                and token not in {"RR73", "73"}):
+            return token
+        return None
+
+    if fields[0] == "CQ":
+        # A directed CQ has an extra region token: CQ DX / CQ 123 / CQ POTA.
+        sender = fields[1] if call(fields[1]) else (fields[2] if len(fields) > 2 else "")
+        return call(sender)
+    if fields[0] in {"DE", "QRZ"}:
+        return call(fields[1])
+    if call(fields[0]) or fields[0] == "<...>":
+        return call(fields[1])
+    return None
+
+
+def align_psk_decodes(
+    ours: list[Decode], remote: list[Decode], signals: list[PskSignal], dial: int,
+) -> list[tuple[Decode | None, Decode | None, PskSignal | None]]:
+    """Attach exact or recent sender context; omit all unrelated PSK reports."""
+    rows = [(local, server, None) for local, server in match_decodes(ours, remote)]
+    for signal in sorted(signals, key=lambda s: (s.freq, s.call)):
+        candidates = []
+        for index, (local, server, attached) in enumerate(rows):
+            if attached is not None:
+                continue
+            for priority, decode in enumerate((local, server)):
+                if decode is not None and transmitting_call(decode.text) == signal.call:
+                    candidates.append((priority, abs(dial + decode.freq - signal.freq), index))
+        if candidates:
+            index = min(candidates)[2]
+            local, server, _ = rows[index]
+            rows[index] = local, server, signal
+    return rows
 
 
 def filter_entries(entries: list[dict[str, Any]], query: str) -> list[dict[str, Any]]:
@@ -977,14 +1189,68 @@ class ComparisonState:
         self.lock = threading.Lock()
         self.ours: dict[int, list[Decode]] = collections.defaultdict(list)
         self.remote: dict[int, list[Decode]] = collections.defaultdict(list)
+        self.psk: dict[int, dict[str, PskSignal]] = {}
+        self.psk_status = "starting"
+        self.selected_slot: int | None = None
         self.status = "starting"
         self.latest_audio_slot: int | None = None
         self.decode_seconds: dict[int, float] = {}
         self.error: str | None = None
 
+    def add_psk(self, value: Any, band: str) -> None:
+        report = parse_psk_report(value, band)
+        if report is None:
+            return
+        slot, signal = report
+        with self.lock:
+            signals = self.psk.setdefault(slot, {})
+            previous = signals.get(signal.call)
+            if previous is None:
+                signals[signal.call] = signal
+            else:
+                previous.reports += 1
+                if signal.grid:
+                    previous.grid = signal.grid
+            # The feed is batched/out of order. Keep recent transmit slots separately
+            # from local audio so late reports neither advance nor evict local results.
+            for old in sorted(self.psk)[:-SLOT_HISTORY]:
+                del self.psk[old]
+
+    def psk_context(self, slot: int | None) -> list[PskSignal]:
+        """Snapshot the latest report per sender at/before the viewed slot.
+
+        Caller holds self.lock. Expiry follows transmission time, never arrival
+        time or local decode activity, so delayed reports cannot revive old data.
+        """
+        if slot is None:
+            return []
+        latest: dict[str, PskSignal] = {}
+        for report_slot in sorted(self.psk):
+            if 0 <= slot - report_slot <= PSK_CONTEXT_SECONDS:
+                for signal in self.psk[report_slot].values():
+                    latest[signal.call] = PskSignal(
+                        signal.call, signal.grid, signal.freq, signal.reports, report_slot)
+        return list(latest.values())
+
+    def view_slot(self) -> int | None:
+        if self.selected_slot is not None:
+            return self.selected_slot
+        decodes = set(self.ours) | set(self.remote)
+        return max(decodes) if decodes else None
+
+    def navigate_slot(self, direction: int) -> None:
+        with self.lock:
+            slots = sorted(set(self.ours) | set(self.remote))
+            current = self.view_slot()
+            if current is None:
+                return
+            candidates = [slot for slot in slots if (slot - current) * direction > 0]
+            if candidates:
+                self.selected_slot = min(candidates) if direction > 0 else max(candidates)
+
     def trim(self) -> None:
         slots = sorted(set(self.ours) | set(self.remote))
-        for old in slots[:-8]:
+        for old in slots[:-SLOT_HISTORY]:
             self.ours.pop(old, None)
             self.remote.pop(old, None)
             self.decode_seconds.pop(old, None)
@@ -1001,16 +1267,19 @@ def draw_comparison(screen: Any, entry: dict[str, Any], state: ComparisonState) 
     screen.erase()
     height, width = screen.getmaxyx()
     receiver = entry["receiver"]
-    title = f"{receiver.get('label', receiver['url'])} — {entry['band']} FT8 — q to quit"
+    title = f"{receiver.get('label', receiver['url'])} — {entry['band']} FT8 — [/] slots, l live, q back"
     screen.addnstr(0, 0, title, width - 1, curses.A_BOLD if curses is not None else 0)
     with state.lock:
         status = state.status
-        slots = sorted(set(state.ours) | set(state.remote))
-        slot = slots[-1] if slots else None
+        slot = state.view_slot()
+        live = state.selected_slot is None
         ours = list(state.ours.get(slot, [])) if slot is not None else []
         remote = list(state.remote.get(slot, [])) if slot is not None else []
         elapsed = state.decode_seconds.get(slot) if slot is not None else None
         audio_slot = state.latest_audio_slot
+        psk_status = state.psk_status
+        psk_slot = slot
+        psk = state.psk_context(slot)
     screen.addnstr(1, 0, status, width - 1)
     detail_url = (
         "https://instances.ubersdr.org/"
@@ -1029,30 +1298,40 @@ def draw_comparison(screen: Any, entry: dict[str, Any], state: ComparisonState) 
         width - 1,
     )
     if slot is None:
-        waiting = "Waiting for the next UTC slot and remote decodes…"
-        screen.addnstr(5, 0, waiting, width - 1)
-        screen.refresh()
-        return
-    stamp = datetime.fromtimestamp(slot, timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    detail = f"Slot {stamp}  local {len(ours)}  remote {len(remote)}"
-    if elapsed is not None:
-        detail += f"  local decode {elapsed:.1f}s"
-    if audio_slot is not None and audio_slot > slot:
-        detail += "  (local decode pending for newer audio)"
+        detail = "Waiting for the next UTC slot and remote decodes…"
+    else:
+        stamp = datetime.fromtimestamp(slot, timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        detail = f"{'LIVE' if live else 'HISTORY'} Slot {stamp}  local {len(ours)}  remote {len(remote)}"
+        if elapsed is not None:
+            detail += f"  local decode {elapsed:.1f}s"
+        if audio_slot is not None and audio_slot > slot:
+            detail += "  (local decode pending for newer audio)"
     screen.addnstr(4, 0, detail, width - 1)
+    rows = align_psk_decodes(ours, remote, psk, FT8_FREQUENCIES[entry["band"]])
+    matched_psk = [signal for _, _, signal in rows if signal is not None]
+    exact_psk = [signal for signal in matched_psk if signal.slot == slot]
+    recent_count = len(matched_psk) - len(exact_psk)
+    psk_stamp = datetime.fromtimestamp(psk_slot, timezone.utc).strftime("%H:%M:%S UTC") if psk_slot is not None else "waiting"
+    screen.addnstr(5, 0, f"PSK Reporter: {psk_status} | aligned TX slot {psk_stamp} | {len(matched_psk)} matched stations, {sum(s.reports for s in exact_psk)} reports in slot, {recent_count} prior (up to 5m)", width - 1)
 
-    gap = 3
-    col = max(20, (width - gap) // 2)
+    gap = 2
+    col = max(1, (width - 1 - 2 * gap) // 3)
     right = col + gap
+    third = 2 * (col + gap)
     underline = curses.A_UNDERLINE if curses is not None else 0
-    screen.addnstr(6, 0, "OUR DECODER  Hz  dB   DT  message", col, underline)
-    if right < width:
-        screen.addnstr(6, right, "REMOTE DECODER  Hz  dB   DT  message", max(1, width - right - 1), underline)
-    rows = match_decodes(ours, remote)
-    for row, (local, server) in enumerate(rows[: max(0, height - 8)], start=7):
-        screen.addnstr(row, 0, format_decode(local, col), col)
-        if right < width:
-            screen.addnstr(row, right, format_decode(server, width - right - 1), max(1, width - right - 1))
+    headings = ("OUR DECODER  Hz  dB   DT  message", "REMOTE DECODER  Hz  dB   DT  message", "PSK REPORTER  MHz  reports/prior age  call/grid")
+    for x, heading in zip((0, right, third), headings):
+        if x < width - 1:
+            screen.addnstr(6, x, heading, min(col, width - x - 1), underline)
+    for index, (local, server, signal) in enumerate(rows[:max(0, height - 8)]):
+        report_text = ""
+        if signal is not None:
+            count = (str(signal.reports) if signal.slot == slot
+                     else f"prev {slot - signal.slot}s")
+            report_text = f"{signal.freq / 1e6:10.6f} {count:>9} {signal.call} {signal.grid}"
+        for x, value in zip((0, right, third), (format_decode(local, col), format_decode(server, col), report_text)):
+            if x < width - 1:
+                screen.addnstr(7 + index, x, value, min(col, width - x - 1))
     screen.refresh()
 
 
@@ -1111,7 +1390,13 @@ def run_comparison(screen: Any, entry: dict[str, Any], args: argparse.Namespace)
     worker.start()
     client_class = UberSDRClient if entry["receiver"].get("type") == "UberSDR" else OpenWebRXClient
     client = client_class(entry["receiver"]["url"], entry["band"], assembler.push, add_remote, status, args.timeout)
+    def psk_status(text: str) -> None:
+        with state.lock:
+            state.psk_status = text
+
+    psk_client = PskReporterClient(entry["band"], lambda value: state.add_psk(value, entry["band"]), psk_status, args.timeout)
     try:
+        psk_client.start()
         try:
             client.start()
         except Exception as error:
@@ -1121,8 +1406,16 @@ def run_comparison(screen: Any, entry: dict[str, Any], args: argparse.Namespace)
             key = screen.getch()
             if key in (ord("q"), ord("Q"), 27):
                 break
+            if key in (ord("["), curses.KEY_LEFT):
+                state.navigate_slot(-1)
+            elif key in (ord("]"), curses.KEY_RIGHT):
+                state.navigate_slot(1)
+            elif key in (ord("l"), ord("L")):
+                with state.lock:
+                    state.selected_slot = None
             time.sleep(0.1)
     finally:
+        psk_client.close()
         client.close()
         decode_stop.set()
         try:
