@@ -11,7 +11,7 @@ Validation: 37 focused tests passed (`tests/test_live_compare.py`, `tests/test_r
 live TLS MQTT reception verified. Full audio/decoder UI operation was not exercised for this change.
 Next: observe the context display during a live QSO; the decoder/CPU plan below remains the next decoder work.
 
-## Candidate search to 4000 Hz and WSJT-X's [nfa, nfb] — done 2026-11-14 (tag `nn_v3_f4k`), not committed yet
+## Candidate search to 4000 Hz and WSJT-X's [nfa, nfb] — done 2026-11-14 (tag `nn_v3_f4k`), merged to `main` (`12a4c4a`)
 
 The user noticed we decode only up to ~3 kHz while jt9 goes higher. jt9 searches WSJT-X's [nfa, nfb] (file-mode
 default 200–4000 Hz), clamped to 100–4910 Hz (`lib/ft8/get_spectrum_baseline.f90`; a window under 100 Hz wide keeps
@@ -40,7 +40,7 @@ sleep events); `golden_c.py`'s default tag is now `nn_v3_f4k`.
 2.89 s (+2.7%), final pass 3.34 -> 3.41 s (+2.3%); decodes 1,688 early (identical), 2,189 -> 2,190 total. The machine
 was **not idle** (another session's `live_compare.py`, load ~5): every time is ~1.8× the idle numbers in Next item 1,
 so read only the ratio; scaled, the idle early pass is ~1.57 s, still ~1 s inside the 2.6 s before the final request.
-Next: commit (ask the user); re-record with a wider passband if decodes above 3 kHz are to be measured on real audio
+Next: re-record with a wider passband if decodes above 3 kHz are to be measured on real audio
 (a user decision: Git LFS bandwidth, new recordings); jt9's `nagain` re-decode searches only nfqso ± 20 Hz (not done).
 
 ## Next (agreed with the user 2026-11-12) — start here
