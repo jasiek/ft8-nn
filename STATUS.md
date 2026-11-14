@@ -134,7 +134,8 @@ start with item 2):
    byte-identical to `nn_v3_ccrpc`** - runs 1–4 all 45 station files (`data/logs/nn_v3_ccg/diff_vs_ccrpc.txt`)
    and the 10 training recordings; noise 0 false; run 2 29,691 / 21,820 / 1, runs 2–4 pooled 107,108 / 78,782 / 4,
    run 1 34,727 / 26,615 / 1, AWGN 50% −22.49; golden C == Python 4/4 PASS (`tools/golden_c.py` default tag now
-   `nn_v3_ccg`). `nn_v3_ccg` is the reference tag from here on.
+   `nn_v3_ccg`). `nn_v3_ccg` was the reference tag until the rebase onto the search-range change (2026-11-14):
+   the gate changes no decodes, so the combined code should reproduce `nn_v3_f4k`, now `golden_c.py`'s default.
    **Step 2 (the stage's remaining 23 s) closed 2026-11-14, nothing worth cutting:** trying the 4 axis neighbours
    first and the diagonals only for promising peaks saves 13% of the stage at a lossless setting (~1% of all CPU),
    and every decoding peak scores near `CC_MIN`, so the data-sync score cannot screen centres. Found on the way
@@ -274,6 +275,11 @@ decodes verified identical to the main machine.
 
 ## In flight
 
+- **Rebased 2026-11-14 onto `origin/main` (search range `nn_v3_f4k`, validation run 5).** The co-channel gate
+  (`nn_v3_ccg`) and the faster NN were each accepted on top of `nn_v3_ccrpc`, the search range on its own; both
+  local changes left decodes identical, so the combined code should equal `nn_v3_f4k`, but no run has checked it.
+  The `nn_v3_f4k` decodes were made on the M1 and are not on the mini. To check: copy them over (or rerun
+  `nn_v3_f4k` from `03ecdb4`), decode runs 1–4 and training with the combined code, diff, then `golden_c.py`.
 - **Validation set expanded 2026-11-09.** Run 3 (`$V/run3`, data repo `794a63d`): 12 fresh Kiwis, none at a training,
   run-1 or run-2 site, Mon 05:32–06:02 UTC (run 2 was Wed 22:30): Oceania/Asia/Qatar daytime 20/15/10 m, Europe dawn
   40 m and 60 m (new band), western USA 80 m. jt9 23,524 decodes / 17,888 slot-confirmed / 17 unconf, the size of run 2
