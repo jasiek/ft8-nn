@@ -13,9 +13,26 @@
 
 static inline double fmax_d(double a, double b) { return a > b ? a : b; }
 
-static int cmp_f(const void *a, const void *b) {
-    float x = *(const float *)a, y = *(const float *)b;
-    return (x > y) - (x < y);
+/* k-th smallest of p[0..n) (reorders p): the value qsort would put at p[k], without sorting the rest */
+static float select_f(float *p, int n, int k) {
+    int lo = 0, hi = n - 1;
+    while (lo < hi) {
+        float piv = p[lo + (hi - lo) / 2];
+        int i = lo, j = hi;
+        while (i <= j) {
+            while (p[i] < piv) i++;
+            while (p[j] > piv) j--;
+            if (i <= j) {
+                float t = p[i];
+                p[i++] = p[j];
+                p[j--] = t;
+            }
+        }
+        if (k <= j) hi = j;
+        else if (k >= i) lo = i;
+        else return p[k];
+    }
+    return p[k];
 }
 static int cmp_d(const void *a, const void *b) {
     double x = *(const double *)a, y = *(const double *)b;
@@ -537,8 +554,7 @@ void nn_features(const cplx *y, int start, int nv, float *out) {
         if (ns > 0) np = ns * NBINS;
     }
     /* torch.median: lower of the two middle values */
-    qsort(p, np, sizeof(float), cmp_f);
-    double med = p[(np - 1) / 2];
+    double med = select_f(p, np, (np - 1) / 2);
     double scale = sqrt(fmax_d(med, 1e-6));
     for (int s = 0; s < NN; s++)
         for (int q = 0; q < NBINS; q++) {

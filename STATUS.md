@@ -134,9 +134,41 @@ start with item 2):
    byte-identical to `nn_v3_ccrpc`** - runs 1–4 all 45 station files (`data/logs/nn_v3_ccg/diff_vs_ccrpc.txt`)
    and the 10 training recordings; noise 0 false; run 2 29,691 / 21,820 / 1, runs 2–4 pooled 107,108 / 78,782 / 4,
    run 1 34,727 / 26,615 / 1, AWGN 50% −22.49; golden C == Python 4/4 PASS (`tools/golden_c.py` default tag now
-   `nn_v3_ccg`). `nn_v3_ccg` is the reference tag from here on. Next in item 2: the
-   remaining 23 s of the stage (fewer peaks per cell, or a cheaper first look than the NN), then the passes
-   themselves (NN 109 s, BP/OSD 69 s of the 239 s).
+   `nn_v3_ccg`). `nn_v3_ccg` is the reference tag from here on.
+   **Step 2 (the stage's remaining 23 s) closed 2026-11-14, nothing worth cutting:** trying the 4 axis neighbours
+   first and the diagonals only for promising peaks saves 13% of the stage at a lossless setting (~1% of all CPU),
+   and every decoding peak scores near `CC_MIN`, so the data-sync score cannot screen centres. Found on the way
+   (an idea for more decodes, not CPU): 96 of the 116 neighbour decodes on run 1 are one baseband sample *before*
+   the data-sync peak (offsets 1, 4, 6), so the peak sits systematically a sample late; centring on peak −1 might
+   decode more of them at the centre.
+   **Step 3 (the passes) started 2026-11-14.** Function profile (macOS `sample`, 1 thread, 40 slots, after step
+   1): NN in ONNX Runtime 38% of CPU, of which **LayerNorm ~13%** (ORT's own per-op profiler at batch 32: 36% of
+   the model's time, more than all the MatMuls at 15.5%); NN features 6% (**`qsort` for one median: 4%**); BP 21%
+   (`expm1`/`log` for tanh/atanh 15%); Costas fine sync 10%; co-channel stage 8%; candidate search 7%
+   (`score_item` 6%); subtraction 6%; OSD 0.7%. Two exact cuts done (in the commit after `77a6373`):
+   (a) **`tools/export_onnx.py` writes every LayerNormalization out as ReduceMean/Sub/Mul/Add/Sqrt/Div**
+   (`unfuse_layernorm`; same function, ORT does not re-fuse it; `--fused-layernorm` reproduces the old file byte
+   for byte) and `models/v3/ft8nn.onnx` is re-exported from the unchanged `model.pt` (max |onnx − torch| 1.43e-5,
+   was 1.81e-5). Python (torch) is untouched. 26% faster per NN batch of 32.
+   (b) **`nn_features` takes the median with a selection (`select_f`) instead of `qsort`**: the same element (unit
+   test 200,000 random / duplicate / sorted arrays, 0 mismatches).
+   40 slots, 1 thread, user CPU (two runs each, reversed order, no sleep inside either): gate + old onnx 287.1 s;
+   + new onnx 253.8 / 256.9; **+ selection 246.8 / 246.2 s, −14.2% on top of step 1 and −18.2% against the 301.2
+   s before it - below `nn_v3_dtcrp`'s 262.8 s, so the +17% is fully won back**; decodes identical in all runs.
+   Checks: C with the new onnx against Python `nn_v3_ccg` on **every slot of runs 1–4 and the training recordings**
+   (55 stations, 6,576 slots, 160,513 decodes; `golden_c.py real --n 1000 --threads 1`): payload, f0, DT, method
+   and SNR equal for all; 4 decodes differ only in the text of a 10-bit hashed call (`DO6THI RR73; AP5ARS
+   <4O7CC>` in C `<RX3ASQ>`, twice, and `<9X5KM>` / `<BI2QFV>`, twice) - the old onnx gives the same 4, so it
+   predates this change (see "Known C/Python difference" below); the 4 standard golden tests + the 40 slots on all
+   cores with `--stream` PASS with `MallocScribble`; `wsjtx/test_sidecar.sh` all checks. Next in step 3: BP
+   (21%): stop hopeless BP runs early as WSJT-X does (no fewer unsatisfied checks for several iterations), or a
+   cheaper tanh/atanh - may change decodes, so Python first and the A/B; then Costas fine sync and the candidate
+   search.
+   **Known C/Python difference (found 2026-11-14, old):** when two calls heard earlier share a DXpedition
+   message's 10-bit hash, C and Python print different ones (both keep the most recently learned call per hash,
+   but they learn the decodes of a slot in a different order; `c/src/unpack.c` `ht_add` / `ft8nn/message.py`
+   `HashTable`). Text only, 4 of 160,513 decodes; the 20-slot golden tests never reached it. Small fix to look at:
+   learn in the same order on both sides.
 3. **Send context, repeat and co-channel decodes with their pass, not at the end of the slot.** They go out in the
    stream's `pass = -1` batch today (plan 6 step (1) (a)); they are the QSO-relevant ones (a station answering).
    First measure how often the final `drop_ctx_dupes` actually drops one, then decide whether streaming them
@@ -175,7 +207,10 @@ Reproduce: `git worktree add --detach <dir> <rev>`, `make -C <dir>/c ORT_PREFIX=
 then `/usr/bin/time -l <dir>/c/build/ft8nn_cli --threads N --time models/v3/ft8nn.onnx <first 40 wavs of
 datasets/ft8-validation-set/recordings/01_40m_*/slots>` (per-slot `time` lines on stderr).
 
-Last updated 2026-11-14 (**validation run 5 with audio to 5 kHz; the candidate cap makes a wider search cost in-band decodes**, section at the top). Before that 2026-11-14 (**candidate search to 4000 Hz and WSJT-X's [nfa, nfb], tag `nn_v3_f4k`**). Before that 2026-11-13 (**co-channel neighbour gate, tag `nn_v3_ccg`**, Next item 2 step 1: −5.7% CPU per busy
+Last updated 2026-11-14 (**validation run 5 with audio to 5 kHz; the candidate cap makes a wider search cost in-band decodes**, section at the top). Before that 2026-11-14 (**LayerNorm written out in `models/v3/ft8nn.onnx` and the NN-feature median by
+selection**, Next item 2 step 3: 40 busy slots at 1 thread 287.1 -> 246.5 s user CPU, decodes identical on every
+slot of runs 1–4 and training; with step 1, −18.2%, below `nn_v3_dtcrp`). Before that 2026-11-14 (**candidate search to 4000 Hz and WSJT-X's [nfa, nfb], tag `nn_v3_f4k`**). Before that 2026-11-13 (**co-channel neighbour
+gate, tag `nn_v3_ccg`**, Next item 2 step 1: −5.7% CPU per busy
 slot, decodes identical to `nn_v3_ccrpc` on runs 1–4, training and AWGN in Python and C; the WSJT-X live run of
 item 1 marked done). Before that (**early pass in C and
 the sidecar: two-pass early pass at 11.8 s, final pass with its decodes as prior**, Next item 1). Before that (**early pass measured in Python**, plan 6a). Before that (**C timing of
@@ -302,7 +337,8 @@ decodes verified identical to the main machine.
   Qt 5 + the 46 MiB `dec_data` segment, so stock WSJT-X would work too), was dropped: the fork has the sidecar
   interface and stock WSJT-X is not a target.
 - Co-channel neighbour gate (tag `nn_v3_ccg`, Next item 2 step 1): accepted 2026-11-13 22:40, decodes identical to
-  `nn_v3_ccrpc` everywhere; on the worktree branch, not merged to `main` yet.
+  `nn_v3_ccrpc` everywhere; merged to `main` (`77a6373`). Then item 2 step 3's two exact cuts (unfused LayerNorm
+  in the onnx, median by selection): the commit after it. Rebuild the C library and the sidecar before a live run.
 - Last commits (2026-11-13, merged to `main` with the user's OK): the early pass - `b6b3a4d` the Python
   measurements and bench tools (plan 6a), `bc956b9` `ft8nn_decode_early` / `ft8nn_decode_final` in C, the sidecar
   decoding WSJT-X's 11.8 s request, and the tests (Next item 1). Decodes of a plain (non-early) decode are
