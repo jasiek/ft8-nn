@@ -123,7 +123,12 @@ static int prof = -1;
 #define NMET 4 /* NN + classical nsym 1, 2, 3 */
 #define NN_BATCH 128
 #define BASE_MEDIAN 1 /* candidate score baseline: 1 = 1.77 * median of all cells (A/B 2026-11-04: real +281), 0 = old pct40 of per-freq max */
-#define FMAX 3100.0 /* candidate search top (f0, Hz); jt9 decodes up to ~3050 (A/B 2026-11-04: validation run 2 +38) */
+/* candidate search range (f0, Hz; frontend.FMIN_DEFAULT / FMAX_DEFAULT, F_LO / F_HI): 150..4000 unless
+ * ft8nn_set_range gives WSJT-X's [nfa, nfb], which is clamped to F_LO..F_HI as jt9 clamps it */
+#define FMIN_DEFAULT 150.0
+#define FMAX_DEFAULT 4000.0
+#define F_LO 100.0
+#define F_HI 4910.0
 /* later passes skip a candidate (same bin, lag, track) tried in an earlier pass when no decode subtracted since lies
  * within REUSE_DF Hz (decoder.decode_slot reuse_df); 0 = off */
 #define REUSE_DF 62.5
@@ -135,7 +140,7 @@ static int prof = -1;
 #define DT_RECENTER_MAX 2.5 /* largest shift applied, so the window cannot walk away (decoder.DT_RECENTER_MAX) */
 #define TRIED_LAG0 160 /* lag offset in the tried table: lags -160..159 frames (early track -63, shift up to -62) */
 #define TRIED_NL 320
-#define TRIED_NB ((int)(FMAX / 3.125) + 1)
+#define TRIED_NB ((int)(F_HI / 3.125) + 1)
 #define NOISE_BIN (3200.0 / 1000.0)
 #define SNR_OFFSET 0.23
 
@@ -162,6 +167,7 @@ struct ft8nn_ctx {
     } hist[CTX_HIST]; /* this context's own decodes of recent slots (ft8nn_decode_at) */
     int nv_bb;        /* NN features: baseband samples that carry audio during the current decode, 0 = all */
     int cons;         /* early pass: no CQ a-priori, no OSD on BP sums, no wide-window erasure OSD */
+    double fmin, fmax; /* candidate search range, Hz (ft8nn_set_range) */
 };
 
 static once_t init_once = ONCE_INIT;
@@ -182,6 +188,8 @@ static int ort_check(const OrtApi *api, OrtStatus *st) {
 ft8nn_ctx *ft8nn_open(const char *onnx_path, int n_threads) {
     run_once(&init_once, global_init);
     ft8nn_ctx *c = calloc(1, sizeof *c);
+    c->fmin = FMIN_DEFAULT;
+    c->fmax = FMAX_DEFAULT;
     c->api = OrtGetApiBase()->GetApi(ORT_API_VERSION);
     const OrtApi *api = c->api;
     OrtSessionOptions *so = NULL;
@@ -228,6 +236,31 @@ void ft8nn_close(ft8nn_ctx *c) {
 }
 
 void ft8nn_reset_hashes(ft8nn_ctx *c) { ht_clear(c->ht); }
+
+/* frontend.search_range */
+void ft8nn_set_range(ft8nn_ctx *c, double nfa, double nfb) {
+    if (nfa < 0 || nfb <= nfa) {
+        c->fmin = FMIN_DEFAULT;
+        c->fmax = FMAX_DEFAULT;
+        return;
+    }
+    double nwin = nfb - nfa;
+    if (nfa < F_LO) {
+        nfa = F_LO;
+        if (nwin < 100) nfb = nfa + nwin;
+    }
+    if (nfb > F_HI) {
+        nfb = F_HI;
+        if (nwin < 100) nfa = nfb - nwin;
+    }
+    c->fmin = nfa;
+    c->fmax = nfb > nfa + 3.125 ? nfb : nfa + 3.125;
+}
+
+void ft8nn_get_range(const ft8nn_ctx *c, double *fmin, double *fmax) {
+    *fmin = c->fmin;
+    *fmax = c->fmax;
+}
 
 int ft8nn_threads(const ft8nn_ctx *c) { return par_threads(c->pool); }
 
@@ -722,8 +755,8 @@ static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall,
     double t0 = tnow(), c0 = tcpu(), t1, t2, t3;
     long n_bp = 0, n_osd = 0, s_bp = 0, s_osd = 0;
     double st[N_ST] = {0};
-    candidate *cands = malloc(sizeof(candidate) * (MAX_CAND + (int)(FMAX / 3.125) + 1));
-    int nc = find_candidates(x, n, 150.0, FMAX, MAX_CAND, 1.3, BASE_MEDIAN, EARLY_DT, EARLY_MIN, dt_shift, cands, c->pool);
+    candidate *cands = malloc(sizeof(candidate) * (MAX_CAND + (int)(c->fmax / 3.125) + 1));
+    int nc = find_candidates(x, n, c->fmin, c->fmax, MAX_CAND, 1.3, BASE_MEDIAN, EARLY_DT, EARLY_MIN, dt_shift, cands, c->pool);
     t1 = tnow();
     /* candidates to try, in order; the tried table is updated as the serial loop always did */
     int *sel = malloc(sizeof(int) * (size_t)(nc + 1)), ns = 0, nskip = 0;

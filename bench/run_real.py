@@ -223,7 +223,10 @@ def main():
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--stations", default=None, help="comma-separated prefixes, e.g. 00,01")
     ap.add_argument("--per-symbol", action="store_true", help="per-symbol Costas sync ratio")
-    ap.add_argument("--fmax", type=float, default=3100.0)
+    ap.add_argument("--fmin", type=float, default=None, help="candidate search bottom, Hz (default frontend.FMIN_DEFAULT)")
+    ap.add_argument("--fmax", type=float, default=None, help="candidate search top, Hz (default frontend.FMAX_DEFAULT)")
+    ap.add_argument("--range", default=None, metavar="NFA,NFB", help="search WSJT-X's [nfa, nfb] as the sidecar does "
+                    "(frontend.search_range: jt9's clamp to 100..4910 Hz); overrides --fmin/--fmax")
     ap.add_argument("--base", default="median", choices=["max40", "median"], help="candidate score baseline")
     ap.add_argument("--erase-gate", type=float, default=15.0, help="burst-erasure retry below this expected error count (0 = off)")
     ap.add_argument("--erase-osd-dmax", type=float, default=3.0, help="wide-window OSD erasure stage distance limit (0 = off)")
@@ -251,6 +254,12 @@ def main():
     ap.add_argument("--compare-only", action="store_true")
     ap.add_argument("--show", type=int, default=8, help="examples to print per category")
     a = ap.parse_args()
+    from ft8nn import frontend as _fe
+
+    if a.range:
+        a.fmin, a.fmax = _fe.search_range(*(float(v) for v in a.range.split(",")))
+    a.fmin = _fe.FMIN_DEFAULT if a.fmin is None else a.fmin
+    a.fmax = _fe.FMAX_DEFAULT if a.fmax is None else a.fmax
 
     from ft8nn import message
 
@@ -262,7 +271,7 @@ def main():
     outroot = Path(a.out)
 
     if not a.compare_only:
-        with ProcessPoolExecutor(a.workers, initializer=_init, initargs=(a.model, a.also_classical, a.n_hyp, a.early_nn, dict(per_symbol=a.per_symbol, fmax=a.fmax, base=a.base), a.erase_gate, a.erase_osd_dmax, a.osd_snaps, a.passes, not a.no_context, a.reuse_df, a.dt_recenter, None if a.repeat == "off" else tuple(map(float, a.repeat.split(","))), _cc_arg(a.cochannel), a.repeat_competitors == "sendable", a.truncate, (a.out, a.context_from) if a.context_from else None, (a.out, a.prior) if a.prior else None, not a.no_ap, a.early_final)) as ex:
+        with ProcessPoolExecutor(a.workers, initializer=_init, initargs=(a.model, a.also_classical, a.n_hyp, a.early_nn, dict(per_symbol=a.per_symbol, fmin=a.fmin, fmax=a.fmax, base=a.base), a.erase_gate, a.erase_osd_dmax, a.osd_snaps, a.passes, not a.no_context, a.reuse_df, a.dt_recenter, None if a.repeat == "off" else tuple(map(float, a.repeat.split(","))), _cc_arg(a.cochannel), a.repeat_competitors == "sendable", a.truncate, (a.out, a.context_from) if a.context_from else None, (a.out, a.prior) if a.prior else None, not a.no_ap, a.early_final)) as ex:
             jobs = []  # (station index, chain): one chain per station and period, or one per file without context
             for si, st in enumerate(stations):
                 files = sorted(str(f) for f in (st / "slots").glob("*.wav"))

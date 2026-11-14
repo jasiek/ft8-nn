@@ -50,7 +50,7 @@ def _decode_file(path):
     x = x / 100.0
     if _ARGS.truncate:
         x[_ARGS.truncate :] = 0  # an early pass: only the first samples have arrived
-    ds = decoder.decode_slot(x, llr_fn=_LLR, n_hyp=_ARGS.n_hyp, osd_order=_ARGS.osd_order, osd_max_hard=_ARGS.osd_max_hard, ap=() if _ARGS.no_ap else (decoder.AP_CQ,), erase_gate=_ARGS.erase_gate, erase_osd_dmax=_ARGS.erase_osd_dmax, osd_snaps=_ARGS.osd_snaps, passes=_ARGS.passes, reuse_df=_ARGS.reuse_df, dt_recenter=_ARGS.dt_recenter, cochannel=_cc_arg(_ARGS.cochannel), cand_kw=dict(per_symbol=_ARGS.per_symbol, fmax=_ARGS.fmax, base=_ARGS.base))
+    ds = decoder.decode_slot(x, llr_fn=_LLR, n_hyp=_ARGS.n_hyp, osd_order=_ARGS.osd_order, osd_max_hard=_ARGS.osd_max_hard, ap=() if _ARGS.no_ap else (decoder.AP_CQ,), erase_gate=_ARGS.erase_gate, erase_osd_dmax=_ARGS.erase_osd_dmax, osd_snaps=_ARGS.osd_snaps, passes=_ARGS.passes, reuse_df=_ARGS.reuse_df, dt_recenter=_ARGS.dt_recenter, cochannel=_cc_arg(_ARGS.cochannel), cand_kw=dict(per_symbol=_ARGS.per_symbol, fmin=_ARGS.fmin, fmax=_ARGS.fmax, base=_ARGS.base))
     return Path(path).name, [
         (POOL.get(d.key, "??" + d.key), round(d.f0, 1), round(d.dt, 2), d.method, d.info.get("metric"), d.info.get("nhard"))
         for d in ds
@@ -65,7 +65,10 @@ def main():
     ap.add_argument("--also-classical", action="store_true")
     ap.add_argument("--n-hyp", type=int, default=2)
     ap.add_argument("--per-symbol", action="store_true", help="per-symbol Costas sync ratio")
-    ap.add_argument("--fmax", type=float, default=3100.0)
+    ap.add_argument("--fmin", type=float, default=None, help="candidate search bottom, Hz (default frontend.FMIN_DEFAULT)")
+    ap.add_argument("--fmax", type=float, default=None, help="candidate search top, Hz (default frontend.FMAX_DEFAULT)")
+    ap.add_argument("--range", default=None, metavar="NFA,NFB", help="search WSJT-X's [nfa, nfb] as the sidecar does "
+                    "(frontend.search_range: jt9's clamp to 100..4910 Hz); overrides --fmin/--fmax")
     ap.add_argument("--base", default="median", choices=["max40", "median"], help="candidate score baseline")
     ap.add_argument("--no-ap", action="store_true", help="disable a-priori (CQ) decoding")
     ap.add_argument("--erase-gate", type=float, default=15.0, help="burst-erasure retry below this expected error count (0 = off)")
@@ -86,6 +89,12 @@ def main():
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--snrs", default=None, help="restrict to SNR range a:b")
     a = ap.parse_args()
+    from ft8nn import frontend as _fe
+
+    if a.range:
+        a.fmin, a.fmax = _fe.search_range(*(float(v) for v in a.range.split(",")))
+    a.fmin = _fe.FMIN_DEFAULT if a.fmin is None else a.fmin
+    a.fmax = _fe.FMAX_DEFAULT if a.fmax is None else a.fmax
 
     root = Path(a.set)
     manifest = json.loads((root / "manifest.json").read_text())

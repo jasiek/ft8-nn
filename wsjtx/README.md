@@ -110,8 +110,10 @@ per WSJT-X pass (`seq 7:   decoder pass 0: 28 decode(s) sent at 2.41 s` …
   them out. Within each batch the order is by frequency.
 - **All performance cores by default.** A decode runs on one thread per performance core
   (`--threads N` to change that); the decodes are the same for any number of threads.
-- **`[nfa, nfb]` is honoured** — decodes outside the frequency range of WSJT-X's waterfall settings
-  are dropped (`--no-range` keeps them).
+- **`[nfa, nfb]` is searched, as `jt9` searches it** — the decoder looks for signals in the frequency
+  range of WSJT-X's waterfall settings, clamped as `jt9` clamps it (100..4910 Hz), and drops any decode
+  that fine sync moved outside it. `--no-range` ignores the range: the decoder's default 150..4000 Hz,
+  everything reported. (Before 2026-11-14 the search stopped at 3100 Hz whatever WSJT-X asked for.)
 - **A-priori annotations:** `"ap":1` marks our CQ a-priori decodes, `"ap":2` the context ones
   (the calls of a message the same station sent 30 or 60 s earlier) and `"ap":3` the repeat stage's
   (exactly the message that station sent 30 or 60 s earlier, tested whole against the audio) — `jt9`
@@ -144,7 +146,8 @@ with their audio, reads the replies, formats each one into the `jt9` line WSJT-X
 
 1. the protocol path gives exactly the decodes a plain decode of the same audio gives,
 2. every line WSJT-X builds from our replies has `jt9`'s FT8 column layout,
-3. `[nfa, nfb]` keeps exactly the decodes inside the range,
+3. `[nfa, nfb]` is searched and kept exactly (the same decodes as file mode `--range NFA NFB`, inside
+   the range), and a narrower request gets nothing outside it,
 4. an early pass (`final: false`) decodes by default, and nothing with `--no-early`; and WSJT-X's
    live sequence of requests (`fake_wsjtx --sequence`: 11.8 s, 13.5 s, 14.4 s) gives exactly what
    file mode `--sequence` prints, nothing at 13.5 s, and no message twice in a slot,

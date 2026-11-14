@@ -41,10 +41,38 @@ def spectrogram(x):
     return (X.real**2 + X.imag**2).astype(np.float32)  # (frames, bins), bin = 3.125 Hz
 
 
+# Frequency range of the candidate search (tone-0 frequency f0, Hz). jt9 searches the [nfa, nfb] that WSJT-X sends
+# with every decode request (the waterfall's range), clamped to 100..4910 Hz (get_spectrum_baseline.f90); from the
+# command line it defaults to 200..4000. Without a request we search 150..4000: jt9's top, and 50 Hz lower at the
+# bottom, where we found decodes jt9 misses.
+FMIN_DEFAULT, FMAX_DEFAULT = 150.0, 4000.0
+F_LO, F_HI = 100.0, 4910.0
+
+
+def search_range(nfa, nfb):
+    """WSJT-X's [nfa, nfb] -> (fmin, fmax) for find_candidates, clamped as jt9 clamps it: below F_LO the range
+    starts at F_LO, above F_HI it ends at F_HI, and a window narrower than 100 Hz (a re-decode around the QSO
+    frequency) keeps its width as it moves. An unset or empty range (nfa < 0 or nfb <= nfa) gives the defaults.
+    The C library's ft8nn_set_range is the same."""
+    if nfa is None or nfb is None or nfa < 0 or nfb <= nfa:
+        return FMIN_DEFAULT, FMAX_DEFAULT
+    nfa, nfb = float(nfa), float(nfb)
+    nwin = nfb - nfa
+    if nfa < F_LO:
+        nfa = F_LO
+        if nwin < 100:
+            nfb = nfa + nwin
+    if nfb > F_HI:
+        nfb = F_HI
+        if nwin < 100:
+            nfa = nfb - nwin
+    return nfa, max(nfb, nfa + 3.125)
+
+
 BASE_MEDIAN_CAL = 1.77  # pct40(max over lags) / median(all cells) on noise-only and synthetic slots
 
 
-def find_candidates(x, fmin=150.0, fmax=3100.0, dtmin=-1.5, dtmax=2.5, max_cand=600, min_score=1.3, lag_excl=10, typ_dt=(-0.6, 1.2), per_symbol=False, base="median", early_dt=-2.5, early_min=3.0, dt_shift=0.0):
+def find_candidates(x, fmin=FMIN_DEFAULT, fmax=FMAX_DEFAULT, dtmin=-1.5, dtmax=2.5, max_cand=600, min_score=1.3, lag_excl=10, typ_dt=(-0.6, 1.2), per_symbol=False, base="median", early_dt=-2.5, early_min=3.0, dt_shift=0.0):
     """Costas-sync candidates, WSJT-X style: per frequency bin the best and second-best lag
     (second at least lag_excl frames away), peak-picked along frequency only. 2-D local maxima
     let the sidelobes of strong signals exhaust the candidate budget on busy bands.

@@ -13,6 +13,8 @@
  * --early N: per slot, an early pass on the first N samples (ft8nn_decode_early; WSJT-X's 11.8 s request is
  * 141696), then the final pass on the whole file with those decodes as prior (ft8nn_decode_final); prints the early
  * decodes, then the new ones. With --time, "time" covers both and "early\t<slot>\t<s %.3f>\t<decodes>" the early pass.
+ * --range NFA NFB: search WSJT-X's [nfa, nfb] as the sidecar does (ft8nn_set_range; bench/run_real.py --range NFA,NFB);
+ * default 150..4000 Hz.
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -126,6 +128,7 @@ static int64_t slot_time(const char *slot) {
 
 int main(int argc, char **argv) {
     int threads = 1, timing = 0, stream = 0, early = 0, a = 1;
+    double nfa = -1, nfb = -1;
     for (;;) {
         if (a + 1 < argc && !strcmp(argv[a], "--threads")) {
             threads = atoi(argv[a + 1]);
@@ -136,6 +139,10 @@ int main(int argc, char **argv) {
         } else if (a + 1 < argc && !strcmp(argv[a], "--early")) {
             early = atoi(argv[a + 1]);
             a += 2;
+        } else if (a + 2 < argc && !strcmp(argv[a], "--range")) {
+            nfa = atof(argv[a + 1]);
+            nfb = atof(argv[a + 2]);
+            a += 3;
         } else if (a < argc && !strcmp(argv[a], "--stream")) {
             stream = 1;
             a++;
@@ -143,11 +150,12 @@ int main(int argc, char **argv) {
             break;
     }
     if (argc - a < 2) {
-        fprintf(stderr, "usage: %s [--threads N] [--time] [--stream] [--early N] model.onnx slot.wav...\n", argv[0]);
+        fprintf(stderr, "usage: %s [--threads N] [--time] [--stream] [--early N] [--range NFA NFB] model.onnx slot.wav...\n", argv[0]);
         return 2;
     }
     ft8nn_ctx *ctx = ft8nn_open(argv[a], threads);
     if (!ctx) return 1;
+    ft8nn_set_range(ctx, nfa, nfb);
     ft8nn_decode_t out[256], pri[256];
     for (int i = a + 1; i < argc; i++) {
         int n = 0, rate = 0;

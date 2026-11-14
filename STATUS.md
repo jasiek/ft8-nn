@@ -11,6 +11,38 @@ Validation: 37 focused tests passed (`tests/test_live_compare.py`, `tests/test_r
 live TLS MQTT reception verified. Full audio/decoder UI operation was not exercised for this change.
 Next: observe the context display during a live QSO; the decoder/CPU plan below remains the next decoder work.
 
+## Candidate search to 4000 Hz and WSJT-X's [nfa, nfb] — done 2026-11-14 (tag `nn_v3_f4k`), not committed yet
+
+The user noticed we decode only up to ~3 kHz while jt9 goes higher. jt9 searches WSJT-X's [nfa, nfb] (file-mode
+default 200–4000 Hz), clamped to 100–4910 Hz (`lib/ft8/get_spectrum_baseline.f90`; a window under 100 Hz wide keeps
+its width at the clamped end). Ours was fixed at 150–3100 Hz. Now: default 150–4000 Hz
+(`frontend.FMIN_DEFAULT`/`FMAX_DEFAULT`, C `FMIN_DEFAULT`/`FMAX_DEFAULT`); `frontend.search_range(nfa, nfb)` and C
+`ft8nn_set_range` / `ft8nn_get_range` apply jt9's clamp; the sidecar searches each request's [nfa, nfb] (before, it
+searched 150–3100 and only filtered); `ft8nn_cli --range NFA NFB`, `run_real.py` / `run_ours.py --range NFA,NFB` and
+`--fmin`/`--fmax`. The noise-floor band (200–3000 Hz) is unchanged. Tests: `tests/test_search_range.py` (the clamp,
+C == Python, synthetic signals at 3.5 and 4.5 kHz found), `wsjtx/test_sidecar.sh` (check 3 against file mode
+`--range 200 4000`; a 200–2500 Hz request gives only decodes inside it).
+**Every recording we have stops at 3 kHz:** the training set and validation runs 1–4 were taken through a KiwiSDR
+200–3000 Hz passband (`collect/kiwi.py` `hi=3000`; `tools/live_compare.py` asks UberSDR for 0–3000 Hz too), so no
+dataset can show decodes above 3 kHz and none can be regenerated to - that needs new recordings. Instead, a
+**shift test**: 40 run-1 `01_40m` slots moved up 1500 Hz (analytic-signal shift): 92% of the decodes at 1700–2600 Hz
+were found again at 3200–4100 Hz and 90% of those at 2600–3100 Hz at 4100–4600 Hz (the lost ones are weak: median
+−31 dB vs −17 dB kept), 20 decodes above 3200 Hz up to f0 4500.8 Hz, SNR reads ~2 dB lower there.
+Results (the recordings are silent above 3 kHz, so these check that nothing is lost and no false decodes appear; the
+small in-band gains come from the candidate-score median being taken over a larger, mostly empty area):
+run 2 **29,743 / 21,858 slot-confirmed / 1 unconf** vs `nn_v3_ccrpc` 29,691 / 21,820 / 1 (the same `CQ CR4UVW PI49`);
+run 1 34,765 / 26,638 / 1 vs 34,727 / 26,615 / 1 (the same `CQ KR9ZUC/R AO63`); training recordings 18,677 -> 18,724
+(jt9-only 198 -> 195); AWGN 50% −22.49 unchanged; noise 0 false / 998; golden C == Python PASS (00_40m 815/815,
+08_80m 629/629, run-2 02_80m 754/754, AWGN 429/429); `ab_run2.sh` + `validate_full.sh nn_v3_f4k` PASS (12:35–16:43, no
+sleep events); `golden_c.py`'s default tag is now `nn_v3_f4k`.
+**C cost** (`ft8nn_cli --threads 0 --time --early 141696`, 40 run-1 `01_40m` slots, the same binary with `--range 150
+3100` = the old search, runs old/new/new/old 16:44–17:01): user CPU 890 -> 913 s (**+2.6%**), early pass mean 2.81 ->
+2.89 s (+2.7%), final pass 3.34 -> 3.41 s (+2.3%); decodes 1,688 early (identical), 2,189 -> 2,190 total. The machine
+was **not idle** (another session's `live_compare.py`, load ~5): every time is ~1.8× the idle numbers in Next item 1,
+so read only the ratio; scaled, the idle early pass is ~1.57 s, still ~1 s inside the 2.6 s before the final request.
+Next: commit (ask the user); re-record with a wider passband if decodes above 3 kHz are to be measured on real audio
+(a user decision: Git LFS bandwidth, new recordings); jt9's `nagain` re-decode searches only nfqso ± 20 Hz (not done).
+
 ## Next (agreed with the user 2026-11-12) — start here
 
 Decode count is no longer the target: what other decoders still find and we miss is ~2,500 slot-confirmed pairs
@@ -86,7 +118,7 @@ Reproduce: `git worktree add --detach <dir> <rev>`, `make -C <dir>/c ORT_PREFIX=
 then `/usr/bin/time -l <dir>/c/build/ft8nn_cli --threads N --time models/v3/ft8nn.onnx <first 40 wavs of
 datasets/ft8-validation-set/recordings/01_40m_*/slots>` (per-slot `time` lines on stderr).
 
-Last updated 2026-11-13 (**early pass in C and the sidecar: two-pass early pass at 11.8 s, final pass with its
+Last updated 2026-11-14 (**candidate search to 4000 Hz and WSJT-X's [nfa, nfb], tag `nn_v3_f4k`**, section at the top). Before that 2026-11-13 (**early pass in C and the sidecar: two-pass early pass at 11.8 s, final pass with its
 decodes as prior**, Next item 1). Before that (**early pass measured in Python**, plan 6a). Before that (**C timing of
 `nn_v3_ccrpc` and the next plan**, above). Before that (**repeat stage scores only competitors a station could send, tag `nn_v3_ccrpc`** (plan
 12): a CQ's competitors no longer include `CQ K1ABC R FN42` or `CQ K1ABC RR73/-12`, which had beaten the margin on
@@ -234,7 +266,7 @@ then v3 = 4000 steps from v2 with real noise in half the rows (21 min; README ha
 Decoder defaults: `decoder.decode_slot`. These are 4 passes with subtraction, 2 fine-sync hypotheses,
 NN metric with classical nsym 1/2/3 fallback (`--also-classical`), OSD order 2 gated on expected errors < 40,
 CQ a-priori decoding (expected errors < 44), burst-erasure retry (expected errors < 15) with a wide-window OSD stage
-(`osd_er`), OSD on summed BP posteriors after iterations 1–2 (`osd_bp`), ghost filter, candidate search 150–3100 Hz plus an early-DT track down to −2.5 s, candidate reuse in passes 2–4
+(`osd_er`), OSD on summed BP posteriors after iterations 1–2 (`osd_bp`), ghost filter, candidate search 150–4000 Hz (150–3100 before 2026-11-14; the sidecar searches WSJT-X's [nfa, nfb], clamped to 100–4910 Hz as jt9 does) plus an early-DT track down to −2.5 s, candidate reuse in passes 2–4
 (`reuse_df` 62.5 Hz, plan 7.3b), message plausibility rules on every stage's result (plan 7.4),
 context a-priori decoding from our own decodes 30/60 s earlier (`bp_cx`/`osd_cx`, expected errors < 48; needs
 `context=` in Python, `ft8nn_decode_at` in C; the bench passes it, see plan 7.2c), DT re-centring (`dt_recenter`,
@@ -307,7 +339,8 @@ Scores (vs jt9 baseline, checkable = sender call is spotted-checkable):
 | 1 | **nn_v3** | **32,244 (+16.3%)** | **24,660 (+14.7%)** | **1** | | |
 | 1 | nn_v3_dtcrp | 34,295 (+23.7%) | 26,299 (+22.4%) | 1 | | |
 | 1 | nn_v3_cc | 34,585 (+24.7%) | 26,505 (+23.3%) | 1 | | |
-| 1 | **nn_v3_ccrpc** | **34,727 (+25.2%)** | **26,615 (+23.8%)** | **1** | | |
+| 1 | nn_v3_ccrpc | 34,727 (+25.2%) | 26,615 (+23.8%) | 1 | | |
+| 1 | **nn_v3_f4k** | **34,765 (+25.4%)** | **26,638 (+23.9%)** | **1** | | search to 4000 Hz |
 | 2 (unseen sites) | jt9 | 24,291 | 17,993 | 16 | – | – |
 | 2 | nn_v2_er | 25,994 (+7.0%) | 19,244 (+7.0%) | 1 | 886 | 2590 |
 | 2 | nn_v2_f31 | 26,032 (+7.2%) | 19,281 (+7.2%) | 1 | 850 | |
@@ -321,7 +354,8 @@ Scores (vs jt9 baseline, checkable = sender call is spotted-checkable):
 | 2 | **nn_v3_dtc** | **28,198 (+16.1%)** | **20,701 (+15.1%)** | **1** | | identical to `nn_v3`: the gate never arms here |
 | 2 | nn_v3_dtcrp | 29,435 (+21.2%) | 21,646 (+20.3%) | 1 | | |
 | 2 | nn_v3_cc | 29,588 (+21.8%) | 21,751 (+20.9%) | 1 | | |
-| 2 | **nn_v3_ccrpc** | **29,691 (+22.2%)** | **21,820 (+21.3%)** | **1** | | |
+| 2 | nn_v3_ccrpc | 29,691 (+22.2%) | 21,820 (+21.3%) | 1 | | |
+| 2 | **nn_v3_f4k** | **29,743 (+22.4%)** | **21,858 (+21.5%)** | **1** | | search to 4000 Hz |
 | 3 (unseen sites, other day) | jt9 | 23,524 | 17,888 | 17 | – | – |
 | 3 | nn_v2_pl | 26,535 (+12.8%) | 19,982 (+11.7%) | 1 | | |
 | 3 | **nn_v3** | **26,688 (+13.5%)** | **20,105 (+12.4%)** | **0** | | |
@@ -1030,7 +1064,7 @@ These come from `tools/diag_strong_miss.py`. It looked at 45 strong jt9-only dec
    because WSJT-X skips a request that arrives while the decoder is busy and a slow early pass would cost the full
    pass (`--early` to decode them) - superseded 2026-11-13: the 11.8 s request now gets a short two-pass early
    pass and the final pass reports only what it adds (Next item 1; `--no-early` restores the empty answer); a re-decode (`samples: 0`) replays the last period's audio; `[nfa, nfb]` is
-   honoured and decodes are reported in frequency order; our CQ a-priori decodes report `ap: 1` and context ones
+   honoured and decodes are reported in frequency order (since 2026-11-14 the search itself covers [nfa, nfb], clamped to 100–4910 Hz as jt9 does; before, it stopped at 3100 Hz); our CQ a-priori decodes report `ap: 1` and context ones
    `ap: 2`, which WSJT-X shows as `a1`/`a2`; a missing model exits so WSJT-X falls back to its own `jt9`. Measured
    9-12 s per slot on the plain M1 for the busiest 40 m station (M4 mini: 6.9-8.0 s), against WSJT-X's 15 s
    request timeout - the low-latency work in 7.6 matters for live use, and a pass that overruns is logged.

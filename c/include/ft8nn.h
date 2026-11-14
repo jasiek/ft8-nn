@@ -92,6 +92,17 @@ int ft8nn_decode_early(ft8nn_ctx *ctx, const float *audio12k, int n, int64_t slo
 int ft8nn_decode_final(ft8nn_ctx *ctx, const float *audio12k, int n, int64_t slot_time, const ft8nn_decode_t *prior,
                        int n_prior, ft8nn_pass_cb cb, void *user, ft8nn_decode_t *out, int max_out);
 
+/* Frequency range of the candidate search (tone-0 frequency, Hz), kept by the context for the decodes that follow:
+ * WSJT-X's [nfa, nfb] from the decode request (its waterfall range), clamped as jt9 clamps it - the range starts
+ * no lower than 100 Hz and ends no higher than 4910 Hz, and a window narrower than 100 Hz keeps its width as it
+ * moves. nfa < 0 or nfb <= nfa restores the default, 150..4000 Hz (jt9's file-mode top is 4000). Signals outside
+ * the range are not searched for, so they are neither decoded nor subtracted; a decode found from a candidate inside
+ * can still end up a few Hz outside it after fine sync. */
+void ft8nn_set_range(ft8nn_ctx *ctx, double nfa, double nfb);
+
+/* The range in use after clamping. */
+void ft8nn_get_range(const ft8nn_ctx *ctx, double *fmin, double *fmax);
+
 /* Forget all learned callsign hashes. */
 void ft8nn_reset_hashes(ft8nn_ctx *ctx);
 

@@ -101,7 +101,8 @@ struct Options
   int max_decodes = 200;                // --max-decodes per pass
   bool early = true;                    // --no-early: answer WSJT-X's early passes with no decodes
   bool sequence = false;                // file mode --sequence: early pass, then final, as WSJT-X asks
-  bool range = true;                    // --no-range: keep decodes outside [nfa, nfb]
+  bool range = true;                    // --no-range: search the default range, keep decodes outside [nfa, nfb]
+  int nfa = 0, nfb = 0;                 // file mode --range: the [nfa, nfb] a WSJT-X request would carry
   bool help = false;
   std::vector<std::string> files;       // file mode: decode these instead of talking to WSJT-X
 };
@@ -122,7 +123,8 @@ static char const * const usage_text =
   "  --sequence        file mode: per file an early pass on the first 11.8 s, then the final\n"
   "                    pass on 14.4 s, as WSJT-X asks (what the sidecar does live)\n"
   "  --max-decodes N   report at most N decodes per WSJT-X pass (default 200)\n"
-  "  --no-range        report decodes outside WSJT-X's [nfa, nfb] too\n"
+  "  --no-range        ignore WSJT-X's [nfa, nfb]: search 150..4000 Hz and report everything found\n"
+  "  --range NFA NFB   file mode: decode as for a WSJT-X request with this [nfa, nfb]\n"
   "  -v, --verbose     log every pass to stderr (WSJT-X copies it into its log)\n"
   "\n"
   "Install: WSJTX_FT8_DECODER='/path/to/ft8nn_sidecar --model /path/to/ft8nn.onnx' wsjtx\n";
@@ -147,6 +149,11 @@ static bool parse_args (int argc, char ** argv, Options & o)
       else if (a == "--no-early") o.early = false;
       else if (a == "--sequence") o.sequence = true;
       else if (a == "--no-range") o.range = false;
+      else if (a == "--range")
+        {
+          o.nfa = atoi (next ().c_str ());
+          o.nfb = atoi (next ().c_str ());
+        }
       else if (a == "-v" || a == "--verbose") verbose = true;
       else if (a == "-h" || a == "--help") o.help = true;
       else if (!a.empty () && a[0] == '-')
@@ -268,6 +275,10 @@ struct Decoder
       s.reported += (int) s.keep.size ();
       (*s.sink) (s.keep, pass);
     };
+    /* Search [nfa, nfb] as jt9 does (ft8nn_set_range clamps it to 100..4910 Hz as jt9 does); with --no-range, or no
+     * usable range in the request, the decoder's default 150..4000 Hz. */
+    bool use = o.range && nfb > nfa && nfa >= 0;
+    ft8nn_set_range (ctx, use ? nfa : -1, use ? nfb : -1);
     /* INT64_MIN is FT8NN_NO_SLOT_TIME: no context decoding, as ft8nn_decode */
     int r;
     if (kind == Early)
@@ -572,13 +583,13 @@ static int file_mode (Options const & o, char const * argv0)
         {
           /* what sidecar mode does with WSJT-X's requests: early on 11.8 s, nothing at 13.5 s, final on 14.4 s */
           std::vector<ft8nn_decode_t> early;
-          k = dec.run (o, std::min (n, EARLY_SAMPLES), t, 0, 0, print, Decoder::Early, &early);
+          k = dec.run (o, std::min (n, EARLY_SAMPLES), t, o.nfa, o.nfb, print, Decoder::Early, &early);
           printf ("<DecodeFinished>%4d%4d%9d\n", 0, std::max (k, 0), 0);
           printf ("<DecodeFinished>%4d%4d%9d\n", 0, 0, 0);
-          k = dec.run (o, std::min (n, FINAL_SAMPLES), t, 0, 0, print, Decoder::Final, &early);
+          k = dec.run (o, std::min (n, FINAL_SAMPLES), t, o.nfa, o.nfb, print, Decoder::Final, &early);
         }
       else
-        k = dec.run (o, n, t, 0, 0, print);
+        k = dec.run (o, n, t, o.nfa, o.nfb, print);
       /* '<DecodeFinished>', 2i4, i9 (lib/decoder.f90 format 1010): WSJT-X writes this itself when
        * our "done" arrives, so file mode prints it only to look like a jt9 pass. */
       printf ("<DecodeFinished>%4d%4d%9d\n", 0, std::max (k, 0), 0);

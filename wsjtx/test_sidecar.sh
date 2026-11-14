@@ -5,7 +5,8 @@
 #
 #   1. the sidecar path gives exactly the decodes a plain decode of the same audio gives,
 #   2. every line WSJT-X builds from our replies has jt9's FT8 column layout,
-#   3. [nfa, nfb] keeps exactly the decodes inside WSJT-X's frequency range,
+#   3. [nfa, nfb] is searched and kept exactly: the decodes equal a file-mode decode of that range
+#      (--range) inside it, and a request for 200..2500 Hz gets nothing above 2500 Hz,
 #   4. an early pass (final=false) decodes by default, and nothing with --no-early,
 #   4b. WSJT-X's live sequence (early at 11.8 s, early at 13.5 s, final at 14.4 s) gives what file mode
 #       --sequence prints: the second early request nothing, the final pass only what the early one missed,
@@ -79,19 +80,28 @@ grep -v "<DecodeFinished>" "$tmp/side.txt" | awk '
   echo "FAIL: line(s) without jt9's FT8 layout:"; head -5 "$tmp/badlines.txt"; exit 1; }
 echo "ok: all $ndec lines have jt9's FT8 column layout"
 
-# 3. with the filter on (fake_wsjtx asks for 200..4000 Hz), exactly the decodes inside the range
-#    survive; the frequency is columns 16..20 of the line.
+# 3. with the range on (fake_wsjtx asks for 200..4000 Hz), the decoder searches that range, as jt9 does, and
+#    exactly the decodes inside it survive: the same as a file-mode decode of that range, filtered; the
+#    frequency is columns 16..20 of the line.
 # shellcheck disable=SC2086
 "$fake" --decoder "$sidecar --model $model" $wavs > "$tmp/range.txt"
+# shellcheck disable=SC2086
+"$sidecar" --model "$model" --range 200 4000 $wavs > "$tmp/file_range.txt"
 awk '/<DecodeFinished>/ {print; next} {f=substr($0,16,5)+0; if (f>=200 && f<=4000) print}' \
-    "$tmp/file.txt" | sed 's/<DecodeFinished>.*//' > "$tmp/want.txt"
+    "$tmp/file_range.txt" | sed 's/<DecodeFinished>.*//' > "$tmp/want.txt"
 sed 's/<DecodeFinished>.*//' "$tmp/range.txt" > "$tmp/got.txt"
 LC_ALL=C sort "$tmp/want.txt" > "$tmp/want.sorted"; LC_ALL=C sort "$tmp/got.txt" > "$tmp/got.sorted"
 if ! diff -u "$tmp/want.sorted" "$tmp/got.sorted" > "$tmp/diff2.txt"; then
   echo "FAIL: the [nfa, nfb] filter did not keep exactly the decodes in 200..4000 Hz"
   head -20 "$tmp/diff2.txt"; exit 1
 fi
-echo "ok: [nfa, nfb] honoured ($(grep -vc '^$' "$tmp/got.txt" || true) of $ndec decodes in 200..4000 Hz)"
+echo "ok: [nfa, nfb] honoured ($(grep -vc '^$' "$tmp/got.txt" || true) decodes in 200..4000 Hz)"
+# a narrower request: nothing above its top
+# shellcheck disable=SC2086
+"$fake" --decoder "$sidecar --model $model" --nfa 200 --nfb 2500 $wavs > "$tmp/range2.txt"
+awk '/<DecodeFinished>/ {next} {f=substr($0,16,5)+0; if (f<200 || f>2500) bad=1; n++} END {exit bad || n == 0}' \
+    "$tmp/range2.txt" || { echo "FAIL: a 200..2500 Hz request gave decodes outside it, or none"; exit 1; }
+echo "ok: a 200..2500 Hz request: $(grep -vc '<DecodeFinished>' "$tmp/range2.txt" || true) decodes, all inside"
 
 # 4. WSJT-X's early passes (final=false, at about 11.8 s and 13.5 s into the period): the first is decoded
 #    by default (a short early pass, see README), and --no-early answers it at once with no decodes.

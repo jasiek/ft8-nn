@@ -11,7 +11,7 @@ saved decodes:
            `<CALL>` (verify.py treats any `<` as unchecked), or our text equals the reference's once `<>` is dropped
   dtwin    reference DT outside our search window [-1.5, 2.5] s, shifted by the receiver's median DT when DT
            re-centring would arm (|median| >= 0.8 s over the slot's decodes)
-  edge     frequency below 200 Hz or above 3000 Hz (our candidate search covers 150-3100 Hz)
+  edge     frequency below 200 Hz or above 3000 Hz (the recordings pass 200-3000 Hz; our search covered 150-3100 Hz until 2026-11-14, now 150-4000)
   cochan   we decode a different sender within 10 Hz and 0.4 s in the same slot (nearest one is recorded);
            cochan_both: the reference also decoded that neighbour's sender in the slot (it got both signals)
   repeat   we decoded the exact text on this receiver 30 or 60 s earlier within 10 Hz (CTX_DF): repeat-stage input
