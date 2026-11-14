@@ -118,7 +118,7 @@ start with item 2):
    cheap to cut (e.g. skip cells whose residual near f0 is at the noise floor, fewer refinement points, cheaper
    subtraction of the last pass), Python first, accepting a change only if decodes stay identical or the A/B
    still passes. Python: `ft8nn/decoder.py` `_cochannel_stage`, `COCHANNEL*`; `ft8nn/frontend.py` `data_sync`.
-   **Step 1 done 2026-11-13 (tag `nn_v3_ccg`; Python acceptance still running when committed).** Profile
+   **Step 1 done 2026-11-13 (tag `nn_v3_ccg`, `0a9bcd0`; accepted, all checks below).** Profile
    (`FT8NN_PROFILE=1`, 40 busy run-1 `01_40m` slots, 1 thread, idle M4): of 301.2 s user CPU the 4 passes take
    238.9 s, **the co-channel stage 41.0 s** (34,569 NN hypotheses, ~9 per decode cell, for 39 decodes; its CPU is
    almost all NN: all-core split NN 43.7 s, BP/OSD 4.8 s, data-sync search 2.4 s wall), subtraction 18.3 s (all
@@ -130,9 +130,11 @@ start with item 2):
    (gate 62 would also lose none but sits on the 61.8 edge; 60 loses 1). Result: C decodes **byte-identical** on
    all of run 1 (1,077 slots, 34,727 decodes) and on the 40 slots; stage NN hypotheses 41.9% of before; 40 slots
    at 1 thread **301.2 -> 283.9 s user CPU (−5.7%)**, stage 41.0 -> 23.2 s, peak RSS 519 -> 478 MB. That wins
-   back about a third of the +17%. Pending at commit time: `tools/ab_run2.sh nn_v3_ccg`, Python runs 3 and 4,
-   `tools/validate_full.sh nn_v3_ccg` (golden C == Python) and a per-file diff of every run's decodes against
-   `nn_v3_ccrpc` (`data/logs/nn_v3_ccg/`, chain script `diff_vs_ccrpc.txt` at the end). Next in item 2: the
+   back about a third of the +17%. **Acceptance (Python, 18:43–22:40, no sleep events): every decode file
+   byte-identical to `nn_v3_ccrpc`** - runs 1–4 all 45 station files (`data/logs/nn_v3_ccg/diff_vs_ccrpc.txt`)
+   and the 10 training recordings; noise 0 false; run 2 29,691 / 21,820 / 1, runs 2–4 pooled 107,108 / 78,782 / 4,
+   run 1 34,727 / 26,615 / 1, AWGN 50% −22.49; golden C == Python 4/4 PASS (`tools/golden_c.py` default tag now
+   `nn_v3_ccg`). `nn_v3_ccg` is the reference tag from here on. Next in item 2: the
    remaining 23 s of the stage (fewer peaks per cell, or a cheaper first look than the NN), then the passes
    themselves (NN 109 s, BP/OSD 69 s of the 239 s).
 3. **Send context, repeat and co-channel decodes with their pass, not at the end of the slot.** They go out in the
@@ -174,8 +176,9 @@ then `/usr/bin/time -l <dir>/c/build/ft8nn_cli --threads N --time models/v3/ft8n
 datasets/ft8-validation-set/recordings/01_40m_*/slots>` (per-slot `time` lines on stderr).
 
 Last updated 2026-11-14 (**validation run 5 with audio to 5 kHz; the candidate cap makes a wider search cost in-band decodes**, section at the top). Before that 2026-11-14 (**candidate search to 4000 Hz and WSJT-X's [nfa, nfb], tag `nn_v3_f4k`**). Before that 2026-11-13 (**co-channel neighbour gate, tag `nn_v3_ccg`**, Next item 2 step 1: −5.7% CPU per busy
-slot, C decodes identical on run 1; the WSJT-X live run of item 1 marked done). Before that (**early pass in C and the
-sidecar: two-pass early pass at 11.8 s, final pass with its decodes as prior**, Next item 1). Before that (**early pass measured in Python**, plan 6a). Before that (**C timing of
+slot, decodes identical to `nn_v3_ccrpc` on runs 1–4, training and AWGN in Python and C; the WSJT-X live run of
+item 1 marked done). Before that (**early pass in C and
+the sidecar: two-pass early pass at 11.8 s, final pass with its decodes as prior**, Next item 1). Before that (**early pass measured in Python**, plan 6a). Before that (**C timing of
 `nn_v3_ccrpc` and the next plan**, above). Before that (**repeat stage scores only competitors a station could send, tag `nn_v3_ccrpc`** (plan
 12): a CQ's competitors no longer include `CQ K1ABC R FN42` or `CQ K1ABC RR73/-12`, which had beaten the margin on
 226 of the 320 repeats lost that way; a CQ-only sender then needs ρ ≥ 0.50 (`REPEAT_SOLO` 0.35), set on the run-1
@@ -298,10 +301,8 @@ decodes verified identical to the main machine.
   a non-JSON line, exit on `quit`, and a missing model. The first attempt, a `jt9` shared-memory shim (`jt9nn`,
   Qt 5 + the 46 MiB `dec_data` segment, so stock WSJT-X would work too), was dropped: the fork has the sidecar
   interface and stock WSJT-X is not a target.
-- **Running 2026-11-13 from 18:43 (expected end ~23:15):** the acceptance chain of the co-channel neighbour gate,
-  tag `nn_v3_ccg` (committed on the user's request before it finished; not merged to `main`): `ab_run2.sh`, Python
-  runs 3 and 4, `validate_full.sh`, then `data/logs/nn_v3_ccg/diff_vs_ccrpc.txt` (every decode file vs
-  `nn_v3_ccrpc`; expected all "same"). If all pass, set `tools/golden_c.py`'s default `--tag` to `nn_v3_ccg`.
+- Co-channel neighbour gate (tag `nn_v3_ccg`, Next item 2 step 1): accepted 2026-11-13 22:40, decodes identical to
+  `nn_v3_ccrpc` everywhere; on the worktree branch, not merged to `main` yet.
 - Last commits (2026-11-13, merged to `main` with the user's OK): the early pass - `b6b3a4d` the Python
   measurements and bench tools (plan 6a), `bc956b9` `ft8nn_decode_early` / `ft8nn_decode_final` in C, the sidecar
   decoding WSJT-X's 11.8 s request, and the tests (Next item 1). Decodes of a plain (non-early) decode are
