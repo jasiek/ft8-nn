@@ -16,7 +16,7 @@ collection run gives a *new* data set made the same way, not the same files.
 
 | file | what |
 |---|---|
-| `kiwi.py` | minimal KiwiSDR WebSocket client: USB mode 200–3000 Hz, AGC on, uncompressed 16-bit PCM at 12 kHz, written as 15 s WAVs aligned to UTC :00/:15/:30/:45 and named `YYMMDD_HHMMSS.wav` (a slot is kept only if recording started within 0.2 s of its boundary) |
+| `kiwi.py` | minimal KiwiSDR WebSocket client: USB mode (passband `lo`–`hi`, default 200–3000 Hz; `val.py` asks for 200–5400 Hz since 2026-11-14), AGC on, uncompressed 16-bit PCM at 12 kHz, written as 15 s WAVs aligned to UTC :00/:15/:30/:45 and named `YYMMDD_HHMMSS.wav` (a slot is kept only if recording started within 0.2 s of its boundary) |
 | `pskr.py` | minimal MQTT 3.1.1 subscriber for `mqtt.pskreporter.info:1883`, topics `pskr/filter/v2/<band>/FT8/#`; one JSON line per spot plus our arrival time `rx_t` |
 | `val.py` | the run driver for the validation runs: `probe`, `probe-fresh`, `record`, `decode` (below) |
 | `ft8rec.py` | the run driver of the training recordings (`probe`, `record`, `decode`); `val.py` is its successor |
@@ -26,7 +26,7 @@ collection run gives a *new* data set made the same way, not the same files.
 | `datarepo.py` | packs a run folder for its Git LFS data repo (FLAC + xz) and unpacks it byte for byte |
 
 These are copies of the data repos' `tools/*.py` (`datasets/ft8-validation-set`, 2026-11-04; `datasets/ft8-training-data`
-`ft8rec.py`, `fill.py`, 2026-11-03; their `kiwi.py` is byte-identical). Only the default paths changed: `val.py`
+`ft8rec.py`, `fill.py`, 2026-11-03; their `kiwi.py` is byte-identical). Only the default paths changed (and, since 2026-11-14, the passband and the jt9 range, below): `val.py`
 and `ft8rec.py` write to `$OUTDIR` (default `.`) and reads the training receiver list from `$TRAIN_SELECTION` (default
 `collect/runs/train/selection.json`); `verify.py` reads the validation set from `$V` (default
 `datasets/ft8-validation-set`). `tools/ab_run2.sh` and `tools/validate_full.sh` call `collect/verify.py`.
@@ -47,6 +47,12 @@ python3 collect/val.py decode                 # jt9 -8 -d 3 labels -> decodes.tx
 python3 collect/manifest.py make $OUTDIR pskr_spots.jsonl selection.json session.json > MANIFEST.sha256
 ```
 
+- **Passband (since 2026-11-14):** `PASSBAND=200,5400` (default) is the Kiwi USB low/high cut for the probes and the
+  recording, saved in `session.json` and each receiver's `meta.json`. Runs 1–4 and the training recordings used
+  200–3000 Hz, so they hold nothing above 3 kHz; the decoder now searches to 4000 Hz by default and to WSJT-X's nfb
+  (jt9 caps it at 4910 Hz) in WSJT-X. A Kiwi at 12 kHz audio gives a flat response to ~5 kHz at `hi=5400`, −4 dB at
+  5.0–5.25 kHz, nothing above 5.5 kHz. jt9 labels use `JT9_RANGE=200,4910` (default; `jt9 -L -H`, jt9's own
+  ceiling, written to `jt9_labels.json`; runs 1–4: jt9's default 200–4000) and the binary `JT9` (default `jt9`).
 - **probe:** records one slot on each band that suits the receiver's local time (day: 20/17/15/10 m; dusk and
   dawn: 20/30/40/17 m; night: 40/80/30/20 m), decodes it with jt9, then picks greedily: busiest
   (receiver, band) pairs first, one band per receiver, at most 2 receivers per band, at least 3 decodes.
@@ -112,9 +118,10 @@ fetches part of a set (`GIT_LFS_SKIP_SMUDGE=1 git submodule update --init`, then
 | validation run 2 | `val2/` | `datasets/ft8-validation-set/run2` | 2026-11-04 22:28:30–22:58:30 | 9 (fresh sites) | 1,077 | 853k |
 | validation run 3 | `val3/` | `datasets/ft8-validation-set/run3` | 2026-11-09 05:32:00–06:02:00 (Mon) | 12 (fresh sites, none from run 2) | 1,435 | 556k |
 | validation run 4 | `val4/` | `datasets/ft8-validation-set/run4` | 2026-11-09 15:00:00–15:30:00 (Mon) | 15 (fresh sites, none from runs 2–3) | 1,790 | 1,473k |
+| validation run 5 | `val5/` | local only so far: `data/collect/2026-11-14-run5` (not uploaded) | 2026-11-14 17:15:45–17:45:45 (Sat) | 16 (fresh sites, none from runs 1–4; **200–5400 Hz passband**) | 1,909 | 1,196k |
 
 Each `collect/runs/<run>/` holds `selection.json` (receivers, bands, probe results), `session.json` (times,
-bands, MQTT topics) and `MANIFEST.sha256`. Run 2 also holds the receiverbook snapshot it was drawn from (runs 3 and 4 reused it, `N_RX=16 PER_BAND=6`: 12 and 15 passed; run 4 via the data repo's `tools/scheduled_run.sh`, which waits for a set UTC time); the
+bands, MQTT topics) and `MANIFEST.sha256`. Run 2 also holds the receiverbook snapshot it was drawn from (runs 3, 4 and 5 reused it, `N_RX=16 PER_BAND=6`: 12, 15 and 16 passed; run 4 via the data repo's `tools/scheduled_run.sh`, which waits for a set UTC time); the
 training run holds its `record.log`, and its `selection.json` is the original (probe seed 372751130, plus the
 receiver that was replaced).
 Check a copy of the data with

@@ -76,6 +76,10 @@ FT8_FREQUENCIES = {
     "6cm": 5_760_174_000,
     "3cm": 10_368_174_000,
 }
+# audio passband top, Hz: the local decoder searches up to 4000 Hz by default and jt9 up to 4910 Hz (both 12 kHz
+# audio, so at most 6000); before 2026-11-14 this was 3000. MIN_COVER_HZ: what a receiver profile must still cover.
+AUDIO_HIGH_CUT = 5000
+MIN_COVER_HZ = 3000
 PSK_CONTEXT_SECONDS = 5 * 60
 SLOT_HISTORY = 40  # Ten minutes of 15-second slots for delayed reception reports.
 METHODS = ("bp", "osd", "bp_ap", "osd_ap", "bp_er", "osd_er", "osd_bp", "bp_cx", "osd_cx", "rp")
@@ -829,7 +833,7 @@ class UberSDRClient:
             self.timeout,
         )
         self.audio_ws.send_json(
-            {"type": "tune", "frequency": self.dial, "mode": "usb", "bandwidthLow": 0, "bandwidthHigh": 3000}
+            {"type": "tune", "frequency": self.dial, "mode": "usb", "bandwidthLow": 0, "bandwidthHigh": AUDIO_HIGH_CUT}
         )
         self.spots_ws.send_json({"type": "subscribe_digital_spots"})
         self.threads = [
@@ -961,7 +965,7 @@ class OpenWebRXClient:
     def _covers_dial(self) -> bool:
         center = self.config.get("center_freq")
         rate = self.config.get("samp_rate")
-        return bool(center and rate and center - rate / 2 <= self.dial and self.dial + 3000 <= center + rate / 2)
+        return bool(center and rate and center - rate / 2 <= self.dial and self.dial + MIN_COVER_HZ <= center + rate / 2)
 
     def _wait_for(self, predicate: Callable[[], bool], timeout: float | None = None) -> None:
         deadline = time.monotonic() + (self.timeout if timeout is None else timeout)
@@ -1012,9 +1016,12 @@ class OpenWebRXClient:
         mode = next(mode for mode in self.modes if mode.get("modulation") == "ft8")
         bandpass = mode.get("bandpass") or {"low_cut": 0, "high_cut": 3000}
         underlying = (mode.get("underlying") or ["usb"])[0]
+        # widen the mode's passband up to AUDIO_HIGH_CUT, as far as the selected profile's spectrum reaches
+        room = int(self.config["center_freq"] + self.config["samp_rate"] / 2 - self.dial)
+        high_cut = max(bandpass["high_cut"], min(AUDIO_HIGH_CUT, room))
         params = {
             "low_cut": bandpass["low_cut"],
-            "high_cut": bandpass["high_cut"],
+            "high_cut": high_cut,
             "offset_freq": round(self.dial - self.config["center_freq"]),
             "mod": underlying,
             "squelch_level": -150,

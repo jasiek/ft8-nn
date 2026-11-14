@@ -36,12 +36,49 @@ run 1 34,765 / 26,638 / 1 vs 34,727 / 26,615 / 1 (the same `CQ KR9ZUC/R AO63`); 
 08_80m 629/629, run-2 02_80m 754/754, AWGN 429/429); `ab_run2.sh` + `validate_full.sh nn_v3_f4k` PASS (12:35–16:43, no
 sleep events); `golden_c.py`'s default tag is now `nn_v3_f4k`.
 **C cost** (`ft8nn_cli --threads 0 --time --early 141696`, 40 run-1 `01_40m` slots, the same binary with `--range 150
-3100` = the old search, runs old/new/new/old 16:44–17:01): user CPU 890 -> 913 s (**+2.6%**), early pass mean 2.81 ->
-2.89 s (+2.7%), final pass 3.34 -> 3.41 s (+2.3%); decodes 1,688 early (identical), 2,189 -> 2,190 total. The machine
-was **not idle** (another session's `live_compare.py`, load ~5): every time is ~1.8× the idle numbers in Next item 1,
-so read only the ratio; scaled, the idle early pass is ~1.57 s, still ~1 s inside the 2.6 s before the final request.
-Next: re-record with a wider passband if decodes above 3 kHz are to be measured on real audio
-(a user decision: Git LFS bandwidth, new recordings); jt9's `nagain` re-decode searches only nfqso ± 20 Hz (not done).
+3100` = the old search, runs old/new/new/old). Measured on the **8-core M1** (4 performance cores), not the M4 mini:
+every time is ~1.8× the M4 numbers in Next item 1 for that reason (a first set, run with another process busy, gave
+the same times as the idle re-run 17:57–18:14, so load was not the cause). Idle re-run: user CPU 884 -> 911 s
+(**+3.0%**), early pass mean 2.79 -> 2.88 s (+3.3%), final pass 3.32 -> 3.41 s (+2.7%); decodes 1,688 early
+(identical), 2,189 -> 2,190 total. Scaled to the M4, the early pass goes ~1.53 -> ~1.58 s, still ~1 s inside the
+2.6 s before WSJT-X's final request. **On the M1 the early pass (2.8 s, max 3.0 s) already overruns that 2.6 s with
+either range**, so WSJT-X there would skip some final requests: the early pass needs a deadline or fewer passes on
+slower machines (the CPU work in Next item 2 matters for this too).
+**Validation run 5 (2026-11-14 17:15:45–17:45:45 UTC): real audio to 5 kHz.** 16 unseen KiwiSDRs (no site shared
+with training or runs 1–4) on 10/12/15/17/20/30/40/60/80 m, recorded through a **200–5400 Hz** USB passband
+(`collect/val.py` `PASSBAND`, default now; `collect/kiwi.py` `record_slots(lo=, hi=)`; a probe showed the Kiwi flat to
+~5 kHz, −4 dB at 5.0–5.25 kHz, nothing above 5.5 kHz; every receiver delivers to 5 kHz). 1,909 slots (hfunderground
+lost 3 to reconnects). jt9 labels at **200–4910 Hz** (`JT9_RANGE`, its ceiling; runs 1–4 used jt9's default
+200–4000) by the **WSJT-X fork build** `/Users/jps/wsjtx-prefix/install/wsjtx.app/Contents/MacOS/jt9` (runs 1–4:
+WSJT-X Improved 3.0.2, not installed here) - both recorded in `jt9_labels.json`. Local copy
+`data/collect/2026-11-14-run5/` (1.5 GB), metadata + MANIFEST in `collect/runs/val5/`; **not yet uploaded** to
+`jasiek/ft8-validation-set` (user decision: LFS bandwidth). `tools/live_compare.py` now asks UberSDR/OpenWebRX for
+audio to 5000 Hz too. C CLI decodes (`ft8nn_cli --range NFA NFB`, one process per receiver, 8 at a time, ~72 min per
+pass on the M1; no sleep events), `data/val/run5/<station>/decodes_<tag>.txt`, logs `data/logs/run5/verify_*.txt`:
+
+| decoder (search range) | decodes | slot-conf | unconf | 150–200 Hz | 3100–4000 Hz (slot-conf) | > 4000 Hz |
+|---|---|---|---|---|---|---|
+| jt9 (200–4910) | 50,412 | 36,311 | 30 | 14 | 160 (105) | 4 (0) |
+| jt9 (200–3100) | 51,084 | 36,823 | 29 | 14 | – | – |
+| `nn_v3_f31` (150–3100, old) | 63,499 | 45,131 | 9 | 229 | – | – |
+| **`nn_v3_f4k` (150–4000, shipped)** | **63,428** | **45,082** | **9** | 227 | 166 (108) | – |
+| `nn_v3_f49` (200–4910) | 63,017 | 44,778 | 9 | 32 | 166 (108) | 1 (0) |
+
+Above 3.1 kHz we match jt9: `nn_v3_f49` finds 160 of jt9's 164 there (the 4 it misses: one weak `active`, three
+above 4 kHz that look like jt9 false decodes, e.g. `9C87DEA1733A00A59`, tier n/a); nearly all of it is on two 15 m
+receivers (`00`, `09`). At the same search range ours vs jt9 is **+24.3% decodes / +22.6% slot-confirmed**
+(150–3100 vs 200–3100). All 9 unconf are the same in every tag; 7 are also jt9's (`E51MWA 21090` ×3, `SPB 73 DSW`
+×2, `TNX 73 GL`, `CQ 1F3SW JN03` - unspotted senders or free text, not false); the other two are `HK4QXX 73` and
+`5R8KKO R6KNZ/R RR73`.
+**Widening costs in-band decodes, for jt9 too** (unlike runs 1–4, whose audio was silent above 3 kHz): inside
+200–3100 Hz `nn_v3_f49` has 42 slot-confirmed the old range lacks and misses 350 (net −308, −0.7%), spread over the
+band, not at the edges; `nn_v3_f4k` net −155 (offset by its +108 at 3.1–4 kHz: total −49 slot-confirmed, −0.1%);
+jt9 200–4910 vs 200–3100 net −617 (−1.7%). Cause: `find_candidates(max_cand=600)` - the cap is full in busy slots
+with either range, and the wide search gives 100–190 of the 600 places to (mostly noise) cells above 3.1 kHz, so the
+weakest score kept rises from ~1.3–1.6 to ~2.0–2.9 (6 worst slots checked). jt9's candidate cap does the same.
+Possible fix (not done; would cost CPU, and the M1 early pass is already over budget): scale `max_cand` with the
+searched width or share it per frequency segment; tune it on training recordings, not on run 5.
+Next: decide on uploading run 5; jt9's `nagain` re-decode searches only nfqso ± 20 Hz (not done).
 
 ## Next (agreed with the user 2026-11-12) — start here
 
@@ -118,7 +155,7 @@ Reproduce: `git worktree add --detach <dir> <rev>`, `make -C <dir>/c ORT_PREFIX=
 then `/usr/bin/time -l <dir>/c/build/ft8nn_cli --threads N --time models/v3/ft8nn.onnx <first 40 wavs of
 datasets/ft8-validation-set/recordings/01_40m_*/slots>` (per-slot `time` lines on stderr).
 
-Last updated 2026-11-14 (**candidate search to 4000 Hz and WSJT-X's [nfa, nfb], tag `nn_v3_f4k`**, section at the top). Before that 2026-11-13 (**early pass in C and the sidecar: two-pass early pass at 11.8 s, final pass with its
+Last updated 2026-11-14 (**validation run 5 with audio to 5 kHz; the candidate cap makes a wider search cost in-band decodes**, section at the top). Before that 2026-11-14 (**candidate search to 4000 Hz and WSJT-X's [nfa, nfb], tag `nn_v3_f4k`**). Before that 2026-11-13 (**early pass in C and the sidecar: two-pass early pass at 11.8 s, final pass with its
 decodes as prior**, Next item 1). Before that (**early pass measured in Python**, plan 6a). Before that (**C timing of
 `nn_v3_ccrpc` and the next plan**, above). Before that (**repeat stage scores only competitors a station could send, tag `nn_v3_ccrpc`** (plan
 12): a CQ's competitors no longer include `CQ K1ABC R FN42` or `CQ K1ABC RR73/-12`, which had beaten the margin on
@@ -305,6 +342,8 @@ Run 1 (`recordings/`) = 9 training-set Kiwis on other bands/times; **run 2 (`run
 used for training** (the honest generalisation test); **run 3 (`run3/recordings`, 2026-11-09) = 12 more unseen Kiwis
 at another day and time** (no site shared with training, run 1 or run 2); **run 4 (`run4/recordings`, 2026-11-09
 15:00 UTC) = 15 more unseen Kiwis, European afternoon / US morning on the high bands**. 120 slots per station, jt9 baseline in each `decodes.txt`.
+**Run 5 (2026-11-14, 16 unseen Kiwis, 200–5400 Hz passband)** is local only so far (`data/collect/2026-11-14-run5/`,
+see the search-range section at the top); runs 1–4 stop at 3 kHz.
 Its `tools/verify.py` puts each decode's sender into a tier: `slot` (spotted by others in that slot) > `active`
 > `repeat` > `unconf`. **`unconf` ≈ false decodes** (jt9: 13 of 27,462 checkable in run 1, 16 of 23,958 in run 2, 17 of 23,139 in run 3, 29 of 37,521 in run 4).
 Treat the folder as read-only; our decodes go to `data/val/run{1,2,3,4}/<station>/decodes_<tag>.txt`. Both data
@@ -375,6 +414,8 @@ Scores (vs jt9 baseline, checkable = sender call is spotted-checkable):
 | **2 + 3 + 4 pooled (unseen)** | nn_v3_dtcrp | 106,074 (+23.0%) | 78,022 (+22.0%) | 4 | | |
 | **2 + 3 + 4 pooled (unseen)** | nn_v3_cc | 106,551 (+23.5%) | 78,324 (+22.5%) | 4 | | |
 | **2 + 3 + 4 pooled (unseen)** | **nn_v3_ccrpc** | **107,108 (+24.2%)** | **78,782 (+23.2%)** | **4** | | |
+| 5 (unseen, audio to 5 kHz; jt9 at 200–4910 Hz) | jt9 | 50,412 | 36,311 | 30 | – | – |
+| 5 | **nn_v3_f4k** (C) | **63,428 (+25.8%)** | **45,082 (+24.2%)** | **9** | | at equal range: +24.3% / +22.6%, see the top section |
 
 † `nn_v3_dtc` on runs 3 and 4 = the re-measured drifting receiver (`03_20m`, `08_12m`) plus the other
 stations' unchanged `nn_v3` decodes; the gate provably cannot fire on those (replaying it over their

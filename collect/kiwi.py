@@ -3,7 +3,8 @@
 Writes 15-second WAV files aligned to FT8 slot boundaries (UTC :00/:15/:30/:45),
 named YYMMDD_HHMMSS.wav so jt9 can decode them directly.
 
-Copied from datasets/ft8-validation-set/tools/kiwi.py (2026-11-04), unchanged.
+Copied from datasets/ft8-validation-set/tools/kiwi.py (2026-11-04). Changed 2026-11-14: record_slots takes the
+USB passband (lo, hi in Hz; default 200-3000 Hz, which every run up to run 4 used).
 """
 import base64, os, socket, ssl, struct, sys, time, wave, json, random
 from urllib.parse import urlparse
@@ -180,7 +181,7 @@ def be_to_le(b):
     return a.tobytes()
 
 
-def record_slots(url, freq_khz, outdir, until, log=print, max_slots=None, info=None):
+def record_slots(url, freq_khz, outdir, until, log=print, max_slots=None, info=None, lo=200, hi=3000):
     """Record slot-aligned 15 s WAVs into outdir until wall-clock `until`.
     Reconnects on failure. Returns list of written filenames."""
     os.makedirs(outdir, exist_ok=True)
@@ -192,7 +193,7 @@ def record_slots(url, freq_khz, outdir, until, log=print, max_slots=None, info=N
             t0 = None
             n = 0
             cur_slot, buf = None, bytearray()
-            for arrival, data, rssi in kiwi_stream(url, freq_khz, info=info):
+            for arrival, data, rssi in kiwi_stream(url, freq_khz, lo=lo, hi=hi, info=info):
                 pcm = be_to_le(data)
                 ns = len(pcm) // 2
                 if t0 is None:

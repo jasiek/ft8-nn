@@ -1,0 +1,264 @@
+{
+ "probed_utc": "2026-11-14T17:15:42.483803+00:00",
+ "source": "receiverbook-fresh",
+ "excluded_training_sites": true,
+ "excluded_earlier_runs": true,
+ "chosen": [
+  {
+   "url": "http://sdr.hfunderground.com:8076/",
+   "band": "15m",
+   "freq_khz": 21074.0,
+   "station": "W3HFU - Westminster, MD, USA - 500 ft Northeast Beverage to Europe",
+   "lat": 39.704,
+   "lon": -76.974,
+   "probe_decodes": 48,
+   "probe_sample": [
+    "171515  -2  0.2 1272 ~  CQ KZ7Y EL95",
+    "171515   8  0.3 1906 ~  M5AFO F5RRS 73",
+    "171515  -1  0.4 1693 ~  CQ W0AAE EN35",
+    "171515  16  0.4  301 ~  AD8JR HB9EFK +01",
+    "171515  10 -0.1  834 ~  CQ CT7AIU IM67"
+   ]
+  },
+  {
+   "url": "http://76.23.193.13:8073/",
+   "band": "20m",
+   "freq_khz": 14074.0,
+   "station": "0-30 MHz SDR @ W1XIV, Shelburne, VT USA",
+   "lat": 44.41,
+   "lon": -73.18,
+   "probe_decodes": 46,
+   "probe_sample": [
+    "171515  -3  0.2  203 ~  W8RLG SQ2BXI R-09",
+    "171515  -2  0.4  558 ~  W9MDM AF5ZO RR73",
+    "171515  -1  0.1 1880 ~  WB3FME DB4VI -13",
+    "171515  -2  0.1  279 ~  RN1ON KE0AXE EN31",
+    "171515  -6  0.1 2294 ~  DG0OFT WB4EM EL97"
+   ]
+  },
+  {
+   "url": "http://dl1bajkiwisdr.ddns.net:8074/",
+   "band": "40m",
+   "freq_khz": 7074.0,
+   "station": "0-30 MHz SDR, DL1BAJ | Hooksiel, Germany",
+   "lat": 53.630673,
+   "lon": 8.026295,
+   "probe_decodes": 45,
+   "probe_sample": [
+    "171515  -3  0.1 1597 ~  HB9TTZ MI7XHT RR73",
+    "171515   8  0.0  738 ~  ER1TX G0RVY R-02",
+    "171515  -5  0.1  890 ~  IW2NPQ R2AL KO85",
+    "171515  -4 -0.1 1740 ~  SP6SR M9POB IO83",
+    "171515  -4  0.1  205 ~  TF3G F5CUN JN26"
+   ]
+  },
+  {
+   "url": "http://hjf2014.ddns.net:8073/",
+   "band": "30m",
+   "freq_khz": 10136.0,
+   "station": "0-30 MHz SDR | Coimbra, Portugal",
+   "lat": 40.211925,
+   "lon": -8.426599,
+   "probe_decodes": 30,
+   "probe_sample": [
+    "171515  -2  0.1 2040 ~  GJ0KYZ ON6NA -08",
+    "171515  -1  0.1 1044 ~  CQ F4CWQ JN08",
+    "171515   4  0.0 1212 ~  CQ F5RMK IN98",
+    "171515  -1  0.1  825 ~  SQ8AA EA7DJN -17",
+    "171515  -5  0.0  957 ~  <...> OZ99X 73"
+   ]
+  },
+  {
+   "url": "http://listener2.proxy.kiwisdr.com:8073/",
+   "band": "10m",
+   "freq_khz": 28074.0,
+   "station": "0-30 MHz SDR #2 | West Mountain, Dutchess County, NY, USA",
+   "lat": 41.62,
+   "lon": -73.64,
+   "probe_decodes": 18,
+   "probe_sample": [
+    "171515  13  0.5 2701 ~  VE3SJJ 6Y5DH RR73",
+    "171515  11  0.3  965 ~  CS8ABF W1HZ R-13",
+    "171515 -12  0.3  401 ~  CQ K2ZJ FN13",
+    "171515   1  0.9  689 ~  W5FZ NP3DM RR73",
+    "171515  -7  0.4 1616 ~  N7TJB LU5MT RR73"
+   ]
+  },
+  {
+   "url": "http://ei2hh.proxy.kiwisdr.com:8073/",
+   "band": "60m",
+   "freq_khz": 5357.0,
+   "station": "EA5JGN | Hondon Valley SDR | Spain",
+   "lat": 38.31,
+   "lon": -0.9,
+   "probe_decodes": 13,
+   "probe_sample": [
+    "171515  -1  0.1  493 ~  CQ EA5KDD IM99",
+    "171515   3  0.4 2606 ~  DM2DS I3QDK JN65",
+    "171515  -6  0.2 1699 ~  CQ LY7T KO05",
+    "171515   5  0.2 2398 ~  3D2USU S56P JN76",
+    "171515   3  0.2 2461 ~  SX200H <...> 73"
+   ]
+  },
+  {
+   "url": "http://22552.proxy.kiwisdr.com:8073/",
+   "band": "12m",
+   "freq_khz": 24915.0,
+   "station": "KE3JP | Greenville Pa.",
+   "lat": 41.45,
+   "lon": -80.4,
+   "probe_decodes": 13,
+   "probe_sample": [
+    "171515  24  0.3 1443 ~  <...> K7CO DN31",
+    "171515   1  0.1 2227 ~  CE3BT CT7BRV 73",
+    "171515  -2  0.3  539 ~  KD3AN KW7E DM33",
+    "171515   0 -0.1 2039 ~  WA4RH VE6AX DO30",
+    "171515   3  0.2 1298 ~  KI0E F5LNU R-09"
+   ]
+  },
+  {
+   "url": "http://zl2j.proxy.kiwisdr.com:8073/",
+   "band": "80m",
+   "freq_khz": 3573.0,
+   "station": "######ZL2J 0-30 MHz SDR antenna 400m Doublet  \\\"NEW ANTENNA\\\"#####",
+   "lat": -40.945498,
+   "lon": 175.57251,
+   "probe_decodes": 5,
+   "probe_sample": [
+    "171515 -14  1.3 1600 ~  R3DPZ R7NO RR73",
+    "171515 -14  0.9 1840 ~  CQ RW9MZ MO74",
+    "171515 -20  1.1 1375 ~  IQ0FB OK1UOZ JO70",
+    "171515 -14  1.2 2370 ~  CQ UN0GY MN83",
+    "171515 -19  1.1  891 ~  OE3PWR RW6HP LN14"
+   ]
+  },
+  {
+   "url": "http://aardvarq.ddns.net:8073/",
+   "band": "17m",
+   "freq_khz": 18100.0,
+   "station": "0-30 MHz SDR - AE6RQ | San Jose, CA USA",
+   "lat": 37.23,
+   "lon": -121.84,
+   "probe_decodes": 5,
+   "probe_sample": [
+    "171515   4  0.1 2513 ~  DK5NC KI6QDH -05",
+    "171515 -13  0.1  810 ~  SA6DST W5AJ -16",
+    "171515 -17 -0.1 1966 ~  F4DNU WH6S -14",
+    "171515 -19  0.2 1729 ~  KA8NRK K0DLP +00",
+    "171515 -17 -0.0 2318 ~  KN5YVJ W9FTR EM60"
+   ]
+  },
+  {
+   "url": "http://kb1vwc.ddns.net:8073/",
+   "band": "15m",
+   "freq_khz": 21074.0,
+   "station": "0-62 MHz SDR, KB1VWC, East Falmouth USA",
+   "lat": 41.57,
+   "lon": -70.55,
+   "probe_decodes": 45,
+   "probe_sample": [
+    "171515  24  0.1 1275 ~  M3TLJ KJ4LTA -06",
+    "171515   7  0.3 1906 ~  M5AFO F5RRS 73",
+    "171515   8 -0.1  834 ~  CQ CT7AIU IM67",
+    "171515   3  0.3  301 ~  AD8JR HB9EFK +01",
+    "171515   2  0.7 1456 ~  M9UTD KQ4FMB EM55"
+   ]
+  },
+  {
+   "url": "http://kiwisdr.g0dub.uk:8073/",
+   "band": "40m",
+   "freq_khz": 7074.0,
+   "station": "0-30 MHz SDR, G0DUB, IO83oe | Chester, UK",
+   "lat": 53.176186,
+   "lon": -2.815302,
+   "probe_decodes": 38,
+   "probe_sample": [
+    "171515  11  0.2 1094 ~  R6FX <...> +02",
+    "171515  11 -0.1 2546 ~  5R8IC IK3SSW JN65",
+    "171515  -6  0.3 1488 ~  UX7QG HB9HYO JN36",
+    "171515  -2  0.1 2006 ~  4X6HP HB9TIH JN36",
+    "171515   0  0.5  935 ~  MW6PNW DL1IP 73"
+   ]
+  },
+  {
+   "url": "http://julussdalen1.proxy.kiwisdr.com:8073/",
+   "band": "30m",
+   "freq_khz": 10136.0,
+   "station": "0-30 MHz KiwiSDR,Julussdalen#1, Elverum - Norway",
+   "lat": 61.037636,
+   "lon": 11.689167,
+   "probe_decodes": 29,
+   "probe_sample": [
+    "171515  20  0.3 2040 ~  GJ0KYZ ON6NA -08",
+    "171515  25  0.7 1958 ~  CQ HA3JB JN96",
+    "171515   1  0.3 1044 ~  CQ F4CWQ JN08",
+    "171515   0  0.3 2594 ~  R3ZG ZS1ALJ R-17",
+    "171515   6  0.3  825 ~  SQ8AA EA7DJN -17"
+   ]
+  },
+  {
+   "url": "http://kiwisdr.birdsnest.name:8073/",
+   "band": "60m",
+   "freq_khz": 5357.0,
+   "station": "Birdy (SWL) | Emsb\u00fcren, Germany",
+   "lat": 52.43,
+   "lon": 7.34,
+   "probe_decodes": 12,
+   "probe_sample": [
+    "171515   3  0.0 2046 ~  DB8MI DL5DQZ R-18",
+    "171515  11  0.1  793 ~  3D2USU MM0EAX IO89",
+    "171515   3  0.0 1700 ~  CQ LY7T KO05",
+    "171515  -6  0.2 2607 ~  DM2DS I3QDK JN65",
+    "171515  -3  0.0 1550 ~  CQ ON4MDW JO10"
+   ]
+  },
+  {
+   "url": "http://22343.proxy.kiwisdr.com:8073/",
+   "band": "10m",
+   "freq_khz": 28074.0,
+   "station": "0-30 MHz SDR | Rudolph, Wisconsin",
+   "lat": 44.53,
+   "lon": -89.79,
+   "probe_decodes": 8,
+   "probe_sample": [
+    "171515  -6  0.1 2134 ~  ZS6SKY N6PAZ DM05",
+    "171515  -7  0.2  797 ~  VE6HQ KN6WEV CM97",
+    "171515 -10 -0.1 1629 ~  W9DCT N2RJR +02",
+    "171515 -11  0.3 2700 ~  VE3SJJ 6Y5DH RR73",
+    "171515  -6 -0.1  749 ~  KJ5POP HK3C +00"
+   ]
+  },
+  {
+   "url": "http://xorrox.de:8073/",
+   "band": "40m",
+   "freq_khz": 7074.0,
+   "station": "0-32 MHz SDR | Berlin, Germany",
+   "lat": 52.553597,
+   "lon": 13.375746,
+   "probe_decodes": 27,
+   "probe_sample": [
+    "171515  14  0.4 2668 ~  5R8IC IK3SSW JN65",
+    "171515  -1  0.5 2128 ~  4X6HP HB9TIH JN36",
+    "171515  -7  0.5  546 ~  F4FSY RD3ARD R-13",
+    "171515  -6  0.6 1342 ~  ZL1VAH LZ2PC KN22",
+    "171515  -4  1.8  806 ~  SQ5BUJ OH3MB 73"
+   ]
+  },
+  {
+   "url": "http://grupodiexistamx-sdr.proxy.kiwisdr.com:8073/",
+   "band": "15m",
+   "freq_khz": 21074.0,
+   "station": "0-30 MHz San Juan del Rio | Grupo Diexista Mexico SDR",
+   "lat": 20.388824,
+   "lon": -99.996367,
+   "probe_decodes": 21,
+   "probe_sample": [
+    "171515  -8  0.1 2622 ~  E51MWA WA1DD FN31",
+    "171515   2  0.0 1621 ~  CQ POTA KJ5NQE EM12",
+    "171515  -3  0.3 1367 ~  <...> KG7IXX/A",
+    "171515  -8  0.1 2567 ~  AA1SL K9ZA EM58",
+    "171515 -10 -0.3  774 ~  M8KWB N9CBW EM78"
+   ]
+  }
+ ]
+}

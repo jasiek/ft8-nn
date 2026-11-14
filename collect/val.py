@@ -12,7 +12,9 @@
   OUTDIR=<run dir> python3 collect/val.py decode
                                  -> jt9 baseline decodes.txt + 30-min WAV per receiver (needs `jt9` on PATH)
 
-Copied from datasets/ft8-validation-set/tools/val.py (2026-11-04); only the default paths differ (see docs/data-collection.md).
+Copied from datasets/ft8-validation-set/tools/val.py (2026-11-04); the default paths differ (see
+docs/data-collection.md), and since 2026-11-14 the Kiwi passband is PASSBAND (default 200,5400 Hz; runs 1-4 used
+200,3000) and jt9 labels cover JT9_RANGE (default 200,4910 Hz, jt9's own ceiling; runs 1-4: jt9's default 200,4000).
 """
 import concurrent.futures as cf
 import json, os, random, re, subprocess, sys, tempfile, threading, time, urllib.request, wave
@@ -27,6 +29,9 @@ RECEIVERS_JSON = os.environ.get("RECEIVERS_JSON")  # flattened receiverbook.de/m
 # the training set's receivers: re-probed by `probe`, excluded by `probe-fresh`
 SOURCE_SEL = os.environ.get("TRAIN_SELECTION", os.path.join(os.path.dirname(__file__), "runs", "train", "selection.json"))
 MINUTES = int(os.environ.get("MINUTES", 30))
+PASSBAND = tuple(int(v) for v in os.environ.get("PASSBAND", "200,5400").split(","))  # Kiwi USB low/high cut, Hz
+JT9_RANGE = tuple(int(v) for v in os.environ.get("JT9_RANGE", "200,4910").split(","))  # jt9 -L / -H, Hz
+JT9 = os.environ.get("JT9", "jt9")
 PSKR_TAIL_S = 12 * 60  # reporters batch uploads (up to ~5 min); keep listening after the last slot
 
 BANDS = {"160m": 1840.0, "80m": 3573.0, "60m": 5357.0, "40m": 7074.0, "30m": 10136.0,
@@ -57,7 +62,8 @@ def candidate_bands(lon, wide=False):
 def jt9_decode(wav_path):
     wav_path = os.path.abspath(wav_path)
     with tempfile.TemporaryDirectory() as d:
-        r = subprocess.run(["jt9", "-8", "-d", "3", "-a", d, "-t", d, wav_path],
+        r = subprocess.run([JT9, "-8", "-d", "3", "-L", str(JT9_RANGE[0]), "-H", str(JT9_RANGE[1]),
+                            "-a", d, "-t", d, wav_path],
                            capture_output=True, text=True, cwd=d, timeout=120)
     # jt9 without a MyCall uses placeholder K1ABC; its MyCall-AP pass ("a2") then invents "K1ABC ..." decodes
     return [l.rstrip() for l in r.stdout.splitlines()
@@ -71,7 +77,7 @@ def probe_rx(rx):
         d = tempfile.mkdtemp(prefix="probe_")
         try:
             files = kiwi.record_slots(rx["url"], BANDS[band], d, time.time() + 35, max_slots=1,
-                                      log=lambda *a: None)
+                                      log=lambda *a: None, lo=PASSBAND[0], hi=PASSBAND[1])
             dec = jt9_decode(os.path.join(d, files[0])) if files else []
         except Exception as e:
             log(f"  {rx['url']} {band}: {e!r}")
@@ -137,7 +143,7 @@ def probe_once(rx, band):
     try:
         info = {}
         files = kiwi.record_slots(rx["url"], BANDS[band], d, time.time() + 35, max_slots=1,
-                                  log=lambda *a: None, info=info)
+                                  log=lambda *a: None, info=info, lo=PASSBAND[0], hi=PASSBAND[1])
         for key in ("inactivity_timeout_mins", "ip_limit_mins"):
             v = info.get(key, 0) or 0
             if 0 < v < MINUTES + 10:
@@ -214,7 +220,8 @@ def cmd_record():
     topics = [f"pskr/filter/v2/{b}/FT8/#" for b in bands]
     os.makedirs(OUT, exist_ok=True)
     spots = os.path.join(BASE, "pskr_spots.jsonl")
-    json.dump(dict(start_utc=start, until_utc=until, pskr_tail_s=PSKR_TAIL_S, bands=bands, topics=topics),
+    json.dump(dict(start_utc=start, until_utc=until, pskr_tail_s=PSKR_TAIL_S, bands=bands, topics=topics,
+                   passband_hz=list(PASSBAND)),
               open(os.path.join(BASE, "session.json"), "w"), indent=1)
     log(f"recording {len(sel)} receivers from {time.strftime('%H:%M:%S', time.gmtime(start))}Z "
         f"for {MINUTES} min; pskr topics {bands}")
@@ -227,12 +234,13 @@ def cmd_record():
         rx["dir"] = os.path.join(OUT, f"{i:02d}_{rx['band']}_{slug(rx['url'].split('//')[1])}")
         slots = os.path.join(rx["dir"], "slots")
         os.makedirs(slots, exist_ok=True)
+        rx["passband_hz"] = list(PASSBAND)
         json.dump(rx, open(os.path.join(rx["dir"], "meta.json"), "w"), indent=1)
         attempts = 0
         while time.time() < until and attempts < 5:
             attempts += 1
             try:
-                kiwi.record_slots(rx["url"], rx["freq_khz"], slots, until, log=log)
+                kiwi.record_slots(rx["url"], rx["freq_khz"], slots, until, log=log, lo=PASSBAND[0], hi=PASSBAND[1])
             except Exception as e:
                 log(f"[{rx['url']}] {e!r}; retry in 20s")
                 time.sleep(20)
@@ -271,6 +279,7 @@ def cmd_decode():
                     else:
                         w.writeframes(silence)
         print(f"{d:45s} slots={len(slots):3d}  decodes={sum(map(len, decs))}")
+    json.dump(dict(jt9=JT9, jt9_range_hz=list(JT9_RANGE)), open(os.path.join(BASE, "jt9_labels.json"), "w"))
 
 
 if __name__ == "__main__":
