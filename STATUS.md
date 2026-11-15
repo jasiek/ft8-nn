@@ -177,9 +177,21 @@ start with item 2):
    false; run 2 29,691 / 21,820 / 1, runs 2–4 pooled 107,108 / 78,782 / 4, run 1 34,727 / 26,615 / 1, AWGN 50%
    −22.49; golden C == Python 4/4 PASS. All of this was measured on the code before the rebase onto the
    search-range change (`nn_v3_f4k`), against `nn_v3_ccg`; `golden_c.py` keeps `nn_v3_f4k` until the combined
-   check (In flight) gives the combined code a Python reference tag - done 2026-11-15: `nn_v3_f4bp`. **Item 2 so far: 301.2 -> 207.1 s per 40 busy slots at 1 thread (−31%), the same decodes.** Next in
-   step 3: Costas fine sync (10% before (c), ~12% now) and the candidate search (`score_item`); a fresh profile
-   first.
+   check (In flight) gives the combined code a Python reference tag - done 2026-11-15: `nn_v3_f4bp`.
+   **Item 2 to here: 301.2 -> 207.1 s per 40 busy slots at 1 thread (−31%), the same decodes.**
+   (d) **Candidate search: the median of the 7 other tones by a fixed network** (2026-11-15, on `main` with the
+   4 kHz search). Fresh profile (`sample`, 1 thread, 40 slots, `main` `b122d09`): NN in ONNX Runtime 37.6%, Costas
+   fine sync 14.4%, BP 13.0%, candidate search 11.4% (**`score_item` 9.7%, the hottest function of our own
+   code**), FFT 9.3% (spread over sync, subtraction, baseband), subtraction 8.5%, co-channel stage 8.3%.
+   `score_item` took each cell's median with an insertion sort, whose data-dependent branches mispredict and keep
+   the loop over frequency bins scalar; now 13 `fminf`/`fmaxf` compare-exchanges (`frontend.c` `median7`), the
+   same value (0 mismatches against the sort over all 5,040 orderings, all 2,187 three-valued inputs and 2M random
+   ones), added in the same order, so the scores and every decode are unchanged; Python's `np.median` is
+   untouched. 40 slots, 1 thread: **216.6 -> 194.2 s user CPU (−10.3%)**, decodes identical; golden C == Python
+   (`nn_v3_f4bp`) 5/5 PASS with `MallocScribble` (00_40m 815, 08_80m 629, run-2 02_80m 754, AWGN 429, run-1
+   01_40m 2,164 on all cores with `--stream`). The 4 kHz search had cost these slots 207.1 -> 216.6 s (+4.6%);
+   this more than pays it back: **item 2 now 301.2 -> 194.2 s (−36%)**. Next: Costas fine sync (`fine_sync2`,
+   14%) and the FFTs.
    **Known C/Python difference (found 2026-11-14, old):** when two calls heard earlier share a DXpedition
    message's 10-bit hash, C and Python print different ones (both keep the most recently learned call per hash,
    but they learn the decodes of a slot in a different order; `c/src/unpack.c` `ht_add` / `ft8nn/message.py`
@@ -223,7 +235,8 @@ Reproduce: `git worktree add --detach <dir> <rev>`, `make -C <dir>/c ORT_PREFIX=
 then `/usr/bin/time -l <dir>/c/build/ft8nn_cli --threads N --time models/v3/ft8nn.onnx <first 40 wavs of
 datasets/ft8-validation-set/recordings/01_40m_*/slots>` (per-slot `time` lines on stderr).
 
-Last updated 2026-11-15 (**combined check of `main` passed, tag `nn_v3_f4bp`**: the search to 4 kHz plus item 2's CPU
+Last updated 2026-11-15 (**candidate-search median by a network, −10.3% CPU per busy slot, decodes identical**,
+Next item 2 step 3 (d)). Before that 2026-11-15 (**combined check of `main` passed, tag `nn_v3_f4bp`**: the search to 4 kHz plus item 2's CPU
 changes give `nn_v3_f4k`'s decodes on runs 1–2 and training (3 labels bp -> osd); first runs 3–4 numbers for the
 4 kHz search, runs 2–4 pooled 107,376 / 78,978 / 4; see "In flight"). Before that 2026-11-15 (**BP stops hopeless
 runs early, tag `nn_v3_bps`**, Next item 2 step 3 (c): 40 busy slots

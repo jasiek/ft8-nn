@@ -40,18 +40,20 @@ static int cmp_d(const void *a, const void *b) {
 }
 
 /* median of 7 floats (odd count: exact middle element) */
-static float median7(float *v) {
-    for (int i = 1; i < 7; i++) { /* insertion sort */
-        float t = v[i];
-        int j = i - 1;
-        while (j >= 0 && v[j] > t) {
-            v[j + 1] = v[j];
-            j--;
-        }
-        v[j + 1] = t;
+/* median of 7 (the 4th smallest) by a fixed network of 13 compare-exchanges: no branches, so the loop over
+ * frequency bins that calls it vectorises; the same value an insertion sort leaves at v[3] */
+#define CX(a, b)                    \
+    {                               \
+        float lo_ = fminf(a, b);    \
+        b = fmaxf(a, b);            \
+        a = lo_;                    \
     }
-    return v[3];
+static inline float median7(float p0, float p1, float p2, float p3, float p4, float p5, float p6) {
+    CX(p0, p5) CX(p0, p3) CX(p1, p6) CX(p2, p4) CX(p0, p1) CX(p3, p5) CX(p2, p6)
+    CX(p2, p3) CX(p3, p6) CX(p4, p5) CX(p1, p4) CX(p1, p3) CX(p3, p4)
+    return p3;
 }
+#undef CX
 
 /* round half to even, as numpy / Python 3 round() */
 static inline double rnd(double x) { return nearbyint(x); }
@@ -104,13 +106,13 @@ static void score_item(void *a, int li) {
             int fr = j->lag0 + j->lmin + li + SYM_FRAMES * (offs[o] + k);
             if (fr < 0 || fr >= j->T) continue;
             const float *row = j->S + (size_t)fr * j->nb + j->b0;
+            const float *t[7]; /* the 7 other tones, in tone order */
+            for (int tn = 0, q = 0; tn < 8; tn++)
+                if (tn != c) t[q++] = row + 2 * tn;
+            const float *tc = row + 2 * c;
             for (int f = 0; f < j->nf; f++) {
-                float oth[7];
-                int q = 0;
-                for (int tn = 0; tn < 8; tn++)
-                    if (tn != c) oth[q++] = row[f + 2 * tn];
-                nu[f] += row[f + 2 * c];
-                de[f] += median7(oth);
+                nu[f] += tc[f];
+                de[f] += median7(t[0][f], t[1][f], t[2][f], t[3][f], t[4][f], t[5][f], t[6][f]);
             }
         }
 }
