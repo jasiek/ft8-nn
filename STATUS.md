@@ -177,7 +177,7 @@ start with item 2):
    false; run 2 29,691 / 21,820 / 1, runs 2–4 pooled 107,108 / 78,782 / 4, run 1 34,727 / 26,615 / 1, AWGN 50%
    −22.49; golden C == Python 4/4 PASS. All of this was measured on the code before the rebase onto the
    search-range change (`nn_v3_f4k`), against `nn_v3_ccg`; `golden_c.py` keeps `nn_v3_f4k` until the combined
-   check (In flight) gives the combined code a Python reference tag. **Item 2 so far: 301.2 -> 207.1 s per 40 busy slots at 1 thread (−31%), the same decodes.** Next in
+   check (In flight) gives the combined code a Python reference tag - done 2026-11-15: `nn_v3_f4bp`. **Item 2 so far: 301.2 -> 207.1 s per 40 busy slots at 1 thread (−31%), the same decodes.** Next in
    step 3: Costas fine sync (10% before (c), ~12% now) and the candidate search (`score_item`); a fresh profile
    first.
    **Known C/Python difference (found 2026-11-14, old):** when two calls heard earlier share a DXpedition
@@ -223,7 +223,10 @@ Reproduce: `git worktree add --detach <dir> <rev>`, `make -C <dir>/c ORT_PREFIX=
 then `/usr/bin/time -l <dir>/c/build/ft8nn_cli --threads N --time models/v3/ft8nn.onnx <first 40 wavs of
 datasets/ft8-validation-set/recordings/01_40m_*/slots>` (per-slot `time` lines on stderr).
 
-Last updated 2026-11-15 (**BP stops hopeless runs early, tag `nn_v3_bps`**, Next item 2 step 3 (c): 40 busy slots
+Last updated 2026-11-15 (**combined check of `main` passed, tag `nn_v3_f4bp`**: the search to 4 kHz plus item 2's CPU
+changes give `nn_v3_f4k`'s decodes on runs 1–2 and training (3 labels bp -> osd); first runs 3–4 numbers for the
+4 kHz search, runs 2–4 pooled 107,376 / 78,978 / 4; see "In flight"). Before that 2026-11-15 (**BP stops hopeless
+runs early, tag `nn_v3_bps`**, Next item 2 step 3 (c): 40 busy slots
 at 1 thread 246.5 -> 207.1 s user CPU, the same decode messages everywhere, 9 of 160k relabelled bp -> osd; item 2
 total −31%; measured before the rebase onto the search-range change, combined check pending, see "In flight").
 Before that 2026-11-14 (**validation run 5 with audio to 5 kHz; the candidate cap makes a wider search cost in-band decodes**, section at the top). Before that 2026-11-14 (**LayerNorm written out in `models/v3/ft8nn.onnx` and the NN-feature median by
@@ -293,6 +296,17 @@ decodes verified identical to the main machine.
 
 ## In flight
 
+- **Combined check done 2026-11-15 (tag `nn_v3_f4bp`, `main` `253b9d7`: search to 4 kHz + co-channel gate +
+  faster NN + BP stop; Python 03:44–07:05 on the mini, no sleep events).** Against `nn_v3_f4k` (copied from the
+  M1): runs 1 and 2 and the 10 training recordings give the same decodes - 25 of 28 files byte-identical, the
+  other 3 one method label each (`bp0` -> `osd0`: `9Y4C K9AI EM58`, `K1RAH VA3TS R+00`, `KG4ORR W4LAW EM74`, the
+  same 3 BP stop gave on the old base); run 1 34,765 / 26,638 / 1, run 2 29,743 / 21,858 / 1, noise 0 false / 998,
+  AWGN 50% −22.49, golden C == Python 4/4 PASS (`golden_c.py`'s default tag now `nn_v3_f4bp`). Runs 3 and 4 had
+  never been decoded with the 4 kHz search: run 3 **28,475 / 21,459 / 1** (`nn_v3_bps`, old range: 28,418 /
+  21,421 / 1), run 4 **49,158 / 35,661 / 2** (48,999 / 35,541 / 2); the wider search reshuffles in-band candidates
+  there (run 3: 374 decode lines only in the old, 431 only in the new; run 4: 1,759 / 1,918) for a net gain.
+  **Runs 2–4 pooled: 107,376 / 78,978 / 4** (old range 107,108 / 78,782 / 4: +268 decodes, +196 slot-confirmed,
+  the same 4 unconfirmed). Logs `data/logs/nn_v3_f4bp/` (`diff.txt`).
 - **Rebased 2026-11-14 onto `origin/main` (search range `nn_v3_f4k`, validation run 5).** The co-channel gate
   (`nn_v3_ccg`) and the faster NN were each accepted on top of `nn_v3_ccrpc`, the search range on its own; both
   local changes left decodes identical, so the combined code should equal `nn_v3_f4k`, but no run has checked it.
