@@ -84,8 +84,7 @@ Next: decide on uploading run 5; jt9's `nagain` re-decode searches only nfqso ±
 
 Decode count is no longer the target: what other decoders still find and we miss is ~2,500 slot-confirmed pairs
 on runs 2–4 (~3% of ours, mostly too weak), and the best remaining lever is worth +0.3% (see "Decided against"
-below). The work is now live operating and CPU, in this order (item 1 is done, including its live run in WSJT-X;
-start with item 2):
+below). The work is now live operating and CPU, in this order (items 1 and 2 are done; start with item 3):
 
 1. **Early pass (plan 6a) - DONE in Python, C and the sidecar 2026-11-13, merged to `main` (`b6b3a4d`
    measurements, `bc956b9` C + sidecar).** WSJT-X asks for decodes at ~11.8 s, ~13.5 s and 14.4 s into the period; the user wants some
@@ -111,7 +110,9 @@ start with item 2):
    ORT_PREFIX=$PWD/third_party/onnxruntime` and `make -C wsjtx ORT_PREFIX=$PWD/third_party/onnxruntime`; early
    passes are on by default, `--no-early` turns them off, `-v` logs each pass's timing and the sidecar warns when
    an early pass outlasts the 2.6 s.)
-2. **Win back the C cost of today's two stages without losing decodes.** `nn_v3_ccrpc` costs **+17% CPU** per
+2. **Win back the C cost of today's two stages without losing decodes - DONE 2026-11-15: −40% CPU per busy slot
+   (301.2 -> 180.8 s per 40 busy run-1 slots at 1 thread), the same decodes; the rest parked (end of this item).**
+   `nn_v3_ccrpc` costs **+17% CPU** per
    busy slot against `nn_v3_dtcrp` (timing below). Profile first: the co-channel stage's `data_sync` search
    (`c/src/frontend.c`, sliding DFT), its NN hypotheses (~10 per decode cell, ~280 per busy slot), and the last
    pass now always being subtracted (~11 ms per decode under load, ~53 decodes per slot here). Then cut what is
@@ -200,9 +201,16 @@ start with item 2):
    `nn_v3_f4bp` on **every slot of runs 1–4 and the training recordings** (55 stations, 07:30–08:47) and AWGN
    (429/429): equal in every field but 6 lines, all known C/Python differences that predate this change: 5
    hash-collision texts (below) and one decode Python has and C has not (next paragraph); the C build before the
-   change gives the same output on that station line for line. **Item 2 now 301.2 -> 180.8 s (−40%).** Next: the
-   FFTs (`butterflies` ~9%, in fine sync's fractional shift, subtraction and the baseband) and the `cos`/`sin`
-   per sample in `rotate` and the fractional shift.
+   change gives the same output on that station line for line. **Item 2 now 301.2 -> 180.8 s (−40%).**
+   **Item 2 closed 2026-11-15 (user: good enough).** Parked, each not bit-exact, so each needs Python first, the
+   C == Python check and the A/B; about −10% together, estimated from the `b122d09` profile: (1) BP's tanh/atanh
+   (`expm1` + `log` per message, ~17 s of the 180.8) by a fast approximation, −4 to −6%; (2) fine sync's fractional
+   shift (a forward and an inverse 3,200-point FFT per hypothesis, after a per-sample `cos`/`sin` rotation), e.g.
+   the shift on the spectrum the downsample already has, −3 to −4%, but rotate and shift no longer commute at the
+   window edges; (3) subtraction (~15 s, FFT-based), −2 to −3%, not profiled. The one big lever left, fewer NN
+   hypotheses (a screen before the NN, which is ~45% of CPU now), changes which hypotheses are tried: a decoder
+   change with a decode / false-decode trade, not an optimisation. Not measured after item 2: the all-cores and
+   early-pass timing of Next item 1 (`ft8nn_cli --threads 0 --time [--early 141696]` on the 40 slots).
    **Known C/Python difference 2 (found 2026-11-15, from `nn_v3_f4k` on):** Python decodes `CQ EK/RX3DPK` at run 2
    `00_40m` 22:38:00 (`osd0`, −37.1 dB, 2713 Hz) and C does not, with the old onnx too: a decode at an OSD gate's
    edge, tipped by the ~1e-5 difference between PyTorch's NN and ONNX Runtime's. 1 of 160k decodes.
@@ -249,8 +257,9 @@ Reproduce: `git worktree add --detach <dir> <rev>`, `make -C <dir>/c ORT_PREFIX=
 then `/usr/bin/time -l <dir>/c/build/ft8nn_cli --threads N --time models/v3/ft8nn.onnx <first 40 wavs of
 datasets/ft8-validation-set/recordings/01_40m_*/slots>` (per-slot `time` lines on stderr).
 
-Last updated 2026-11-15 (**Costas fine sync slides its DFTs along DT, −6.9% CPU per busy slot, decodes
-identical; item 2 −40%**, Next item 2 step 3 (e)). Before that 2026-11-15 (**candidate-search median by a network,
+Last updated 2026-11-15 (**Next item 2 closed at −40% CPU per busy slot with the same decodes; the remaining,
+non-exact leads parked**; next is item 3). Before that 2026-11-15 (**Costas fine sync slides its DFTs along DT, −6.9%
+CPU per busy slot, decodes identical; item 2 −40%**, Next item 2 step 3 (e)). Before that 2026-11-15 (**candidate-search median by a network,
 −10.3% CPU per busy slot, decodes identical**, Next item 2 step 3 (d)). Before that 2026-11-15 (**combined check of `main` passed, tag `nn_v3_f4bp`**: the search to 4 kHz plus item 2's CPU
 changes give `nn_v3_f4k`'s decodes on runs 1–2 and training (3 labels bp -> osd); first runs 3–4 numbers for the
 4 kHz search, runs 2–4 pooled 107,376 / 78,978 / 4; see "In flight"). Before that 2026-11-15 (**BP stops hopeless
