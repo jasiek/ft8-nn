@@ -24,14 +24,29 @@ _G = np.concatenate([np.eye(91, dtype=np.uint8), ft8.LDPC_GEN.T], axis=1)  # (91
 
 def syndrome_ok(bits):
     """bits (B,174) uint8 -> (B,) bool, all parity checks satisfied."""
-    return ((bits.astype(np.int32) @ _H.T.astype(np.int32)) & 1).sum(-1) == 0
+    return n_unsatisfied(bits) == 0
 
 
-def bp_decode(llr, iters=30):
+def n_unsatisfied(bits):
+    """bits (B,174) uint8 -> (B,) int, parity checks not satisfied."""
+    return ((bits.astype(np.int32) @ _H.T.astype(np.int32)) & 1).sum(-1)
+
+
+# BP stops a run that is going nowhere (as WSJT-X's bpdecode174_91, with its own numbers): after `patience` iterations
+# in a row without fewer unsatisfied parity checks, once at least `min_iter` iterations are done and more than `floor`
+# checks are still unsatisfied. Nearly every BP run is a noise hypothesis that never converges and used to run all 30
+# iterations. Chosen on validation run 1 (10.2M BP runs, 39,561 converge): WSJT-X's (5, 10, 15) would stop 55 runs
+# that converge later; (8, 5, 15) stops 2, whose decodes OSD then finds (same 34,727 decodes, 2 labelled osd0 instead
+# of bp0), and keeps 40% of the iterations; (8, 15, 15) stops none and keeps 54%. None: always `iters` iterations.
+BP_STOP = (8, 5, 15)
+
+
+def bp_decode(llr, iters=30, stop=BP_STOP):
     """Batched sum-product BP.
 
     llr: (B,174). Returns (bits (B,174) uint8, ok (B,) bool, n_hard_errors (B,) int).
     n_hard_errors = number of channel hard decisions that disagree with the decoded codeword.
+    stop: (patience, min_iter, floor), see BP_STOP; None runs every row to `iters` or convergence.
     """
     llr = np.atleast_2d(np.asarray(llr, np.float64))
     B = llr.shape[0]
@@ -40,8 +55,11 @@ def bp_decode(llr, iters=30):
     bits = (llr > 0).astype(np.uint8)
     done = syndrome_ok(bits)
     out = bits.copy()
-    for _ in range(iters):
-        act = ~done
+    live = ~done  # rows still iterating: not converged, not stopped
+    last = np.zeros(B, int)
+    cnt = np.zeros(B, int)
+    for it in range(iters):
+        act = live.copy()
         if not act.any():
             break
         Ra = R[act]
@@ -56,10 +74,17 @@ def bp_decode(llr, iters=30):
         R[act] = Ra
         post = Lp[act] + Ra.reshape(Ra.shape[0], -1)[:, _EDGE_OF_BIT].sum(-1)
         b = (post < 0).astype(np.uint8)
-        ok = syndrome_ok(b)
+        nc = n_unsatisfied(b)
+        ok = nc == 0
         ia = np.where(act)[0]
         out[ia] = b
         done[ia[ok]] = True
+        live[ia[ok]] = False
+        if stop:
+            patience, min_iter, floor = stop
+            cnt[ia] = np.where(nc < last[ia], 0, cnt[ia] + 1) if it > 0 else 0
+            last[ia] = nc
+            live[ia[~ok & (cnt[ia] >= patience) & (it + 1 >= min_iter) & (nc > floor)]] = False
     nhard = ((llr > 0).astype(np.uint8) != out).sum(-1)
     return out, done, nhard
 

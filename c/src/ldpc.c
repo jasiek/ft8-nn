@@ -37,6 +37,23 @@ static int syndrome_ok(const uint8_t *b) {
     return 1;
 }
 
+static int n_unsatisfied(const uint8_t *b) {
+    int c = 0;
+    for (int m = 0; m < 83; m++) {
+        int s = 0;
+        for (int j = 0; j < 7; j++)
+            if (LDPC_NM[m][j] >= 0) s ^= b[LDPC_NM[m][j]];
+        c += s;
+    }
+    return c;
+}
+
+/* ldpc.BP_STOP: stop a run after BP_PATIENCE iterations in a row without fewer unsatisfied checks, once at least
+ * BP_MIN_ITER iterations are done and more than BP_FLOOR checks are unsatisfied */
+#define BP_PATIENCE 8
+#define BP_MIN_ITER 5
+#define BP_FLOOR 15
+
 int bp_decode(const double *llr, int iters, uint8_t *out, int *nhard) {
     double Lp[174], R[83 * 7], tot[174], T[7];
     uint8_t hard[174];
@@ -47,6 +64,7 @@ int bp_decode(const double *llr, int iters, uint8_t *out, int *nhard) {
     memcpy(out, hard, 174);
     int done = syndrome_ok(hard);
     memset(R, 0, sizeof R);
+    int last = 0, cnt = 0;
     for (int it = 0; it < iters && !done; it++) {
         for (int n = 0; n < 174; n++) {
             const int *e = edge_of_bit[n];
@@ -82,7 +100,13 @@ int bp_decode(const double *llr, int iters, uint8_t *out, int *nhard) {
             const int *e = edge_of_bit[n];
             out[n] = (Lp[n] + (R[e[0]] + R[e[1]] + R[e[2]])) < 0;
         }
-        done = syndrome_ok(out);
+        int nc = n_unsatisfied(out);
+        done = nc == 0;
+        if (!done) {
+            if (it > 0) cnt = nc < last ? 0 : cnt + 1;
+            last = nc;
+            if (cnt >= BP_PATIENCE && it + 1 >= BP_MIN_ITER && nc > BP_FLOOR) break;
+        }
     }
     int nh = 0;
     for (int n = 0; n < 174; n++) nh += hard[n] != out[n];

@@ -161,10 +161,25 @@ start with item 2):
    and SNR equal for all; 4 decodes differ only in the text of a 10-bit hashed call (`DO6THI RR73; AP5ARS
    <4O7CC>` in C `<RX3ASQ>`, twice, and `<9X5KM>` / `<BI2QFV>`, twice) - the old onnx gives the same 4, so it
    predates this change (see "Known C/Python difference" below); the 4 standard golden tests + the 40 slots on all
-   cores with `--stream` PASS with `MallocScribble`; `wsjtx/test_sidecar.sh` all checks. Next in step 3: BP
-   (21%): stop hopeless BP runs early as WSJT-X does (no fewer unsatisfied checks for several iterations), or a
-   cheaper tanh/atanh - may change decodes, so Python first and the A/B; then Costas fine sync and the candidate
-   search.
+   cores with `--stream` PASS with `MallocScribble`; `wsjtx/test_sidecar.sh` all checks.
+   (c) **BP stops a run that is going nowhere (tag `nn_v3_bps`):** after 8 iterations in a row without fewer
+   unsatisfied parity checks, once ≥ 5 iterations are done and > 15 checks are unsatisfied (`ldpc.BP_STOP =
+   (8, 5, 15)`, C `BP_PATIENCE` / `BP_MIN_ITER` / `BP_FLOOR`; WSJT-X's `bpdecode174_91` does the same with (5,
+   10, 15)). Nearly every BP run is a noise hypothesis that never converges and ran all 30 iterations. Chosen on
+   run 1 (a temporary C tally of 64 rules over all 10.2M BP runs, 39,561 converging): WSJT-X's own (5, 10, 15)
+   would cut off 55 convergences; (8, 5, 15) cuts off 2 and keeps 40% of the iterations; (8, 15, 15) cuts off none
+   and keeps 54%. Decoded in C on run 1: (8, 15, 15) byte-identical, (8, 5, 15) the same 34,727 messages with 2
+   labels `bp0` -> `osd0` (OSD finds the codeword BP was stopped short of). 40 slots, 1 thread: **246.5 -> 207.1
+   s user CPU (−16.0%)**; (8, 15, 15) 216.9 s (−12.0%), the fallback had runs 2–4 lost anything. **Acceptance
+   (Python, 18:33–21:30, no sleep events): every decode in runs 1–4 and the training recordings is the same
+   message at the same f0, DT and SNR as `nn_v3_ccg`**; 46 of 55 files byte-identical, the other 9 each one
+   method label (8 `bp0` -> `osd0`, 1 `bp_cx0` -> `osd_cx0`; `data/logs/nn_v3_bps/diff_vs_ccg.txt`); noise 0
+   false; run 2 29,691 / 21,820 / 1, runs 2–4 pooled 107,108 / 78,782 / 4, run 1 34,727 / 26,615 / 1, AWGN 50%
+   −22.49; golden C == Python 4/4 PASS. All of this was measured on the code before the rebase onto the
+   search-range change (`nn_v3_f4k`), against `nn_v3_ccg`; `golden_c.py` keeps `nn_v3_f4k` until the combined
+   check (In flight) gives the combined code a Python reference tag. **Item 2 so far: 301.2 -> 207.1 s per 40 busy slots at 1 thread (−31%), the same decodes.** Next in
+   step 3: Costas fine sync (10% before (c), ~12% now) and the candidate search (`score_item`); a fresh profile
+   first.
    **Known C/Python difference (found 2026-11-14, old):** when two calls heard earlier share a DXpedition
    message's 10-bit hash, C and Python print different ones (both keep the most recently learned call per hash,
    but they learn the decodes of a slot in a different order; `c/src/unpack.c` `ht_add` / `ft8nn/message.py`
@@ -208,7 +223,10 @@ Reproduce: `git worktree add --detach <dir> <rev>`, `make -C <dir>/c ORT_PREFIX=
 then `/usr/bin/time -l <dir>/c/build/ft8nn_cli --threads N --time models/v3/ft8nn.onnx <first 40 wavs of
 datasets/ft8-validation-set/recordings/01_40m_*/slots>` (per-slot `time` lines on stderr).
 
-Last updated 2026-11-14 (**validation run 5 with audio to 5 kHz; the candidate cap makes a wider search cost in-band decodes**, section at the top). Before that 2026-11-14 (**LayerNorm written out in `models/v3/ft8nn.onnx` and the NN-feature median by
+Last updated 2026-11-15 (**BP stops hopeless runs early, tag `nn_v3_bps`**, Next item 2 step 3 (c): 40 busy slots
+at 1 thread 246.5 -> 207.1 s user CPU, the same decode messages everywhere, 9 of 160k relabelled bp -> osd; item 2
+total −31%; measured before the rebase onto the search-range change, combined check pending, see "In flight").
+Before that 2026-11-14 (**validation run 5 with audio to 5 kHz; the candidate cap makes a wider search cost in-band decodes**, section at the top). Before that 2026-11-14 (**LayerNorm written out in `models/v3/ft8nn.onnx` and the NN-feature median by
 selection**, Next item 2 step 3: 40 busy slots at 1 thread 287.1 -> 246.5 s user CPU, decodes identical on every
 slot of runs 1–4 and training; with step 1, −18.2%, below `nn_v3_dtcrp`). Before that 2026-11-14 (**candidate search to 4000 Hz and WSJT-X's [nfa, nfb], tag `nn_v3_f4k`**). Before that 2026-11-13 (**co-channel neighbour
 gate, tag `nn_v3_ccg`**, Next item 2 step 1: −5.7% CPU per busy
@@ -280,6 +298,9 @@ decodes verified identical to the main machine.
   local changes left decodes identical, so the combined code should equal `nn_v3_f4k`, but no run has checked it.
   The `nn_v3_f4k` decodes were made on the M1 and are not on the mini. To check: copy them over (or rerun
   `nn_v3_f4k` from `03ecdb4`), decode runs 1–4 and training with the combined code, diff, then `golden_c.py`.
+  BP early stop (`nn_v3_bps`, 2026-11-15) was accepted on the pre-rebase code too and rebased on top; it changes
+  only method labels there (9 of 160k bp -> osd), so the combined code should equal `nn_v3_f4k` but for such
+  labels. The combined check covers it: same message, f0, DT and SNR as `nn_v3_f4k` everywhere, labels aside.
 - **Validation set expanded 2026-11-09.** Run 3 (`$V/run3`, data repo `794a63d`): 12 fresh Kiwis, none at a training,
   run-1 or run-2 site, Mon 05:32–06:02 UTC (run 2 was Wed 22:30): Oceania/Asia/Qatar daytime 20/15/10 m, Europe dawn
   40 m and 60 m (new band), western USA 80 m. jt9 23,524 decodes / 17,888 slot-confirmed / 17 unconf, the size of run 2
@@ -344,7 +365,8 @@ decodes verified identical to the main machine.
   interface and stock WSJT-X is not a target.
 - Co-channel neighbour gate (tag `nn_v3_ccg`, Next item 2 step 1): accepted 2026-11-13 22:40, decodes identical to
   `nn_v3_ccrpc` everywhere; merged to `main` (`77a6373`). Then item 2 step 3's two exact cuts (unfused LayerNorm
-  in the onnx, median by selection): the commit after it. Rebuild the C library and the sidecar before a live run.
+  in the onnx, median by selection): `faca3ae`, merged. Then BP early stop (`nn_v3_bps`): the commit after it.
+  Rebuild the C library and the sidecar before a live run.
 - Last commits (2026-11-13, merged to `main` with the user's OK): the early pass - `b6b3a4d` the Python
   measurements and bench tools (plan 6a), `bc956b9` `ft8nn_decode_early` / `ft8nn_decode_final` in C, the sidecar
   decoding WSJT-X's 11.8 s request, and the tests (Next item 1). Decodes of a plain (non-early) decode are
@@ -366,7 +388,8 @@ its starting point. `runs/` is the gitignored output folder for new training run
 `train.py --cfg v2 --init runs/v1/model.pt --lr 5e-4 --steps 8000` (about 4 h on the M1 Pro, 74 min on the M4 mini, MPS),
 then v3 = 4000 steps from v2 with real noise in half the rows (21 min; README has the commands, plan 7.5 the results). `--kind conv|gru` trains the study's alternatives, `--teacher CKPT` distils from a checkpoint.
 
-Decoder defaults: `decoder.decode_slot`. These are 4 passes with subtraction, 2 fine-sync hypotheses,
+Decoder defaults: `decoder.decode_slot`. These are 4 passes with subtraction, 2 fine-sync hypotheses, BP that stops
+a run going nowhere (`ldpc.BP_STOP`),
 NN metric with classical nsym 1/2/3 fallback (`--also-classical`), OSD order 2 gated on expected errors < 40,
 CQ a-priori decoding (expected errors < 44), burst-erasure retry (expected errors < 15) with a wide-window OSD stage
 (`osd_er`), OSD on summed BP posteriors after iterations 1–2 (`osd_bp`), ghost filter, candidate search 150–4000 Hz (150–3100 before 2026-11-14; the sidecar searches WSJT-X's [nfa, nfb], clamped to 100–4910 Hz as jt9 does) plus an early-DT track down to −2.5 s, candidate reuse in passes 2–4
