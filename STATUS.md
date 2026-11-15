@@ -190,8 +190,22 @@ start with item 2):
    untouched. 40 slots, 1 thread: **216.6 -> 194.2 s user CPU (−10.3%)**, decodes identical; golden C == Python
    (`nn_v3_f4bp`) 5/5 PASS with `MallocScribble` (00_40m 815, 08_80m 629, run-2 02_80m 754, AWGN 429, run-1
    01_40m 2,164 on all cores with `--stream`). The 4 kHz search had cost these slots 207.1 -> 216.6 s (+4.6%);
-   this more than pays it back: **item 2 now 301.2 -> 194.2 s (−36%)**. Next: Costas fine sync (`fine_sync2`,
-   14%) and the FFTs.
+   this more than pays it back: **item 2 now 301.2 -> 194.2 s (−36%)**.
+   (e) **Costas fine sync slides its DFTs along DT** (2026-11-15). `fine_sync2` correlated each candidate's three
+   Costas arrays against 51 df × 25 dt points, recomputing every symbol's 32-sample DFT at each dt; now each is
+   computed directly at the first dt and slid one sample at a time to the other 24 (Z(p+1) = e^{iw} (Z(p) − y_p K_0
+   + y_{p+32} K_32), the method `data_sync` already uses), about 10× fewer operations for the grid. Not bit-exact:
+   the grid values move by ≤ 9.1e-13 relative (5.1M cells checked against the direct sum); Python keeps its matrix
+   product. 40 slots, 1 thread: **194.2 -> 180.8 s user CPU (−6.9%)**, decodes identical. C against Python
+   `nn_v3_f4bp` on **every slot of runs 1–4 and the training recordings** (55 stations, 07:30–08:47) and AWGN
+   (429/429): equal in every field but 6 lines, all known C/Python differences that predate this change: 5
+   hash-collision texts (below) and one decode Python has and C has not (next paragraph); the C build before the
+   change gives the same output on that station line for line. **Item 2 now 301.2 -> 180.8 s (−40%).** Next: the
+   FFTs (`butterflies` ~9%, in fine sync's fractional shift, subtraction and the baseband) and the `cos`/`sin`
+   per sample in `rotate` and the fractional shift.
+   **Known C/Python difference 2 (found 2026-11-15, from `nn_v3_f4k` on):** Python decodes `CQ EK/RX3DPK` at run 2
+   `00_40m` 22:38:00 (`osd0`, −37.1 dB, 2713 Hz) and C does not, with the old onnx too: a decode at an OSD gate's
+   edge, tipped by the ~1e-5 difference between PyTorch's NN and ONNX Runtime's. 1 of 160k decodes.
    **Known C/Python difference (found 2026-11-14, old):** when two calls heard earlier share a DXpedition
    message's 10-bit hash, C and Python print different ones (both keep the most recently learned call per hash,
    but they learn the decodes of a slot in a different order; `c/src/unpack.c` `ht_add` / `ft8nn/message.py`
@@ -235,8 +249,9 @@ Reproduce: `git worktree add --detach <dir> <rev>`, `make -C <dir>/c ORT_PREFIX=
 then `/usr/bin/time -l <dir>/c/build/ft8nn_cli --threads N --time models/v3/ft8nn.onnx <first 40 wavs of
 datasets/ft8-validation-set/recordings/01_40m_*/slots>` (per-slot `time` lines on stderr).
 
-Last updated 2026-11-15 (**candidate-search median by a network, −10.3% CPU per busy slot, decodes identical**,
-Next item 2 step 3 (d)). Before that 2026-11-15 (**combined check of `main` passed, tag `nn_v3_f4bp`**: the search to 4 kHz plus item 2's CPU
+Last updated 2026-11-15 (**Costas fine sync slides its DFTs along DT, −6.9% CPU per busy slot, decodes
+identical; item 2 −40%**, Next item 2 step 3 (e)). Before that 2026-11-15 (**candidate-search median by a network,
+−10.3% CPU per busy slot, decodes identical**, Next item 2 step 3 (d)). Before that 2026-11-15 (**combined check of `main` passed, tag `nn_v3_f4bp`**: the search to 4 kHz plus item 2's CPU
 changes give `nn_v3_f4k`'s decodes on runs 1–2 and training (3 labels bp -> osd); first runs 3–4 numbers for the
 4 kHz search, runs 2–4 pooled 107,376 / 78,978 / 4; see "In flight"). Before that 2026-11-15 (**BP stops hopeless
 runs early, tag `nn_v3_bps`**, Next item 2 step 3 (c): 40 busy slots

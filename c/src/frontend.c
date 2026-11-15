@@ -338,6 +338,9 @@ static void spectra_init(void);
 
 static double dfs[NDF];
 static double gridKr[21][SPS_BB][NDF], gridKi[21][SPS_BB][NDF]; /* split re/im so the fi loop vectorises */
+/* sliding the 32-sample window one sample later: Z(p + 1) = e^{iw} (Z(p) - y_p K_0 + y_{p+32} K_32), with
+ * K_n = gridK[s][n] continued to n = 32 */
+static double slWr[21][NDF], slWi[21][NDF], slK0r[21][NDF], slK0i[21][NDF], slK32r[21][NDF], slK32i[21][NDF];
 
 void frontend_init(void) {
     /* numpy arange fills start + i * delta with delta = (start + step) - start */
@@ -351,6 +354,17 @@ void frontend_init(void) {
                 gridKr[s][n][fi] = cos(ph);
                 gridKi[s][n][fi] = sin(ph);
             }
+    for (int s = 0; s < 21; s++)
+        for (int fi = 0; fi < NDF; fi++) {
+            double f = COSTAS[s % 7] * TONE_SPACING + dfs[fi], w = 2 * M_PI * f / FS_BB;
+            double c = 2 * M_PI * dfs[fi] * SPS_BB * SYNC_SYMS[s] / FS_BB;
+            slWr[s][fi] = cos(w);
+            slWi[s][fi] = sin(w);
+            slK0r[s][fi] = cos(-c);
+            slK0i[s][fi] = sin(-c);
+            slK32r[s][fi] = cos(-(w * SPS_BB + c));
+            slK32i[s][fi] = sin(-(w * SPS_BB + c));
+        }
     for (int i = 0; i < TAPER_N; i++) taper[i] = 0.5 * (1 - cos(M_PI * i / (TAPER_N - 1)));
     spectra_init();
 }
@@ -378,32 +392,54 @@ int fine_sync2(const baseband *b, const candidate *c, int n_hyp, sync_hyp *out) 
     cplx y0[NBB];
     baseband_downsample(b, c->f0, y0);
     int start0 = (int)rnd((NOMINAL_START + c->dt) * FS_BB);
-    double Mp[NDF][NDT];
-    for (int ti = 0; ti < NDT; ti++) {
-        int dt = ti - DT_SPAN;
-        double acc[NDF];
-        memset(acc, 0, sizeof acc);
-        for (int a = 0; a < 3; a++) {
+    /* semi-coherent Costas metric on the (df, dt) grid: per array, |sum of its 7 symbols' 32-sample DFTs|^2, summed
+     * over the 3 arrays. Each symbol's DFT is computed directly at the first dt and slid one sample at a time to the
+     * other 24 (frontend.costas_grid's matrix product gives the same values to ~1e-13 relative). */
+    double Mp[NDF][NDT], acc[NDT][NDF];
+    memset(acc, 0, sizeof acc);
+    for (int a = 0; a < 3; a++) {
+        double Zr[NDT][NDF], Zi[NDT][NDF];
+        memset(Zr, 0, sizeof Zr);
+        memset(Zi, 0, sizeof Zi);
+        for (int k = 0; k < 7; k++) {
+            int s = 7 * a + k, p = start0 - DT_SPAN + SPS_BB * SYNC_SYMS[s];
             double zr[NDF], zi[NDF];
             memset(zr, 0, sizeof zr);
             memset(zi, 0, sizeof zi);
-            for (int k = 0; k < 7; k++) {
-                int s = 7 * a + k, base = start0 + dt + SPS_BB * SYNC_SYMS[s];
-                for (int n = 0; n < SPS_BB; n++) {
-                    int idx = base + n;
-                    if (idx < 0 || idx >= NBB) continue;
-                    double vr = creal(y0[idx]), vi = cimag(y0[idx]);
-                    const double *Kr = gridKr[s][n], *Ki = gridKi[s][n];
-                    for (int fi = 0; fi < NDF; fi++) {
-                        zr[fi] += vr * Kr[fi] - vi * Ki[fi];
-                        zi[fi] += vr * Ki[fi] + vi * Kr[fi];
-                    }
+            for (int n = 0; n < SPS_BB; n++) {
+                int idx = p + n;
+                if (idx < 0 || idx >= NBB) continue;
+                double vr = creal(y0[idx]), vi = cimag(y0[idx]);
+                const double *Kr = gridKr[s][n], *Ki = gridKi[s][n];
+                for (int fi = 0; fi < NDF; fi++) {
+                    zr[fi] += vr * Kr[fi] - vi * Ki[fi];
+                    zi[fi] += vr * Ki[fi] + vi * Kr[fi];
                 }
             }
-            for (int fi = 0; fi < NDF; fi++) acc[fi] += zr[fi] * zr[fi] + zi[fi] * zi[fi];
+            for (int ti = 0;; ti++, p++) {
+                for (int fi = 0; fi < NDF; fi++) {
+                    Zr[ti][fi] += zr[fi];
+                    Zi[ti][fi] += zi[fi];
+                }
+                if (ti == NDT - 1) break;
+                double or_ = 0, oi = 0, nr = 0, ni = 0; /* the sample leaving and the one entering (0 outside y0) */
+                if (p >= 0 && p < NBB) or_ = creal(y0[p]), oi = cimag(y0[p]);
+                if (p + SPS_BB >= 0 && p + SPS_BB < NBB) nr = creal(y0[p + SPS_BB]), ni = cimag(y0[p + SPS_BB]);
+                const double *Wr = slWr[s], *Wi = slWi[s], *K0r = slK0r[s], *K0i = slK0i[s], *K32r = slK32r[s],
+                             *K32i = slK32i[s];
+                for (int fi = 0; fi < NDF; fi++) {
+                    double tr = zr[fi] - (or_ * K0r[fi] - oi * K0i[fi]) + (nr * K32r[fi] - ni * K32i[fi]);
+                    double tq = zi[fi] - (or_ * K0i[fi] + oi * K0r[fi]) + (nr * K32i[fi] + ni * K32r[fi]);
+                    zr[fi] = Wr[fi] * tr - Wi[fi] * tq;
+                    zi[fi] = Wr[fi] * tq + Wi[fi] * tr;
+                }
+            }
         }
-        for (int fi = 0; fi < NDF; fi++) Mp[fi][ti] = acc[fi];
+        for (int ti = 0; ti < NDT; ti++)
+            for (int fi = 0; fi < NDF; fi++) acc[ti][fi] += Zr[ti][fi] * Zr[ti][fi] + Zi[ti][fi] * Zi[ti][fi];
     }
+    for (int ti = 0; ti < NDT; ti++)
+        for (int fi = 0; fi < NDF; fi++) Mp[fi][ti] = acc[ti][fi];
     /* local maxima over a (7, 5) window (scipy maximum_filter, reflect mode == clipped window) */
     int pf[NDF * NDT], pt[NDF * NDT], np_ = 0;
     for (int i = 0; i < NDF; i++)
