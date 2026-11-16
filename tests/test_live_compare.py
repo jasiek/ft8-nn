@@ -486,3 +486,115 @@ def test_rendered_qso_shows_prior_age_then_exact_slot_count():
     MODULE.draw_comparison(screen, entry, state)
     assert not any("prev 30s" in value for value in screen.cells.values())
     assert "2 reports in slot, 0 prior" in screen.cells[5, 0]
+
+
+def skimmer_event(t=1_794_833_040, dial=7_074_000.0, mode="FT8", decodes=None):
+    rows = decodes if decodes is not None else [
+        [5, 0.2, 2246, "PD9HIX M0DUU IO92", "", "M0DUU", "IO92", "England", 422, "loc", "EU", 158]]
+    return {"mode": mode, "dial": dial, "t": t, "took": 1.3, "band": "40", "stream": 5, "skipped": 0, "decodes": rows}
+
+
+def test_skimmer_cycle_keeps_every_decode_on_our_dial_only():
+    slot, decodes = MODULE.parse_skimmer_cycle(skimmer_event(), 7_074_000)
+    assert slot == 1_794_833_040
+    assert decodes == [MODULE.Decode(2246.0, 0.2, 5.0, "PD9HIX M0DUU IO92", "remote")]
+    assert MODULE.parse_skimmer_cycle(skimmer_event(dial=7_047_500.0), 7_074_000) is None
+    assert MODULE.parse_skimmer_cycle(skimmer_event(mode="FT4"), 7_074_000) is None
+    assert MODULE.parse_skimmer_cycle({"mode": "FT8", "dial": 7_074_000}, 7_074_000) is None
+    # a short or malformed row is skipped, the rest of the slot kept; t is floored to the slot start
+    slot, decodes = MODULE.parse_skimmer_cycle(
+        skimmer_event(t=1_794_833_047, decodes=[[1, 0.1], ["x", 0.1, 900, "CQ K1ABC FN31"], [-9, 0.4, 900, "CQ K1ABC FN31"]]),
+        7_074_000)
+    assert slot == 1_794_833_040 and [d.text for d in decodes] == ["CQ K1ABC FN31"]
+
+
+def test_skimmer_addon_is_detected_by_its_page(monkeypatch):
+    class Response:
+        def __init__(self, body):
+            self.body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self, _size):
+            return self.body
+
+    seen = []
+
+    def page(request, timeout):
+        seen.append(request.full_url)
+        return Response(b"<html><title>UberSDR Skimmer</title></html>")
+
+    monkeypatch.setattr(MODULE.urllib.request, "urlopen", page)
+    assert MODULE.has_skimmer_addon("http://10.0.0.5:8080/", 5)
+    assert seen == ["http://10.0.0.5:8080/addon/skimmer/"]
+    monkeypatch.setattr(MODULE.urllib.request, "urlopen", lambda request, timeout: Response(b"<title>UberSDR</title>"))
+    assert not MODULE.has_skimmer_addon("http://10.0.0.5:8080", 5)
+
+    def refused(request, timeout):
+        raise MODULE.urllib.error.HTTPError(request.full_url, 401, "Unauthorized", {}, None)
+
+    monkeypatch.setattr(MODULE.urllib.request, "urlopen", refused)
+    assert not MODULE.has_skimmer_addon("http://10.0.0.5:8080", 5)
+
+
+def test_skimmer_loop_delivers_our_dial_from_the_first_slot_on(monkeypatch):
+    import json
+    client = MODULE.UberSDRClient("http://10.0.0.5:8080", "40m", lambda *_: None, None, lambda _: None)
+    client.first_slot = 150
+    got = []
+
+    def on_decode(slot, decode):
+        got.append((slot, decode.text))
+        if decode.text == "CQ LAST FN31":
+            client.stop_event.set()
+
+    client.on_decode = on_decode
+
+    def ft(event):
+        return [b"event: ft\n", b"data: " + json.dumps(event).encode() + b"\n", b"\n"]
+
+    lines = (
+        [b"event: hello\n", b'data: {"t": 0}\n', b"\n"]
+        + ft(skimmer_event(t=135, decodes=[[0, 0.1, 500, "CQ OLD FN31"]]))      # before our first slot
+        + ft(skimmer_event(t=150, dial=14_074_000.0, decodes=[[0, 0.1, 500, "CQ TWENTY FN31"]]))
+        + ft(skimmer_event(t=150, decodes=[[0, 0.1, 500, "CQ K1ABC FN31"], [3, 0.2, 700, "K1ABC W9XYZ EN52"]]))
+        + ft(skimmer_event(t=165, decodes=[[0, 0.1, 500, "CQ LAST FN31"]]))
+    )
+
+    class Stream(list):
+        def close(self):
+            pass
+
+    monkeypatch.setattr(MODULE, "open_event_stream", lambda url, timeout: Stream(lines))
+    client._skimmer_loop()
+    assert got == [(150, "CQ K1ABC FN31"), (150, "K1ABC W9XYZ EN52"), (165, "CQ LAST FN31")]
+
+
+def test_remote_heading_names_the_source():
+    class Screen:
+        def __init__(self):
+            self.cells = {}
+
+        def erase(self):
+            pass
+
+        def getmaxyx(self):
+            return 24, 240
+
+        def addnstr(self, row, column, value, _length, *_attrs):
+            self.cells[row, column] = value
+
+        def refresh(self):
+            pass
+
+    entry = {"band": "40m", "receiver": {"url": "http://10.0.0.5:8080", "type": "UberSDR"}}
+    for source, heading in (("skimmer", "REMOTE SKIMMER"), ("spots", "REMOTE SPOTS (repeats dropped)"),
+                            ("decoder", "REMOTE DECODER")):
+        screen, state = Screen(), MODULE.ComparisonState()
+        state.remote_source = source
+        MODULE.draw_comparison(screen, entry, state)
+        assert any(row == 6 and value.startswith(heading) for (row, _), value in screen.cells.items())

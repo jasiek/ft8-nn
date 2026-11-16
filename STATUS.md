@@ -1,5 +1,21 @@
 # Status and plan (resume here)
 
+## Live comparison: remote decodes from the skimmer add-on where there is one — done 2026-11-16
+
+The remote column used to come from UberSDR's spot feed (`/ws/dxcluster`, `subscribe_digital_spots`), which sends each
+station once every few minutes: on 40 m at an instance with the add-on it carried ~5 decodes a slot where its decoder had
+~21 (8 slots: 111 of 126 dropped decodes were stations already spotted). Our extra decodes then looked like remote misses.
+`tools/live_compare.py` now checks `/addon/skimmer/` first and, when the add-on is there, reads its event stream
+(`/addon/skimmer/api/events`, event `ft`: every decode of each slot, one event a dial a slot), else falls back to the
+spot feed with the column titled "REMOTE SPOTS (repeats dropped)". Directory survey 2026-11-16: 3 of 76 public
+instances have the add-on (WESSEX, K1RA, K1HTV-4; all stream FT8 on 160–10 m).
+Validation: 44 focused tests passed; live, 55 s each: an instance via the add-on 21–24 remote decodes a slot,
+oe3gbb-1 via spots 5–11.
+Next (fairness): OpenWebRX also sends every decode (`secondary_demod`; checked live 2026-11-16, stations repeat every
+30 s; 108 Receiverbook receivers decode FT8 on 40 m), so the fair remote sources are OpenWebRX and add-on instances.
+Our side still gets lossy audio: `format=opus` from UberSDR (the TUI's lossless `pcm-zstd` is the fix to try) and
+ADPCM from OpenWebRX when the operator enables it. Then limit the picker to the fair sources.
+
 ## Live comparison against one chosen UberSDR instance — done 2026-11-16
 
 `tools/live_compare.py --instance ADDRESS` (IP, host:port or URL; bare means `http://`, `https://` on :443) skips the

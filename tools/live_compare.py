@@ -24,6 +24,7 @@ import collections
 import ctypes
 import ctypes.util
 import hashlib
+import http.client
 import json
 import math
 import os
@@ -654,6 +655,70 @@ def audio_frequency(value: Any, dial: int) -> float:
     return frequency - dial if frequency > 100_000 else frequency
 
 
+SKIMMER_PATH = "/addon/skimmer"
+# Column headings for the remote decodes, by where they come from. UberSDR's spot feed sends each station once
+# every few minutes, so against it a slot shows ~1/4 of the remote decodes (40 m, 2026-11-16: 5 a slot vs 21).
+REMOTE_HEADINGS = {
+    "skimmer": "REMOTE SKIMMER  Hz  dB   DT  message",
+    "spots": "REMOTE SPOTS (repeats dropped)  Hz  dB   DT  message",
+    "decoder": "REMOTE DECODER  Hz  dB   DT  message",
+}
+
+
+def has_skimmer_addon(url: str, timeout: float) -> bool:
+    """True if the UberSDR instance serves the skimmer add-on, which streams every decode of each slot."""
+    request = urllib.request.Request(url.rstrip("/") + SKIMMER_PATH + "/", headers={"User-Agent": "ft8-nn-live-compare/1"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return "UberSDR Skimmer" in response.read(8192).decode("utf-8", "replace")
+    except (OSError, ValueError):  # URLError/HTTPError (404, or 401/403 behind a login) are OSErrors
+        return False
+
+
+def parse_skimmer_cycle(value: Any, dial: int) -> tuple[int, list[Decode]] | None:
+    """One skimmer "ft" event (one dial, one slot: every decode, before any spot filtering) as (slot, decodes).
+
+    The event is {"mode", "dial" (Hz), "t" (slot start, UTC s), "decodes": [[snr, dt, audio Hz, message, ...]]}.
+    """
+    if not isinstance(value, dict) or value.get("mode") != "FT8":
+        return None
+    try:
+        if round(float(value.get("dial", 0))) != dial:
+            return None
+        slot = int(float(value["t"])) // 15 * 15
+    except (KeyError, TypeError, ValueError):
+        return None
+    decodes = []
+    for row in value.get("decodes") or []:
+        if not isinstance(row, (list, tuple)) or len(row) < 4:
+            continue
+        try:
+            decodes.append(Decode(float(row[2]), float(row[1]), float(row[0]), str(row[3]), "remote"))
+        except (TypeError, ValueError):
+            continue
+    return slot, decodes
+
+
+def open_event_stream(url: str, timeout: float) -> http.client.HTTPResponse:
+    """The skimmer's server-sent event stream. Not urllib: it sends "Accept-Encoding: identity", and with that
+    header the server ends the stream inside its first (~880 KB) event, before any "ft" event."""
+    parts = urllib.parse.urlsplit(url.rstrip("/") + SKIMMER_PATH + "/api/events")
+    if parts.scheme == "https":
+        connection: http.client.HTTPConnection = http.client.HTTPSConnection(
+            parts.hostname, parts.port, timeout=timeout, context=ssl.create_default_context())
+    else:
+        connection = http.client.HTTPConnection(parts.hostname, parts.port, timeout=timeout)
+    connection.putrequest("GET", parts.path, skip_accept_encoding=True)
+    connection.putheader("Accept", "text/event-stream")
+    connection.putheader("User-Agent", "ft8-nn-live-compare/1")
+    connection.endheaders()
+    response = connection.getresponse()
+    if response.status != 200:
+        connection.close()
+        raise ConnectionError(f"skimmer events: HTTP {response.status}")
+    return response
+
+
 def ubersdr_frame_time(payload: bytes, fallback: float) -> float:
     """Return UberSDR's nanosecond audio timestamp, rejecting implausible values."""
     if len(payload) >= 8:
@@ -861,9 +926,14 @@ class UberSDRClient:
         self.stop_event = threading.Event()
         self.error: Exception | None = None
         self.first_slot: int | None = None
+        self.events: http.client.HTTPResponse | None = None
+        # where the remote decodes come from: "skimmer" (every decode) when the instance has the add-on, else "spots"
+        self.remote_source = "spots"
 
     def start(self) -> None:
         self.first_slot = (int(time.time()) // 15 + 1) * 15
+        if has_skimmer_addon(self.url, self.timeout):
+            self.remote_source = "skimmer"
         request = urllib.request.Request(
             self.url + "/connection",
             data=json.dumps({"user_session_id": self.session_id}).encode(),
@@ -886,22 +956,28 @@ class UberSDRClient:
             }
         )
         self.audio_ws = WebSocket(f"{scheme}://{parsed.netloc}/ws?{query}", self.timeout)
-        self.spots_ws = WebSocket(
-            f"{scheme}://{parsed.netloc}/ws/dxcluster?user_session_id={urllib.parse.quote(self.session_id)}",
-            self.timeout,
-        )
         self.audio_ws.send_json(
             {"type": "tune", "frequency": self.dial, "mode": "usb", "bandwidthLow": 0, "bandwidthHigh": AUDIO_HIGH_CUT}
         )
-        self.spots_ws.send_json({"type": "subscribe_digital_spots"})
+        if self.remote_source == "skimmer":
+            remote_loop = self._skimmer_loop
+        else:
+            self.spots_ws = WebSocket(
+                f"{scheme}://{parsed.netloc}/ws/dxcluster?user_session_id={urllib.parse.quote(self.session_id)}",
+                self.timeout,
+            )
+            self.spots_ws.send_json({"type": "subscribe_digital_spots"})
+            remote_loop = self._spots_loop
         self.threads = [
             threading.Thread(target=self._audio_loop, name="ubersdr-audio", daemon=True),
-            threading.Thread(target=self._spots_loop, name="ubersdr-spots", daemon=True),
+            threading.Thread(target=remote_loop, name=f"ubersdr-{self.remote_source}", daemon=True),
         ]
         for thread in self.threads:
             thread.start()
+        source = ("remote: skimmer add-on, every decode" if self.remote_source == "skimmer"
+                  else "remote: spots only (no skimmer add-on), each station once per few minutes")
         self.on_status(
-            f"streaming UberSDR at {self.dial / 1e6:.6f} MHz; "
+            f"streaming UberSDR at {self.dial / 1e6:.6f} MHz; {source}; "
             "collecting first complete local slot (up to 30 s)"
         )
 
@@ -959,8 +1035,41 @@ class UberSDRClient:
         except Exception as error:
             self._fail(error)
 
+    def _skimmer_loop(self) -> None:
+        """Every FT8 decode of each slot on our dial, from the skimmer add-on's event stream; reconnects."""
+        while not self.stop_event.is_set():
+            try:
+                # a long read timeout: one "ft" event a dial a slot, so a quiet stream still talks every few seconds
+                self.events = open_event_stream(self.url, max(self.timeout, 60.0))
+                event = ""
+                for raw in self.events:
+                    if self.stop_event.is_set():
+                        return
+                    line = raw.decode("utf-8", "replace").rstrip("\r\n")
+                    if line.startswith("event:"):
+                        event = line[6:].strip()
+                    elif line.startswith("data:") and event == "ft":
+                        cycle = parse_skimmer_cycle(json.loads(line[5:]), self.dial)
+                        # slots before ours have no local audio to compare against
+                        if cycle is None or (self.first_slot is not None and cycle[0] < self.first_slot):
+                            continue
+                        for decode in cycle[1]:
+                            self.on_decode(cycle[0], decode)
+                if not self.stop_event.is_set():
+                    self.on_status("skimmer event stream ended; reconnecting")
+            except Exception as error:
+                if self.stop_event.is_set():
+                    return
+                self.on_status(f"skimmer event stream: {error}; reconnecting")
+            self.stop_event.wait(2)
+
     def close(self) -> None:
         self.stop_event.set()
+        if self.events is not None:
+            try:
+                self.events.close()
+            except Exception:
+                pass
         for ws in (self.audio_ws, self.spots_ws):
             if ws:
                 ws.close()
@@ -1254,6 +1363,7 @@ class ComparisonState:
         self.lock = threading.Lock()
         self.ours: dict[int, list[Decode]] = collections.defaultdict(list)
         self.remote: dict[int, list[Decode]] = collections.defaultdict(list)
+        self.remote_source = "decoder"  # a key of REMOTE_HEADINGS
         self.psk: dict[int, dict[str, PskSignal]] = {}
         self.psk_status = "starting"
         self.selected_slot: int | None = None
@@ -1345,6 +1455,7 @@ def draw_comparison(screen: Any, entry: dict[str, Any], state: ComparisonState) 
         psk_status = state.psk_status
         psk_slot = slot
         psk = state.psk_context(slot)
+        remote_heading = REMOTE_HEADINGS.get(state.remote_source, REMOTE_HEADINGS["decoder"])
     screen.addnstr(1, 0, status, width - 1)
     if receiver.get("detail_url"):
         source_line = f"Instance: {receiver['detail_url']}"
@@ -1385,7 +1496,7 @@ def draw_comparison(screen: Any, entry: dict[str, Any], state: ComparisonState) 
     right = col + gap
     third = 2 * (col + gap)
     underline = curses.A_UNDERLINE if curses is not None else 0
-    headings = ("OUR DECODER  Hz  dB   DT  message", "REMOTE DECODER  Hz  dB   DT  message", "PSK REPORTER  MHz  reports/prior age  call/grid")
+    headings = ("OUR DECODER  Hz  dB   DT  message", remote_heading, "PSK REPORTER  MHz  reports/prior age  call/grid")
     for x, heading in zip((0, right, third), headings):
         if x < width - 1:
             screen.addnstr(6, x, heading, min(col, width - x - 1), underline)
@@ -1465,6 +1576,8 @@ def run_comparison(screen: Any, entry: dict[str, Any], args: argparse.Namespace)
         psk_client.start()
         try:
             client.start()
+            with state.lock:
+                state.remote_source = getattr(client, "remote_source", "decoder")
         except Exception as error:
             status(f"connection failed: {error} — press q to quit")
         while True:
