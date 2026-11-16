@@ -134,6 +134,48 @@ def test_ubersdr_directory_response_is_normalized():
     assert entries[0]["receiver"]["type"] == "UberSDR"
 
 
+def test_instance_address_forms():
+    assert MODULE.normalize_instance_url("192.168.1.20") == "http://192.168.1.20"
+    assert MODULE.normalize_instance_url(" 192.168.1.20:8080/ ") == "http://192.168.1.20:8080"
+    assert MODULE.normalize_instance_url("https://sdr.example/") == "https://sdr.example"
+    assert MODULE.normalize_instance_url("sdr.example:443") == "https://sdr.example:443"
+    for bad in ("", "ftp://sdr.example", "http://"):
+        try:
+            MODULE.normalize_instance_url(bad)
+        except ValueError:
+            continue
+        raise AssertionError(bad)
+
+
+def test_instance_entries_follow_tuning_range_and_label():
+    description = {
+        "digital_decodes": True,
+        "version": "0.1.68",
+        "receiver": {"callsign": "K1ABC-1", "location": "Example", "gps": {"lat": 1, "lon": 2}},
+        "tuning_range": {"min_frequency": 1_000_000, "max_frequency": 15_000_000},
+        "pskreporter_rank": {"reports": {"40m": {"day": 99}}},
+    }
+    entries = MODULE.instance_entries("http://10.0.0.5:8080", description)
+    assert [entry["band"] for entry in entries] == ["160m", "80m", "60m", "40m", "30m", "20m"]
+    forty = entries[3]
+    assert forty["ft8_decodes_total"] == 99
+    assert forty["receiver"]["label"] == "K1ABC-1"
+    assert forty["receiver"]["url"] == "http://10.0.0.5:8080"
+    assert forty["receiver"]["type"] == "UberSDR"
+    # an instance without /api/description falls back to UberSDR's 10 kHz–30 MHz range
+    fallback = [entry["band"] for entry in MODULE.instance_entries("http://10.0.0.5", {})]
+    assert fallback[0] == "2190m" and fallback[-1] == "10m" and len(fallback) == 12
+
+
+def test_instance_without_digital_decoding_is_refused():
+    try:
+        MODULE.instance_entries("http://10.0.0.5", {"digital_decodes": False})
+    except RuntimeError as error:
+        assert "digital decoding" in str(error)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
 def test_streaming_view_shows_metrics_link_and_decode_snapshot():
     class Screen:
         def __init__(self):
@@ -162,6 +204,10 @@ def test_streaming_view_shows_metrics_link_and_decode_snapshot():
     assert screen.lines[2] == "Directory: https://example.test/rx/metrics.json"
     assert screen.lines[3] == "FT8 traffic at directory build: 42.50/min  total since restart: 1,234,567"
     assert "42.50/min" in MODULE.entry_label(entry)
+
+    entry["receiver"].update(type="UberSDR", detail_url="http://10.0.0.5:8080")
+    MODULE.draw_comparison(screen, entry, MODULE.ComparisonState())
+    assert screen.lines[2] == "Instance: http://10.0.0.5:8080"
 
 
 def spot(call="K1ABC", slot=150, **overrides):

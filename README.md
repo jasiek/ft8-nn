@@ -188,7 +188,14 @@ performs the active stream probes and 60-second traffic measurement described by
 python3 collect/receiverbook_directory.py                 # optional UberSDR directory snapshot
 make -C c                                                 # build libft8nn if needed
 python3 tools/live_compare.py                             # choose a receiver and compare live decodes
+python3 tools/live_compare.py --instance 192.168.1.20:8080  # benchmark against one UberSDR instance (IP, host:port or URL)
 ```
+
+`--instance` skips the public directory, so it also works for a private or LAN instance. A bare address means
+`http://` (`https://` on port 443). The tool reads the instance's own `/api/description` for its callsign and
+tuning range, then offers every FT8 band inside that range in the same picker; an instance without that endpoint
+gets UberSDR's default 10 kHz–30 MHz. It refuses an instance whose digital decoding is switched off, because that
+instance sends no FT8 decodes to compare against.
 
 `live_compare.py` presents a curses receiver picker with arrow-key navigation and substring filtering. Once a
 receiver-band pair is selected, it consumes the same UberSDR audio and remote FT8-decoder messages, divides the

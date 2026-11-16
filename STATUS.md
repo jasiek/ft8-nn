@@ -1,5 +1,13 @@
 # Status and plan (resume here)
 
+## Live comparison against one chosen UberSDR instance — done 2026-11-16
+
+`tools/live_compare.py --instance ADDRESS` (IP, host:port or URL; bare means `http://`, `https://` on :443) skips the
+public directory and benchmarks against that one instance, private/LAN ones included. Bands come from the instance's
+own `/api/description` tuning range (404 → UberSDR's 10 kHz–30 MHz); digital decoding off → refused; the header
+shows `Instance: <url>`. Validation: 40 focused tests passed (`tests/test_live_compare.py`, `tests/test_receiverbook_directory.py`); address parsing and band lists checked against a live
+public instance; an unresolvable host fails before the picker. Full audio/decoder UI not exercised for this change.
+
 ## Live comparison update — done 2026-11-14
 
 Added a third column subscribing to the selected band's FT8 PSK Reporter MQTT feed over TLS, with reconnect.

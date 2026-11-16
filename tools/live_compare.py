@@ -36,6 +36,7 @@ import struct
 import sys
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
@@ -730,6 +731,63 @@ def load_directory(source: str, timeout: float) -> dict[str, Any]:
     return json.loads(Path(source).read_text())
 
 
+def normalize_instance_url(value: str) -> str:
+    """Accept an IP, host[:port] or URL for one UberSDR instance; a bare address means plain HTTP (HTTPS on :443)."""
+    text = value.strip()
+    if "://" not in text:
+        bare = urllib.parse.urlparse("//" + text)
+        text = ("https://" if bare.port == 443 else "http://") + text
+    parsed = urllib.parse.urlparse(text)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise ValueError(f"invalid UberSDR instance address: {value!r}")
+    return text.rstrip("/")
+
+
+def load_instance_description(url: str, timeout: float) -> dict[str, Any]:
+    """Read the instance's own /api/description; an instance without it (404) gets UberSDR's defaults.
+
+    An unreachable host or any other HTTP error still raises, so a mistyped address fails before the picker opens.
+    """
+    request = urllib.request.Request(url + "/api/description", headers={"User-Agent": "ft8-nn-live-compare/1"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            description = json.load(response)
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return {}
+        raise
+    except ValueError:
+        return {}
+    return description if isinstance(description, dict) else {}
+
+
+def instance_entries(url: str, description: dict[str, Any]) -> list[dict[str, Any]]:
+    """Picker entries for every FT8 band inside one instance's tuning range, lowest band first."""
+    if description.get("digital_decodes") is False:
+        raise RuntimeError(f"{url} has digital decoding switched off, so it sends no FT8 decodes to compare against")
+    receiver = description.get("receiver") if isinstance(description.get("receiver"), dict) else {}
+    gps = receiver.get("gps") if isinstance(receiver.get("gps"), dict) else {}
+    instance = {
+        "is_online": True,
+        "digital_decodes": True,
+        "public_url": url,
+        "callsign": receiver.get("callsign"),
+        "name": receiver.get("name"),
+        "location": receiver.get("location", ""),
+        "latitude": gps.get("lat"),
+        "longitude": gps.get("lon"),
+        "version": description.get("version"),
+        "tuning_range": description.get("tuning_range") or {},
+        "pskreporter_rank": description.get("pskreporter_rank") or {},
+        # no per-band SNR outside the directory; listing every band lets the tuning range decide
+        "band_conditions": dict.fromkeys(FT8_FREQUENCIES),
+    }
+    entries = directory_entries({"instances": [instance]})
+    for entry in entries:
+        entry["receiver"]["detail_url"] = url
+    return sorted(entries, key=lambda entry: FT8_FREQUENCIES[entry["band"]])
+
+
 class OpusDecoder:
     """Thin libopus wrapper for UberSDR's header-plus-raw-Opus frames."""
 
@@ -1288,12 +1346,13 @@ def draw_comparison(screen: Any, entry: dict[str, Any], state: ComparisonState) 
         psk_slot = slot
         psk = state.psk_context(slot)
     screen.addnstr(1, 0, status, width - 1)
-    detail_url = (
-        "https://instances.ubersdr.org/"
-        if receiver.get("type") == "UberSDR"
-        else metrics_url(receiver["url"])
-    )
-    screen.addnstr(2, 0, f"Directory: {detail_url}", width - 1)
+    if receiver.get("detail_url"):
+        source_line = f"Instance: {receiver['detail_url']}"
+    elif receiver.get("type") == "UberSDR":
+        source_line = "Directory: https://instances.ubersdr.org/"
+    else:
+        source_line = f"Directory: {metrics_url(receiver['url'])}"
+    screen.addnstr(2, 0, source_line, width - 1)
     rate = entry.get("ft8_decodes_per_minute")
     rate_text = f"{rate:,.2f}/min" if isinstance(rate, (int, float)) else "unknown"
     decode_count = entry.get("ft8_decodes_total", entry.get("ft8_decodes"))
@@ -1458,16 +1517,30 @@ def receiver_ui(screen: Any, entries: list[dict[str, Any]], args: argparse.Names
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--directory", default=DEFAULT_DIRECTORY, help="UberSDR API URL or local directory JSON")
+    parser.add_argument(
+        "--instance", metavar="ADDRESS",
+        help="benchmark against this one UberSDR instance instead of the directory: an IP, host:port or URL "
+             "(a bare address means http://), e.g. 192.168.1.20:8080",
+    )
     parser.add_argument("--model", type=Path, default=DEFAULT_MODEL)
     parser.add_argument("--library", type=Path, default=default_library())
     parser.add_argument("--threads", type=int, default=0, help="local decoder threads; 0 uses performance cores")
     parser.add_argument("--timeout", type=float, default=10.0)
     parser.add_argument("--audio-delay", type=float, default=0.0, help="seconds from UTC boundary until its audio arrives")
     args = parser.parse_args(argv)
-    document = load_directory(args.directory, args.timeout)
-    entries = [entry for entry in directory_entries(document) if entry.get("band") in FT8_FREQUENCIES]
-    if not entries:
-        parser.error("receiver directory contains no supported entries")
+    if args.instance:
+        try:
+            url = normalize_instance_url(args.instance)
+            entries = instance_entries(url, load_instance_description(url, args.timeout))
+        except (OSError, RuntimeError, ValueError) as error:
+            parser.error(f"--instance: {error}")
+        if not entries:
+            parser.error(f"--instance: no FT8 band lies inside {url}'s tuning range")
+    else:
+        document = load_directory(args.directory, args.timeout)
+        entries = [entry for entry in directory_entries(document) if entry.get("band") in FT8_FREQUENCIES]
+        if not entries:
+            parser.error("receiver directory contains no supported entries")
     if curses is None:
         print("The live comparison terminal UI requires Python curses, which is not available.", file=sys.stderr)
         return 2
