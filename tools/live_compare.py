@@ -901,6 +901,95 @@ class OpusDecoder:
             self.decoder = None
 
 
+def load_zstd() -> Any | None:
+    """The system's libzstd through ctypes (nothing is built), or None if there is none."""
+    names = [ctypes.util.find_library("zstd")]
+    if sys.platform == "darwin":
+        names.extend(["/opt/homebrew/lib/libzstd.1.dylib", "/opt/local/lib/libzstd.1.dylib", "/usr/local/lib/libzstd.1.dylib"])
+    else:
+        names.extend(["libzstd.so.1"])
+    for name in names:
+        if not name:
+            continue
+        try:
+            lib = ctypes.CDLL(name)
+        except OSError:
+            continue
+        lib.ZSTD_createDCtx.restype = ctypes.c_void_p
+        lib.ZSTD_freeDCtx.argtypes = [ctypes.c_void_p]
+        lib.ZSTD_decompressDCtx.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_char_p, ctypes.c_size_t]
+        lib.ZSTD_decompressDCtx.restype = ctypes.c_size_t
+        lib.ZSTD_isError.argtypes = [ctypes.c_size_t]
+        lib.ZSTD_isError.restype = ctypes.c_uint
+        lib.ZSTD_getErrorName.argtypes = [ctypes.c_size_t]
+        lib.ZSTD_getErrorName.restype = ctypes.c_char_p
+        return lib
+    return None
+
+
+class UberSDRPcmDecoder:
+    """UberSDR's lossless "pcm-zstd" audio: each WebSocket message is one zstd frame holding a little-endian header
+    and big-endian int16 samples (ka9q_ubersdr pcm_binary.go). Full header, "PC" (0x5043): version, format, GPS time
+    ns @4, wall ms @12, rate @20, channels @24; 29 bytes for version 1, 37 for 2 and 3. Minimal header, "PM"
+    (0x504D), 13 bytes: GPS time ns @3, the rate and channels as before."""
+
+    FULL, MINIMAL = 0x5043, 0x504D
+
+    def __init__(self, lib: Any) -> None:
+        self.lib = lib
+        self.context = lib.ZSTD_createDCtx()
+        if not self.context:
+            raise RuntimeError("ZSTD_createDCtx failed")
+        self.buffer = ctypes.create_string_buffer(1 << 20)
+        self.sample_rate: int | None = None
+        self.channels: int | None = None
+
+    def decompress(self, payload: bytes) -> bytes:
+        size = self.lib.ZSTD_decompressDCtx(self.context, self.buffer, len(self.buffer), payload, len(payload))
+        if self.lib.ZSTD_isError(size):
+            raise RuntimeError(f"zstd: {self.lib.ZSTD_getErrorName(size).decode()}")
+        return self.buffer.raw[:size]
+
+    def decode(self, payload: bytes) -> tuple[array.array, float | None]:
+        """(mono int16 samples, GPS time in s of the first one, or None)."""
+        return self.parse(self.decompress(payload))
+
+    def parse(self, packet: bytes) -> tuple[array.array, float | None]:
+        if len(packet) < 13:
+            raise ValueError(f"PCM packet too short: {len(packet)} bytes")
+        magic = struct.unpack_from("<H", packet)[0]
+        if magic == self.FULL:
+            header = 29 if packet[2] == 1 else 37
+            if len(packet) < header:
+                raise ValueError(f"PCM full header too short: {len(packet)} bytes")
+            stamp = struct.unpack_from("<Q", packet, 4)[0]
+            self.sample_rate = struct.unpack_from("<I", packet, 20)[0]
+            self.channels = packet[24]
+        elif magic == self.MINIMAL:
+            if self.sample_rate is None:
+                raise ValueError("PCM minimal header before any full one")
+            header = 13
+            stamp = struct.unpack_from("<Q", packet, 3)[0]
+        else:
+            raise ValueError(f"not an UberSDR PCM packet (magic {magic:#06x})")
+        if self.sample_rate != 12_000 or self.channels != 1:
+            raise RuntimeError(f"unsupported UberSDR audio format: {self.sample_rate} Hz, {self.channels} channels")
+        samples = array.array("h")
+        data = packet[header:]
+        samples.frombytes(data[: len(data) // 2 * 2])
+        if sys.byteorder == "little":
+            samples.byteswap()
+        if not stamp:
+            return samples, None
+        seconds, nanoseconds = divmod(stamp, 1_000_000_000)
+        return samples, seconds + nanoseconds / 1e9
+
+    def close(self) -> None:
+        if self.context:
+            self.lib.ZSTD_freeDCtx(self.context)
+            self.context = None
+
+
 class UberSDRClient:
     def __init__(
         self,
@@ -922,6 +1011,10 @@ class UberSDRClient:
         self.audio_ws: WebSocket | None = None
         self.spots_ws: WebSocket | None = None
         self.decoder: OpusDecoder | None = None
+        self.pcm: UberSDRPcmDecoder | None = None
+        # our decoder's audio: "pcm-zstd" (lossless, the demodulator's own samples) when the server and libzstd allow,
+        # else "opus" (lossy: it costs weak decodes the remote decoder, working on the lossless samples, keeps)
+        self.audio_format = "opus"
         self.threads: list[threading.Thread] = []
         self.stop_event = threading.Event()
         self.error: Exception | None = None
@@ -946,16 +1039,27 @@ class UberSDRClient:
             raise RuntimeError(permission.get("reason", "connection rejected"))
         parsed = urllib.parse.urlparse(self.url)
         scheme = "wss" if parsed.scheme == "https" else "ws"
-        query = urllib.parse.urlencode(
-            {
-                "frequency": self.dial,
-                "mode": "usb",
-                "user_session_id": self.session_id,
-                "format": "opus",
-                "version": 3,
-            }
-        )
-        self.audio_ws = WebSocket(f"{scheme}://{parsed.netloc}/ws?{query}", self.timeout)
+        zstd = load_zstd()
+        for audio_format in (["pcm-zstd"] if zstd else []) + ["opus"]:
+            query = urllib.parse.urlencode(
+                {
+                    "frequency": self.dial,
+                    "mode": "usb",
+                    "user_session_id": self.session_id,
+                    "format": audio_format,
+                    "version": 3,
+                }
+            )
+            try:
+                self.audio_ws = WebSocket(f"{scheme}://{parsed.netloc}/ws?{query}", self.timeout)
+            except ConnectionError:
+                if audio_format == "opus":
+                    raise
+                continue  # a server without lossless audio refuses the upgrade; ask for Opus instead
+            self.audio_format = audio_format
+            if audio_format == "pcm-zstd":
+                self.pcm = UberSDRPcmDecoder(zstd)
+            break
         self.audio_ws.send_json(
             {"type": "tune", "frequency": self.dial, "mode": "usb", "bandwidthLow": 0, "bandwidthHigh": AUDIO_HIGH_CUT}
         )
@@ -976,8 +1080,10 @@ class UberSDRClient:
             thread.start()
         source = ("remote: skimmer add-on, every decode" if self.remote_source == "skimmer"
                   else "remote: spots only (no skimmer add-on), each station once per few minutes")
+        audio = ("audio: lossless PCM" if self.audio_format == "pcm-zstd"
+                 else "audio: Opus (lossy; " + ("no lossless stream" if zstd else "no libzstd") + ")")
         self.on_status(
-            f"streaming UberSDR at {self.dial / 1e6:.6f} MHz; {source}; "
+            f"streaming UberSDR at {self.dial / 1e6:.6f} MHz; {audio}; {source}; "
             "collecting first complete local slot (up to 30 s)"
         )
 
@@ -990,7 +1096,15 @@ class UberSDRClient:
         try:
             while not self.stop_event.is_set():
                 kind, payload = self.audio_ws.recv()
-                if kind != "binary" or len(payload) < 22:
+                if kind != "binary":
+                    continue
+                if self.pcm is not None:
+                    samples, stamp = self.pcm.decode(payload)
+                    if samples:
+                        now = time.time()
+                        self.on_audio(samples, stamp if stamp is not None and abs(stamp - now) < 300 else now)
+                    continue
+                if len(payload) < 22:
                     continue
                 sample_rate = struct.unpack_from("<I", payload, 8)[0]
                 channels = payload[12]
@@ -1078,6 +1192,8 @@ class UberSDRClient:
                 thread.join(timeout=2)
         if self.decoder:
             self.decoder.close()
+        if self.pcm:
+            self.pcm.close()
 
 
 class OpenWebRXClient:

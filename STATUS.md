@@ -13,8 +13,13 @@ Validation: 44 focused tests passed; live, 55 s each: an instance via the add-on
 oe3gbb-1 via spots 5–11.
 Next (fairness): OpenWebRX also sends every decode (`secondary_demod`; checked live 2026-11-16, stations repeat every
 30 s; 108 Receiverbook receivers decode FT8 on 40 m), so the fair remote sources are OpenWebRX and add-on instances.
-Our side still gets lossy audio: `format=opus` from UberSDR (the TUI's lossless `pcm-zstd` is the fix to try) and
-ADPCM from OpenWebRX when the operator enables it. Then limit the picker to the fair sources.
+Lossless UberSDR audio — done 2026-11-16: the client asks for `format=pcm-zstd` (each message one zstd frame of a
+little-endian header and big-endian int16 samples; ka9q_ubersdr `pcm_binary.go`), decompressed by the system libzstd
+through ctypes (nothing built); no libzstd or a refused upgrade falls back to Opus, and the status line names the
+audio. Live, two sessions on one add-on instance, 5 slots of 40 m: our decoder 219 decodes on lossless vs 203 on
+Opus (20 only lossless, 4 only Opus); remote decodes we lacked 22 vs 38. 47 focused tests passed; curses UI not run.
+Next: OpenWebRX sends ADPCM when the operator enables it (flag those receivers), then limit the picker to the fair
+sources (OpenWebRX, add-on instances).
 
 ## Live comparison against one chosen UberSDR instance — done 2026-11-16
 

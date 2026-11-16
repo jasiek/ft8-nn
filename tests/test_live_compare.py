@@ -598,3 +598,94 @@ def test_remote_heading_names_the_source():
         state.remote_source = source
         MODULE.draw_comparison(screen, entry, state)
         assert any(row == 6 and value.startswith(heading) for (row, _), value in screen.cells.items())
+
+
+def pcm_full(samples, version=3, stamp_ns=1_794_833_040_250_000_000, rate=12_000, channels=1):
+    import struct
+    head = struct.pack("<HBBQQIB", 0x5043, version, 2, stamp_ns, stamp_ns // 1_000_000, rate, channels)
+    head += b"\0" * ((29 if version == 1 else 37) - len(head))
+    return head + struct.pack(f">{len(samples)}h", *samples)
+
+
+def test_pcm_packets_full_and_minimal_headers():
+    import struct
+    decoder = MODULE.UberSDRPcmDecoder.__new__(MODULE.UberSDRPcmDecoder)
+    decoder.sample_rate = decoder.channels = None
+    try:
+        decoder.parse(struct.pack("<HBQH", 0x504D, 1, 5, 0) + b"\0\1")
+        assert False, "a minimal header needs a full one first"
+    except ValueError:
+        pass
+    samples, stamp = decoder.parse(pcm_full([1, -2, 32767, -32768]))
+    assert list(samples) == [1, -2, 32767, -32768] and stamp == 1_794_833_040.25
+    samples, _ = decoder.parse(pcm_full([258], version=1))  # 29-byte header
+    assert list(samples) == [258]
+    samples, stamp = decoder.parse(struct.pack("<HBQH", 0x504D, 1, 3_000_000_000, 0) + struct.pack(">2h", 7, -7))
+    assert list(samples) == [7, -7] and stamp == 3.0
+    for bad in (b"\0" * 40, pcm_full([0], rate=48_000)):
+        try:
+            decoder.parse(bad)
+            assert False
+        except (ValueError, RuntimeError):
+            pass
+
+
+def test_pcm_zstd_round_trip_through_libzstd():
+    import ctypes
+    import pytest
+    lib = MODULE.load_zstd()
+    if lib is None:
+        pytest.skip("no libzstd")
+    packet = pcm_full(list(range(-120, 120)))
+    lib.ZSTD_compress.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_char_p, ctypes.c_size_t, ctypes.c_int]
+    lib.ZSTD_compress.restype = ctypes.c_size_t
+    out = ctypes.create_string_buffer(4096)
+    size = lib.ZSTD_compress(out, len(out), packet, len(packet), 3)
+    decoder = MODULE.UberSDRPcmDecoder(lib)
+    try:
+        samples, _ = decoder.decode(out.raw[:size])
+        assert list(samples) == list(range(-120, 120))
+        try:
+            decoder.decode(b"not zstd")
+            assert False
+        except RuntimeError:
+            pass
+    finally:
+        decoder.close()
+
+
+def test_ubersdr_asks_for_lossless_audio_and_falls_back_to_opus(monkeypatch):
+    import io
+    import json
+    opened = []
+
+    class Socket:
+        def __init__(self, url, timeout):
+            if "/ws?" in url and "pcm-zstd" in url and refuse_lossless:
+                raise ConnectionError("WebSocket upgrade failed: HTTP/1.1 400 Bad Request")
+            opened.append(url)
+
+        def send_json(self, value):
+            pass
+
+        def recv(self):
+            raise EOFError("closed")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(MODULE, "WebSocket", Socket)
+    monkeypatch.setattr(MODULE, "has_skimmer_addon", lambda url, timeout: False)
+    monkeypatch.setattr(MODULE.urllib.request, "urlopen", lambda request, timeout: io.BytesIO(json.dumps({"allowed": True}).encode()))
+    monkeypatch.setattr(MODULE, "load_zstd", lambda: object())
+    monkeypatch.setattr(MODULE, "UberSDRPcmDecoder", lambda lib: type("Pcm", (), {"close": lambda self: None})())
+    for refuse_lossless, expected in ((False, "pcm-zstd"), (True, "opus")):
+        opened.clear()
+        statuses = []
+        client = MODULE.UberSDRClient("http://10.0.0.5:8080", "40m", lambda *_: None, lambda *_: None, statuses.append)
+        client.start()
+        client.close()
+        assert client.audio_format == expected
+        assert f"format={expected}" in opened[0]
+        wanted = "lossless PCM" if expected == "pcm-zstd" else "Opus (lossy; no lossless stream)"
+        assert any(wanted in status for status in statuses)  # the fake stream's EOF may report first
