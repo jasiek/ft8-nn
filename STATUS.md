@@ -1,5 +1,63 @@
 # Status and plan (resume here)
 
+## SNR reports in line with jt9 — done 2026-11-16 (tag `nn_v3_snr`)
+
+The user asked why our SNR did not match jt9's. **Before:** on runs 2–4 pooled (80,743 decodes both made) ours − jt9
+had a median of −3.9 dB and a slope of 0.75 (ours vs jt9). The gap depended on audio frequency (median −27.4 dB at
+3000 Hz, −20.9 at 2750, −8 at 500, +1.4 at 1500) and on the receiver (−0.1 to −6.6 dB).
+**Why:** both compute SNR = 10·log10(power on the decoded tones / noise per bin − 1) − constant. They differ in the
+noise. jt9 (`lib/ft8/get_spectrum_baseline.f90`, `baseline.f90`) takes the noise *at the signal's frequency*: the
+slot's average spectrum (3840-point Nuttall windows, 3.125 Hz bins) in dB over [nfa, nfb]; in each of 10 segments the
+points at or below the 10th percentile; a degree-4 polynomial through them, + 0.65 dB. We took *one number per slot*,
+the median power over 200–3000 Hz (`Baseband.noise_psd`). That was wrong three ways:
+- (1) KiwiSDR audio falls off towards 3 kHz and below ~1 kHz, so at the edges the real floor is far below the median.
+- (2) On a busy band the median takes in signal energy, so everything read low there. On a quiet band the empty
+  edges pull the median below the mid-band floor, so mid-band SNRs read high.
+- (3) The median was recomputed on each pass's residual. Strong signals, decoded first, read low; weak ones, decoded
+  later, read high. That is the 0.75 slope.
+
+**Change:** `frontend.spectrum_baseline` is a port of jt9's floor, and `Baseband.noise_ratio(f0)` turns it into the
+units `downsample` normalises to; `decoder.estimate_snr(h, bits77, bb)` uses it. In C: `spectrum_baseline` /
+`baseband_noise_ratio` in `c/src/frontend.c`, and `sync_hyp.nratio`, set by `fine_sync2` and the co-channel stage.
+Only the SNR uses it. The network's input scale (`noise_psd`) is unchanged, so decodes are byte-identical. Two
+details are needed to match jt9 3.0.x, besides the port:
+- **Fit range = jt9's [nfa, nfb]:** WSJT-X's request range when there is one (`decode_slot(snr_rng=)`,
+  `run_real.py --range`, C `ft8nn_set_range`), else jt9's command-line default 200–4000 Hz (`BASE_NFA/BASE_NFB`).
+  Our 150 Hz search floor reads +11 dB vs jt9 below 500 Hz: 150–200 Hz is as empty as 3–4 kHz on these
+  recordings and pulls the fit down.
+- **The floor sees the first 11.8 s in a 15 s buffer, the rest zero** (`BASE_CUT` = 41·3456 samples). jt9 decodes
+  a file the way WSJT-X decodes live, at 11.8 / 13.5 / 14.4 s with the buffer zeroed past that point
+  (`lib/jt9.f90` nzhsym 41/47/50, read in the WSJT-X 3.0.1 source; the installed 3.0.2 jt9 reproduces the run-1
+  labels exactly). The cut is a step in the waveform. Its splatter fills the empty 3–4 kHz, which lifts jt9's fit at
+  the top edge by up to ~15 dB and lowers it mid-band by 2–4 dB. On 149 clean signals added to real run-1 slots, the
+  full slot left ours − jt9 at −2.4..+8.2 dB per 500 Hz; the cut left a flat +1.1. The scale counts only the window
+  energy on audio, which removes that +1.1. Our early pass ends at the same sample, so both passes see one floor.
+
+`SNR_OFFSET` 0.23 → −0.32: re-fitted on synthetic AWGN (`tools/calib_snr.py`, +0.55 dB at −20/−18/−16). jt9 reads the
+true SNR there too. The WSJT-X sidecar now clamps at −25 dB as jt9 3.0 does (`ft8b.f90`; master and 2.x: −24); the
+CLI and decode files keep the unclamped value.
+**Note: matching jt9 copies its distortion.** On noise through a KiwiSDR-like passband, jt9 itself reads +12..+15 dB
+at the edges and −5 mid-band vs the true SNR, and so do we now. On flat noise both read the truth (±0.4 dB).
+**Results** (`tools/cmp_snr_jt9.py`, new; medians of ours − jt9, `nn_v3_f4bp` → `nn_v3_snr`):
+
+| | decodes shared | all | slope | per jt9-SNR bin | per 250 Hz bin | per receiver |
+|---|---|---|---|---|---|---|
+| run 1 | 26,356 | −6.0 → **+0.2** | 0.89 → **0.98** | → −0.1..+0.4 | −27.1..−1.9 → **0.0..+0.3** | → 0.0..+0.3 |
+| runs 2–4 pooled | 80,743 | −3.9 → **+0.1** | 0.75 → **0.99** | −10.8..+1.9 → **0.0..+0.2** | −27.4..+1.4 → **−0.1..+0.4** | → −0.2..+0.3 (36) |
+
+Synthetic slots (`jt9` 3.0.2 on the same WAVs): flat noise and a KiwiSDR-like passband, ours − jt9 within ±0.4 dB in
+every 300 Hz bin. Decodes unchanged: runs 1–4 every station's decode lines identical to `nn_v3_f4bp` apart from the
+SNR column. Run 1 34,765 / 26,638 / 1, run 2 29,743 / 21,858 / 1, run 3 28,475 / 21,459 / 1, run 4 49,158 / 35,661 /
+2, noise 0 false / 998. Training recordings 18,724 ours (the same; all 10 stations' decode lines identical apart from SNR), AWGN 50% −22.49 dB (unchanged), `ab_run2.sh` + `validate_full.sh nn_v3_snr` PASS, golden C == Python 4/4 with every field equal (`00_40m` 815/815, `08_80m` 629/629, run-2 `02_80m` 754/754, AWGN 429/429). Golden C == Python on every field, SNR included (run-2 `02_80m`
+754/754, `ci_smoke` 51/51); `golden_c.py`'s default tag is now `nn_v3_snr`. **C cost +0.8% user CPU** (40 run-1
+`01_40m` slots, `--threads 0 --early 141696`, HEAD vs new built side by side, old/new/new/old: 327.6 → 330.2 s; the
+floor skips the 19 all-zero segments past the cut). Tests: `tests/test_snr_baseline.py` (white-noise floor, true
+SNR on flat noise, a passband slope that the old median got 5 dB wrong, a busy band, the fit range); 97 pass;
+`wsjtx/test_sidecar.sh` passes. Python 08:55–15:36 on the mini, no sleep events. The machine was shared from
+~09:07 with another session's training and run-1 decodes (load average up to ~280), so the stage times (run 2 60 min,
+run 3 61, run 4 125, run 1 102) are not timings.
+Next: nothing open here. The decoder plan below is unchanged (Next item 3).
+
 ## Live comparison update — done 2026-11-14
 
 Added a third column subscribing to the selected band's FT8 PSK Reporter MQTT feed over TLS, with reconnect.
@@ -257,8 +315,10 @@ Reproduce: `git worktree add --detach <dir> <rev>`, `make -C <dir>/c ORT_PREFIX=
 then `/usr/bin/time -l <dir>/c/build/ft8nn_cli --threads N --time models/v3/ft8nn.onnx <first 40 wavs of
 datasets/ft8-validation-set/recordings/01_40m_*/slots>` (per-slot `time` lines on stderr).
 
-Last updated 2026-11-15 (**Next item 2 closed at −40% CPU per busy slot with the same decodes; the remaining,
-non-exact leads parked**; next is item 3). Before that 2026-11-15 (**Costas fine sync slides its DFTs along DT, −6.9%
+Last updated 2026-11-16 (**SNR reports in line with jt9, tag `nn_v3_snr`**: jt9's local noise floor instead of
+one median per slot, measured as jt9 does on the first 11.8 s; runs 2–4 ours − jt9 −3.9 → +0.1 dB, slope 0.75 →
+0.99, decodes unchanged; section at the top). Before that 2026-11-15 (**Next item 2 closed at −40% CPU per busy slot
+with the same decodes; the remaining, non-exact leads parked**; next is item 3). Before that 2026-11-15 (**Costas fine sync slides its DFTs along DT, −6.9%
 CPU per busy slot, decodes identical; item 2 −40%**, Next item 2 step 3 (e)). Before that 2026-11-15 (**candidate-search median by a network,
 −10.3% CPU per busy slot, decodes identical**, Next item 2 step 3 (d)). Before that 2026-11-15 (**combined check of `main` passed, tag `nn_v3_f4bp`**: the search to 4 kHz plus item 2's CPU
 changes give `nn_v3_f4k`'s decodes on runs 1–2 and training (3 labels bp -> osd); first runs 3–4 numbers for the

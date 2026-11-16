@@ -227,6 +227,7 @@ packages are needed. Press `q` to return to the picker.
 |---|---|
 | `tools/ab_run2.sh` | Runs the quick decoder-change A/B gate: noise-only false-decode testing followed by validation run 2 and PSK Reporter scoring. |
 | `tools/calib_snr.py` | Calibrates the decoder's estimated SNR against known SNRs in synthetic benchmark slots. |
+| `tools/cmp_snr_jt9.py` | Compares our reported SNR with jt9's on the decodes both made, by jt9 SNR, audio frequency and receiver, for one or more decoder tags side by side. |
 | `tools/ci_smoke.py` | Generates a small synthetic workload and checks that the C and Python decoding pipelines produce identical results without needing recorded data. |
 | `tools/compare_decoders.py` | Compares verified decoder outputs across validation runs, including totals, confirmation tiers, overlap, and exclusive signals. |
 | `tools/diag_ctx_miss.py` | Diagnoses reference-only repeated messages that context a-priori decoding should have been able to recover. |
