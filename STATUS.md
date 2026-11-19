@@ -403,15 +403,9 @@ decodes verified identical to the main machine.
   21,421 / 1), run 4 **49,158 / 35,661 / 2** (48,999 / 35,541 / 2); the wider search reshuffles in-band candidates
   there (run 3: 374 decode lines only in the old, 431 only in the new; run 4: 1,759 / 1,918) for a net gain.
   **Runs 2–4 pooled: 107,376 / 78,978 / 4** (old range 107,108 / 78,782 / 4: +268 decodes, +196 slot-confirmed,
-  the same 4 unconfirmed). Logs `data/logs/nn_v3_f4bp/` (`diff.txt`).
-- **Rebased 2026-11-14 onto `origin/main` (search range `nn_v3_f4k`, validation run 5).** The co-channel gate
-  (`nn_v3_ccg`) and the faster NN were each accepted on top of `nn_v3_ccrpc`, the search range on its own; both
-  local changes left decodes identical, so the combined code should equal `nn_v3_f4k`, but no run has checked it.
-  The `nn_v3_f4k` decodes were made on the M1 and are not on the mini. To check: copy them over (or rerun
-  `nn_v3_f4k` from `03ecdb4`), decode runs 1–4 and training with the combined code, diff, then `golden_c.py`.
-  BP early stop (`nn_v3_bps`, 2026-11-15) was accepted on the pre-rebase code too and rebased on top; it changes
-  only method labels there (9 of 160k bp -> osd), so the combined code should equal `nn_v3_f4k` but for such
-  labels. The combined check covers it: same message, f0, DT and SNR as `nn_v3_f4k` everywhere, labels aside.
+  the same 4 unconfirmed). Logs `data/logs/nn_v3_f4bp/` (`diff.txt`). Rerun 2026-11-18 at `53840d8` (`ab_run2.sh` +
+  `validate_full.sh`, 13:51–15:39, no sleep events): all 28 run-1/run-2/training decode files byte-identical to
+  `nn_v3_snr`, golden 4/4 PASS - the results reproduce.
 - **Validation set expanded 2026-11-09.** Run 3 (`$V/run3`, data repo `794a63d`): 12 fresh Kiwis, none at a training,
   run-1 or run-2 site, Mon 05:32–06:02 UTC (run 2 was Wed 22:30): Oceania/Asia/Qatar daytime 20/15/10 m, Europe dawn
   40 m and 60 m (new band), western USA 80 m. jt9 23,524 decodes / 17,888 slot-confirmed / 17 unconf, the size of run 2
