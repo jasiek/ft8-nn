@@ -1,5 +1,20 @@
 # Status and plan (resume here)
 
+## ONNX Runtime from NuGet — done 2026-11-19 (CI was failing)
+
+**github.com/microsoft/onnxruntime is gone** (404 since about 2026-11-18, release downloads included; Microsoft has
+said nothing, onnxruntime.ai still links there), so `tools/get_onnxruntime.sh` failed in both CI workflows (windows
+run 44495816140: `curl: (22) ... 404`). It now downloads Microsoft's NuGet package `Microsoft.ML.OnnxRuntime`
+(one 152 MB zip with every platform's library), checks it against a pinned SHA-256 (1.31.1:
+`6871ccbc…2e7c679a`; another version needs `ORT_SHA256=`), and unpacks this platform's headers and library into the
+same `third_party/onnxruntime-<plat>-<ver>/{include,lib}` layout as before (plus the `libonnxruntime.1.dylib` /
+`libonnxruntime.so.1` names the library records for itself). **Same build:** the NuGet osx-arm64 library has all 31
+Mach-O sections byte-identical to the GitHub release's (23 MB of code); only Microsoft's code signature replaces the
+ad-hoc one; headers identical but for CRLF line ends. Checked in a fresh worktree on the mini: golden C == Python 4/4
+with every field equal against `nn_v3_snr` (00_40m 815, 08_80m 629, run-2 02_80m 754, AWGN 429), pytest 97 passed;
+a wrong hash exits 1 and unpacks nothing. The NuGet package has no macOS x86_64 library (the GitHub releases had),
+so Intel Macs are no longer supported by the script. Existing `third_party/onnxruntime-*-1.31.1` folders are reused.
+
 ## SNR reports in line with jt9 — done 2026-11-16 (tag `nn_v3_snr`)
 
 The user asked why our SNR did not match jt9's. **Before:** on runs 2–4 pooled (80,743 decodes both made) ours − jt9
@@ -315,7 +330,7 @@ Reproduce: `git worktree add --detach <dir> <rev>`, `make -C <dir>/c ORT_PREFIX=
 then `/usr/bin/time -l <dir>/c/build/ft8nn_cli --threads N --time models/v3/ft8nn.onnx <first 40 wavs of
 datasets/ft8-validation-set/recordings/01_40m_*/slots>` (per-slot `time` lines on stderr).
 
-Last updated 2026-11-16 (**SNR reports in line with jt9, tag `nn_v3_snr`**: jt9's local noise floor instead of
+Last updated 2026-11-19 (**ONNX Runtime from NuGet**: the GitHub repo and its releases are gone; same build, pinned SHA-256, section at the top). Before that 2026-11-16 (**SNR reports in line with jt9, tag `nn_v3_snr`**: jt9's local noise floor instead of
 one median per slot, measured as jt9 does on the first 11.8 s; runs 2–4 ours − jt9 −3.9 → +0.1 dB, slope 0.75 →
 0.99, decodes unchanged; section at the top). Before that 2026-11-15 (**Next item 2 closed at −40% CPU per busy slot
 with the same decodes; the remaining, non-exact leads parked**; next is item 3). Before that 2026-11-15 (**Costas fine sync slides its DFTs along DT, −6.9%

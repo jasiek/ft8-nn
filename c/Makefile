@@ -1,4 +1,4 @@
-# libft8nn: needs ONNX Runtime and nothing else. Default: the official release unpacked by
+# libft8nn: needs ONNX Runtime and nothing else. Default: Microsoft's official build unpacked by
 # tools/get_onnxruntime.sh into third_party/onnxruntime (Homebrew's build runs this model 2.3x slower);
 # falls back to `brew --prefix onnxruntime`, then /usr/local. Override with make ORT_PREFIX=/path.
 # make NATIVE=1 adds -march=native (faster on the build machine, but the binary then needs a CPU like it).
@@ -9,7 +9,7 @@ CFLAGS ?= -O3 -fcx-limited-range -Wall -Wextra -Wno-unused-parameter -std=c11
 ifeq ($(NATIVE),1)
 CFLAGS += -march=native
 endif
-# official releases put the headers in include/, Homebrew in include/onnxruntime/
+# the official build (get_onnxruntime.sh) puts the headers in include/, Homebrew in include/onnxruntime/
 CPPFLAGS += -I$(ORT_PREFIX)/include -I$(ORT_PREFIX)/include/onnxruntime -D_DEFAULT_SOURCE
 
 ifeq ($(OS),Windows_NT)

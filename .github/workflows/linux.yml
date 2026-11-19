@@ -27,7 +27,7 @@ jobs:
         with:
           enable-cache: true
 
-      - name: ONNX Runtime (official release)
+      - name: ONNX Runtime (official build, NuGet)
         run: tools/get_onnxruntime.sh
 
       - name: Build libft8nn
