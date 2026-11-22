@@ -1,5 +1,32 @@
 # Status and plan (resume here)
 
+## ONNX supply-chain audit; ONNX Runtime telemetry off — done 2026-11-22
+
+The user heard ONNX was compromised. **What is known (as of 2026-11-20):** PyPI `agent-framework` 1.26.1/1.26.2
+(Microsoft) carried a credential stealer (a `.pth` start-up hook), live ~55 min on 2026-11-17 from 20:35 UTC; Wiz says
+a Microsoft release-signing (ESRP) certificate was stolen. Microsoft made `microsoft/onnxruntime` and ~7 related repos
+private "while we investigate" (still 404 on 2026-11-22). No source names a tampered onnx/onnxruntime release.
+**Audit of the M1 (not yet the M4):** no `agent-framework` or its payload files anywhere; every start-up `.pth` is
+standard. onnx 1.23.2, onnxruntime 1.31.1, onnxscript 0.7.2, onnx-ir 1.1.0: all 1,774 installed files match their
+wheels' RECORD, and the `uv.lock` hashes equal PyPI's (uploaded 2026-09-09..10-26, before the incident).
+`third_party/onnxruntime-osx-arm64-1.31.1` (downloaded 2026-11-09): its code and data bytes equal the
+Developer-ID-signed dylib in NuGet `Microsoft.ML.OnnxRuntime` 1.31.1 (published 2026-10-28); only the signature differs.
+**Found instead: ONNX Runtime 1.31.1 sends telemetry to Microsoft** (1DS, `mobile.events.data.microsoft.com`): a device
+ID, hardware model, OS, program name and errors, queued in `~/Library/Application Support/Microsoft/DeveloperTools/
+.onnxruntime/onnxruntime.db`. `ft8nn_cli`, `ft8nn_sidecar`, `jt9nn`, `jt9nn-small` and Python had each sent at least
+once (macOS URL caches, 2026-11-09..13). **Change:** `ft8nn_open` sets `ORT_DISABLE_TELEMETRY=1` (a user's own value wins)
+before `CreateEnv` and calls `DisableTelemetryEvents`; `tools/export_onnx.py` and `tests/test_onnx.py` set it before
+importing onnxruntime. `tools/get_onnxruntime.sh` (NuGet since 2026-11-19, section below; its package pin
+`6871ccbc…` equals an independent download here) now also checks a reused osx-arm64 1.31.1 folder's library:
+the NuGet build `2685dc29…` or the GitHub release's `17500d6b…`, anything else exits 1.
+**Tests:** sandboxed (outbound network denied, `HOME` in a scratch folder): the CLI, the sidecar and `test_onnx.py`
+write no telemetry; plain onnxruntime without the opt-out writes 4 files (the control). HEAD vs new C, run 4
+`07_20m`: 120 slots 4,578 decode lines and `--stream --early 141120` 40 slots 1,395 lines, byte-identical.
+`wsjtx/test_sidecar.sh` passes. `golden_c.py` not run (its `nn_v3_snr` references are on the M4). Queued events and
+ORT's device ID deleted on the M1.
+**Next:** do not upgrade ONNX packages or ONNX Runtime (e.g. onnxruntime 1.32.0) until Microsoft explains;
+`uv sync` is safe (hashes pinned). On the M4: same audit, and clear its `.onnxruntime` telemetry folder.
+
 ## ONNX Runtime from NuGet — done 2026-11-19 (CI was failing)
 
 **github.com/microsoft/onnxruntime is gone** (404 since about 2026-11-18, release downloads included; Microsoft has
@@ -330,7 +357,7 @@ Reproduce: `git worktree add --detach <dir> <rev>`, `make -C <dir>/c ORT_PREFIX=
 then `/usr/bin/time -l <dir>/c/build/ft8nn_cli --threads N --time models/v3/ft8nn.onnx <first 40 wavs of
 datasets/ft8-validation-set/recordings/01_40m_*/slots>` (per-slot `time` lines on stderr).
 
-Last updated 2026-11-19 (**ONNX Runtime from NuGet**: the GitHub repo and its releases are gone; same build, pinned SHA-256, section at the top). Before that 2026-11-16 (**SNR reports in line with jt9, tag `nn_v3_snr`**: jt9's local noise floor instead of
+Last updated 2026-11-22 (**ONNX audit**: no compromise found on the M1; ONNX Runtime's telemetry to Microsoft turned off in libft8nn and the Python tools; section at the top). Before that 2026-11-19 (**ONNX Runtime from NuGet**: the GitHub repo and its releases are gone; same build, pinned SHA-256, section at the top). Before that 2026-11-16 (**SNR reports in line with jt9, tag `nn_v3_snr`**: jt9's local noise floor instead of
 one median per slot, measured as jt9 does on the first 11.8 s; runs 2–4 ours − jt9 −3.9 → +0.1 dB, slope 0.75 →
 0.99, decodes unchanged; section at the top). Before that 2026-11-15 (**Next item 2 closed at −40% CPU per busy slot
 with the same decodes; the remaining, non-exact leads parked**; next is item 3). Before that 2026-11-15 (**Costas fine sync slides its DFTs along DT, −6.9%

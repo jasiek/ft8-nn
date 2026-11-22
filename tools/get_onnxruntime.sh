@@ -46,6 +46,17 @@ if [ ! -d "$NAME" ]; then
   esac
   mv "$NAME.tmp" "$NAME"
 fi
+# A folder that is already there is reused without the package check above, so for osx-arm64 1.31.1 check the
+# library itself on every run. Two builds are good, with the same code and data bytes (checked 2026-11-22):
+# the NuGet one (Microsoft's Developer ID signature) and the old GitHub release's (ad-hoc signature).
+if [ "$PLAT-$VER" = osx-arm64-1.31.1 ]; then
+  GOT=$(shasum -a 256 "$NAME/lib/libonnxruntime.dylib" | cut -d' ' -f1)
+  case $GOT in
+    2685dc296147c47b0dbd8e0615547b12fc0c445d158d1f374cbd0705d9626fdc) ;;  # NuGet
+    17500d6b1e37e70f43a2c57d94233a1bc29fbcb297be0a5f8c7c13184f3307ba) ;;  # GitHub release
+    *) echo "$NAME/lib/libonnxruntime.dylib: unknown SHA-256 $GOT; not using it" >&2; exit 1 ;;
+  esac
+fi
 # MSYS2's ln -s makes a copy unless native symlinks are allowed, and ln -n won't replace a copied directory
 case $PLAT in win-*) rm -rf onnxruntime ;; esac
 ln -sfn "$NAME" onnxruntime

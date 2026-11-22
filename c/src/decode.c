@@ -206,7 +206,16 @@ ft8nn_ctx *ft8nn_open(const char *onnx_path, int n_threads) {
 #else
     const char *model = onnx_path;
 #endif
+    /* ONNX Runtime 1.31 sends usage telemetry (device ID, hardware, OS, program name, errors) to Microsoft unless
+       ORT_DISABLE_TELEMETRY is set; it reads the variable when the environment is created. A user's own setting
+       wins. DisableTelemetryEvents covers builds that ignore the variable (on Windows, ETW tracing). */
+#ifdef _WIN32
+    if (!getenv("ORT_DISABLE_TELEMETRY")) _putenv_s("ORT_DISABLE_TELEMETRY", "1");
+#else
+    setenv("ORT_DISABLE_TELEMETRY", "1", 0);
+#endif
     if (ort_check(api, api->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "ft8nn", &c->env)) ||
+        ort_check(api, api->DisableTelemetryEvents(c->env)) ||
         ort_check(api, api->CreateSessionOptions(&so)) ||
         /* one ONNX Runtime thread per Run: our own threads call Run concurrently on chunks of hypotheses */
         ort_check(api, api->SetIntraOpNumThreads(so, 1)) || ort_check(api, api->SetInterOpNumThreads(so, 1)) ||

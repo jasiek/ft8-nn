@@ -29,7 +29,9 @@ and past decisions are there too. `README.md` covers setup; `docs/data-collectio
   needs the AP/OSD gates re-checked; judge false decodes on runs 2–4 pooled and `data/bench/noise10k`.
 - The data repos (Git LFS) share 10 GiB/month of download bandwidth: avoid needless full clones.
 
-## Machine notes (Mac mini M4)
+## Machine notes (two Mac minis: an 8-core M1 and an M4, ssh alias `mini`, driven by `tools/mini.sh`)
+
+- `sysctl -n machdep.cpu.brand_string` says which one you are on; timings differ ~1.8x, so always name the machine.
 
 - Long runs: start only when the Mac is fully awake and wrap with `caffeinate -dims`; afterwards check
   `pmset -g log` for Sleep/DarkWake (dark-wake runs crawl and give garbage timings).
