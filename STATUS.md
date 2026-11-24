@@ -1,5 +1,31 @@
 # Status and plan (resume here)
 
+## Bandwidth-scaled `max_cand` and post-`cc`/`rp` targeted pass — done 2026-11-24 (tag `nn_v3_opt3`)
+
+A residual probe on validation run 1 (subtracting all `nn_v3_ccpara` decodes and running one pass with `max_cand=1500`)
+found 59 extra real decodes (43 slot-confirmed, 0 unconfirmed) truncated between candidate ranks 600–900 (675 of 1,077
+run-1 slots hit `max_cand=600` after the 4 kHz search widening, and 0 decoded past rank 900), plus 102 decodes within
+62.5 Hz of subtracted `_cochannel_stage` (`cc`) or `_repeat_stage` (`rp`) decodes (`rp` decodes were never subtracted
+and no pass ran after `cc`/`rp`).
+Changes (`ft8nn/decoder.py`, `bench/run_real.py`, `c/src/decode.c`):
+1. `_scaled_max_cand` / `scaled_max_cand`: scales `max_cand` linearly with searched width (`600` for ≤2.57 kHz, `900`
+   at default 150–4000 Hz, `1101` at 200–4910 Hz, capped at `1200`). Early pass (`ft8nn_decode_early` /
+   `_decode_early_final`) keeps `600` so live WSJT-X 11.8 s latency is unchanged.
+2. `post_pass`: accepted `rp` decodes are now subtracted too, and when `cc` or `rp` adds any decode, one targeted
+   pass runs on candidates within `62.5 Hz` (`reuse_df`) of those `cc`/`rp` frequencies (zero extra work on slots where
+   `cc`/`rp` add nothing, including noise/AWGN).
+Results vs `nn_v3_ccpara` (`tools/ab_run2.sh nn_v3_opt3` + `tools/validate_full.sh nn_v3_opt3`, M1 Pro, 8 workers, no
+sleep events):
+- noise (100 slots / 998): **0 false**;
+- validation run 2 (unseen): 29,750 / 21,860 / 1 → **29,910 / 21,975 / 1** (+160 / +115 slot-confirmed, same `CQ CR4UVW PI49`);
+- validation run 1: 34,789 / 26,652 / 1 → **35,104 / 26,879 / 1** (+315 / +227 slot-confirmed, same `CQ KR9ZUC/R AO63`);
+- training recordings: 18,733 (jt9-only 193) → **18,782 (jt9-only 183)** (+49, −10 jt9-only);
+- AWGN: 50% −22.49 / 90% −21.24 dB (identical, 0 false);
+- golden C == Python (`MallocScribble`, `--threads 4`): 00_40m 828/828, 08_80m 631/631, run-2 02_80m 756/756 (and
+  run-2 00_40m 950/950 `--stream`), AWGN 429/429; `tools/ci_smoke.py` 51/51; `wsjtx/test_sidecar.sh` all checks;
+  `pytest` 103/103. `tools/golden_c.py` default `--tag` updated to `nn_v3_opt3`.
+Next: Option 4 — cross-slot soft LLR Chase combining across consecutive same-parity slots.
+
 ## Co-channel parabolic centring — done 2026-11-24 (tag `nn_v3_ccpara`)
 
 In `_cochannel_stage` (`ft8nn/decoder.py`, C `cc_search` in `c/src/decode.c`), each local maximum of `data_sync`

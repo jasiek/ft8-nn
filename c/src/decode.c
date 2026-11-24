@@ -748,26 +748,48 @@ static void merge_between(void *arg, int nchunks) {
     m->sent = q;
 }
 
+/* decoder._scaled_max_cand: 900 at default 150..4000 Hz, scaling linearly with searched width, [MAX_CAND, 1200] */
+static int scaled_max_cand(const ft8nn_ctx *c, int early) {
+    if (early) return MAX_CAND;
+    double w = c->fmax > c->fmin ? c->fmax - c->fmin : 0.0;
+    int mc = (int)nearbyint((double)MAX_CAND * 1.5 * w / (FMAX_DEFAULT - FMIN_DEFAULT));
+    if (mc < MAX_CAND) mc = MAX_CAND;
+    if (mc > 1200) mc = 1200;
+    return mc;
+}
+
 /* One pass. Appends new decodes (payload not in all[0..nall)) to all; returns count added, -1 on error. Decodes that
- * are final before the pass ends go to cb already (report: pass, then marked final). */
-static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall, int cap, int pass, const dec *cx, int ncx,
-                       signed char *tried, double dt_shift, ft8nn_pass_cb cb, void *user, ft8nn_decode_t *batch) {
+ * are final before the pass ends go to cb already (report: pass, then marked final). If post_f0 != NULL, only
+ * candidates within REUSE_DF Hz of post_f0[0..n_post) are tried (post-cc/rp targeted pass). */
+static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall, int cap, int pass, int max_cand,
+                       const dec *cx, int ncx, signed char *tried, const double *post_f0, int n_post, double dt_shift,
+                       ft8nn_pass_cb cb, void *user, ft8nn_decode_t *batch) {
     if (prof < 0) prof = getenv("FT8NN_PROFILE") != NULL;
     double t0 = tnow(), c0 = tcpu(), t1, t2, t3;
     long n_bp = 0, n_osd = 0, s_bp = 0, s_osd = 0;
     double st[N_ST] = {0};
-    candidate *cands = malloc(sizeof(candidate) * (MAX_CAND + (int)(c->fmax / 3.125) + 1));
-    int nc = find_candidates(x, n, c->fmin, c->fmax, MAX_CAND, 1.3, BASE_MEDIAN, EARLY_DT, EARLY_MIN, dt_shift, cands, c->pool);
+    candidate *cands = malloc(sizeof(candidate) * (max_cand + (int)(c->fmax / 3.125) + 1));
+    int nc = find_candidates(x, n, c->fmin, c->fmax, max_cand, 1.3, BASE_MEDIAN, EARLY_DT, EARLY_MIN, dt_shift, cands, c->pool);
     t1 = tnow();
     /* candidates to try, in order; the tried table is updated as the serial loop always did */
     int *sel = malloc(sizeof(int) * (size_t)(nc + 1)), ns = 0, nskip = 0;
+    double df_win = REUSE_DF > 0 ? REUSE_DF : 62.5;
     for (int ci = 0; ci < nc; ci++) {
-        if (REUSE_DF > 0 && pass > 0 && reuse_skip(&cands[ci], tried, all, nall)) {
+        if (post_f0) {
+            int near = 0;
+            for (int q = 0; q < n_post && !near; q++) near = fabs(post_f0[q] - cands[ci].f0) < df_win;
+            if (!near) {
+                nskip++;
+                continue;
+            }
+        } else if (tried && REUSE_DF > 0 && pass > 0 && reuse_skip(&cands[ci], tried, all, nall)) {
             nskip++;
             continue;
         }
-        int ti = tried_idx(&cands[ci]);
-        if (ti >= 0) tried[ti] = (signed char)pass;
+        if (tried) {
+            int ti = tried_idx(&cands[ci]);
+            if (ti >= 0) tried[ti] = (signed char)pass;
+        }
         sel[ns++] = ci;
     }
     baseband bb;
@@ -1373,9 +1395,10 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
     }
     c->nv_bb = early ? (int)((int64_t)n * 200 / 12000) : 0; /* nn_metric.make_llr_fn n_valid, mask_median */
     c->cons = early;
+    int mc = scaled_max_cand(c, early);
     for (int p = 0; p < (early ? EARLY_PASSES : PASSES); p++) {
         double shift = DT_RECENTER > 0 ? dt_recenter_shift(all, nall, cx, ncx) : 0.0;
-        int k = decode_pass(c, x, n, all, nall, DEC_CAP, p, cx, ncx, tried, shift, cb, user, batch);
+        int k = decode_pass(c, x, n, all, nall, DEC_CAP, p, mc, cx, ncx, tried, NULL, 0, shift, cb, user, batch);
         if (k < 0) {
             free(x);
             free(all);
@@ -1399,6 +1422,8 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
         nall += k;
         if (!k) break;
     }
+    double post_f0[DEC_CAP];
+    int n_post = 0;
     if (nall > 0 && !early) { /* x is now the residual */
         int r = cochannel_stage(c, x, n, all, nall);
         if (r < 0) {
@@ -1415,6 +1440,7 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
             int tones[NN];
             encode77(all[q].bits77, cw, tones);
             subtract_signal(x, n, tones, all[q].f0, all[q].dt, c->pool);
+            if (n_post < DEC_CAP) post_f0[n_post++] = all[q].f0;
         }
         nall = r;
     }
@@ -1429,7 +1455,29 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
             c->nv_bb = c->cons = 0;
             return -1;
         }
+        for (int q = nall; q < r; q++) {
+            uint8_t cw[174];
+            int tones[NN];
+            encode77(all[q].bits77, cw, tones);
+            subtract_signal(x, n, tones, all[q].f0, all[q].dt, c->pool);
+            if (n_post < DEC_CAP) post_f0[n_post++] = all[q].f0;
+        }
         nall = r;
+    }
+    if (!early && n_post > 0) { /* targeted pass within REUSE_DF Hz of any subtracted cc or rp decode */
+        double shift = DT_RECENTER > 0 ? dt_recenter_shift(all, nall, cx, ncx) : 0.0;
+        int k = decode_pass(c, x, n, all, nall, DEC_CAP, PASSES + 1, mc, cx, ncx, NULL, post_f0, n_post, shift, NULL,
+                            NULL, NULL);
+        if (k < 0) {
+            free(x);
+            free(all);
+            free(cx);
+            free(tried);
+            free(batch);
+            c->nv_bb = c->cons = 0;
+            return -1;
+        }
+        nall += k;
     }
     nall = drop_ctx_dupes(all, 0, nall);
     report(c, all, 0, nall, 1, -1, cb, user, batch); /* the context decodes that survived, the co-channel and repeat stages' */

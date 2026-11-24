@@ -111,7 +111,16 @@ def classical_metrics(hyps):
     return out
 
 
-def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=4, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, context=(), ctx_gate=48.0, cand_kw=None, reuse_df=62.5, dt_recenter=0.8, repeat=REPEAT, cochannel=COCHANNEL, prior=()):
+def _scaled_max_cand(max_cand, cand_kw):
+    """Scale candidate cap with searched bandwidth (900 at default 150..4000 Hz, 1101 at 200..4910 Hz,
+    floored at max_cand and capped at 1200) so wideband search does not starve in-band candidates."""
+    fmin = (cand_kw or {}).get("fmin", fe.FMIN_DEFAULT)
+    fmax = (cand_kw or {}).get("fmax", fe.FMAX_DEFAULT)
+    w = max(0.0, float(fmax) - float(fmin))
+    return max(max_cand, min(1200, int(round(max_cand * 1.5 * w / (fe.FMAX_DEFAULT - fe.FMIN_DEFAULT)))))
+
+
+def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=4, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, context=(), ctx_gate=48.0, cand_kw=None, reuse_df=62.5, dt_recenter=0.8, repeat=REPEAT, cochannel=COCHANNEL, prior=(), scale_cand=True, post_pass=True):
     """Decode one 15 s slot (real audio @12 kHz, any scale), with multi-pass subtraction.
 
     llr_fn(hyps) -> per-hypothesis list of LLR vectors to try in order (first success wins).
@@ -154,6 +163,7 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
         d.info["prior"] = True
         found[d.key] = d
         subtract(x, ft8.encode77(d.bits77)[1], d.f0, d.dt)
+    mc = _scaled_max_cand(max_cand, cand_kw) if scale_cand else max_cand
     tried, subs = {}, []  # candidate key -> pass last tried; (f0, pass) of every subtracted decode
     for p in range(passes):
         skip = None
@@ -165,7 +175,7 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
             sh = _dt_shift([d.dt for d in found.values()] + [c[1] for c in context], dt_recenter)
             if sh:
                 ckw["dt_shift"] = sh
-        new = _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, ckw, skip, tried, p)
+        new = _decode_pass(x, llr_fn, mc, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, ckw, skip, tried, p)
         for d in new:
             d.info["pass"] = p
             found[d.key] = d
@@ -173,13 +183,31 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
             subtract(x, ft8.encode77(d.bits77)[1], d.f0, d.dt)
         if not new:
             break
+    post_f0s = []
     if cochannel and found:
         for d in _cochannel_stage(x, llr_fn, found, *cochannel, osd_order, osd_max_hard, osd_gate, osd_snaps):
             d.info["pass"] = passes
             found[d.key] = d
             subtract(x, ft8.encode77(d.bits77)[1], d.f0, d.dt)
+            post_f0s.append(d.f0)
     if repeat and context:
         for d in _repeat_stage(x, llr_fn, found, context, n_hyp, *repeat):
+            d.info["pass"] = passes
+            found[d.key] = d
+            if post_pass:
+                subtract(x, ft8.encode77(d.bits77)[1], d.f0, d.dt)
+                post_f0s.append(d.f0)
+    if post_pass and post_f0s:
+        df_win = reuse_df or 62.5
+        skip = lambda c: not any(abs(fs - c.f0) < df_win for fs in post_f0s)
+        ckw = dict(cand_kw or {})
+        if dt_recenter and "dt_shift" not in ckw:
+            sh = _dt_shift([d.dt for d in found.values()] + [c[1] for c in context], dt_recenter)
+            if sh:
+                ckw["dt_shift"] = sh
+        new = _decode_pass(x, llr_fn, mc, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, ckw, skip, None, passes + 1)
+        for d in new:
+            d.info["pass"] = passes + 1
             found[d.key] = d
     _drop_ctx_dupes(found)
     return list(found.values())
