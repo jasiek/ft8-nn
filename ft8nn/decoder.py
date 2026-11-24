@@ -72,6 +72,14 @@ EARLY_PASSES = 2
 # itself (expected errors <= 39.3) and 116 from a neighbour of a peak at <= 61.8, while 65% of the 53,221 peaks were
 # at >= 66; so 66 skips 58% of the stage's NN hypotheses and loses none of them.
 COCHANNEL = (2, 1, 8.0, 24, 50, 3.0, 66.0)
+# Cross-slot soft LLR Chase combining (_chase_stage): combine failed NN LLRs of this slot with failed NN LLRs from
+# 30 and/or 60 s earlier (same parity) at the same (f0, dt), with zero extra NN calls.
+# (df_max Hz, dt_max s, combine LLR clip, min rho on slot t, min rho on previous slot, min successor margin on slot t),
+# tuned on validation run 1 (433 strict new decodes = 335 slot-confirmed, 92 active, 0 unconfirmed; 0 false on 8x
+# cross-band shuffle null of 106k pairs; 0 jt9 disagreements).
+CHASE = (2.5, 0.12, 4.0, 0.30, 0.20, 0.05)
+CHASE_EE_MAX = 68.0  # keep failed non-early NN hypotheses below this expected-error ceiling (noise ~70)
+CHASE_CAP = 256      # max failed hypotheses kept per slot (lowest exp_err first)
 
 
 def context_patterns(context, f0, dt):
@@ -120,7 +128,7 @@ def _scaled_max_cand(max_cand, cand_kw):
     return max(max_cand, min(1200, int(round(max_cand * 1.5 * w / (fe.FMAX_DEFAULT - fe.FMIN_DEFAULT)))))
 
 
-def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=4, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, context=(), ctx_gate=48.0, cand_kw=None, reuse_df=62.5, dt_recenter=0.8, repeat=REPEAT, cochannel=COCHANNEL, prior=(), scale_cand=True, post_pass=True):
+def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=4, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, context=(), ctx_gate=48.0, cand_kw=None, reuse_df=62.5, dt_recenter=0.8, repeat=REPEAT, cochannel=COCHANNEL, prior=(), scale_cand=True, post_pass=True, chase=CHASE, chase_hist=(), failed_out=None):
     """Decode one 15 s slot (real audio @12 kHz, any scale), with multi-pass subtraction.
 
     llr_fn(hyps) -> per-hypothesis list of LLR vectors to try in order (first success wins).
@@ -165,6 +173,7 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
         subtract(x, ft8.encode77(d.bits77)[1], d.f0, d.dt)
     mc = _scaled_max_cand(max_cand, cand_kw) if scale_cand else max_cand
     tried, subs = {}, []  # candidate key -> pass last tried; (f0, pass) of every subtracted decode
+    failed_map = {} if (chase or failed_out is not None) else None
     for p in range(passes):
         skip = None
         if reuse_df and p:
@@ -175,7 +184,7 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
             sh = _dt_shift([d.dt for d in found.values()] + [c[1] for c in context], dt_recenter)
             if sh:
                 ckw["dt_shift"] = sh
-        new = _decode_pass(x, llr_fn, mc, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, ckw, skip, tried, p)
+        new = _decode_pass(x, llr_fn, mc, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, ckw, skip, tried, p, failed_map)
         for d in new:
             d.info["pass"] = p
             found[d.key] = d
@@ -186,6 +195,13 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
     post_f0s = []
     if cochannel and found:
         for d in _cochannel_stage(x, llr_fn, found, *cochannel, osd_order, osd_max_hard, osd_gate, osd_snaps):
+            d.info["pass"] = passes
+            found[d.key] = d
+            subtract(x, ft8.encode77(d.bits77)[1], d.f0, d.dt)
+            post_f0s.append(d.f0)
+    if chase and chase_hist and failed_map:
+        cur_failed = _finalize_failed(failed_map, found)
+        for d in _chase_stage(x, cur_failed, chase_hist, found, *chase, osd_order, osd_max_hard, osd_gate):
             d.info["pass"] = passes
             found[d.key] = d
             subtract(x, ft8.encode77(d.bits77)[1], d.f0, d.dt)
@@ -205,11 +221,13 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
             sh = _dt_shift([d.dt for d in found.values()] + [c[1] for c in context], dt_recenter)
             if sh:
                 ckw["dt_shift"] = sh
-        new = _decode_pass(x, llr_fn, mc, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, ckw, skip, None, passes + 1)
+        new = _decode_pass(x, llr_fn, mc, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, ckw, skip, None, passes + 1, failed_map)
         for d in new:
             d.info["pass"] = passes + 1
             found[d.key] = d
     _drop_ctx_dupes(found)
+    if failed_out is not None and failed_map:
+        failed_out.extend(_finalize_failed(failed_map, found))
     return list(found.values())
 
 
@@ -430,6 +448,121 @@ def _cochannel_stage(x, llr_fn, found, near, far, span, tnear, tfar, min_score, 
     return list(out.values())
 
 
+def _finalize_failed(failed_map, found):
+    """Filter failed NN hypotheses near any decoded signal, sort by (exp_err, f0, dt), cap at CHASE_CAP."""
+    decs = list(found.values())
+    kept = [v for v in failed_map.values() if not any(abs(v[0] - d.f0) < 3.0 and abs(v[1] - d.dt) < 0.05 for d in decs)]
+    kept.sort(key=lambda v: (v[2], v[0], v[1]))
+    return kept[:CHASE_CAP]
+
+
+def _chase_margin(lt, b77, clip=REPEAT[2]):
+    """(rho(lt, b77), margin over best sendable successor on lt). For CQs and non-standard messages with no sendable
+    successor, the runner-up ceiling is REPEAT_SOLO (as _repeat_stage)."""
+    l = np.clip(lt, -clip, clip)
+    denom = float(np.abs(l).sum()) + 1e-9
+    s0 = _codeword(b77)
+    r0 = float((l @ s0) / denom)
+    if b77[74:77].tolist() not in ([0, 0, 1], [0, 1, 0]):
+        return r0, r0 - REPEAT_SOLO
+    g = message._int(b77[59:74])
+    grids = [g] if g < message.MAXGRID4 else []
+    k0 = b77.tobytes()
+    alts = [c for c in _successors(b77, grids, sendable_only=REPEAT_SENDABLE) if c.tobytes() != k0]
+    if not alts:
+        return r0, r0 - REPEAT_SOLO
+    S = np.stack([_codeword(c) for c in alts])
+    r2 = float((S @ l).max() / denom)
+    return r0, r0 - r2
+
+
+def _chase_stage(x, cur_failed, chase_hist, found, df_max, dt_max, clip, rho_t_min, rho_p_min, margin_t, osd_order, osd_max_hard, osd_gate):
+    """Cross-slot soft LLR Chase combining: combine failed NN LLRs of this slot with failed NN LLRs from 30 and/or
+    60 s earlier within (df_max, dt_max), decode with BP then gated OSD, and gate on uncombined slot agreement
+    (rho_t, rho_p) and successor margin (margin_t) so stale messages from t-30/t-60 cannot leak."""
+    prevs = [p for p in chase_hist if p]
+    if not cur_failed or not prevs:
+        return []
+    prev_arr = [(np.array([e[0] for e in p]), np.array([e[1] for e in p]), p) for p in prevs]
+    comb_L, comb_meta = [], []
+    for hi, (f0_i, dt_i, _, lt_f32) in enumerate(cur_failed):
+        lt_i = lt_f32.astype(np.float64)
+        lt_c = np.clip(lt_i, -clip, clip)
+        matches = []
+        for f0_p, dt_p, p in prev_arr:
+            df = np.abs(f0_p - f0_i)
+            dd = np.abs(dt_p - dt_i)
+            ok = (df <= df_max) & (dd <= dt_max)
+            if not ok.any():
+                continue
+            cand_idx = np.nonzero(ok)[0]
+            dist = (df[cand_idx] / df_max) ** 2 + (dd[cand_idx] / dt_max) ** 2
+            best_j = int(cand_idx[int(np.argmin(dist))])
+            lp_raw = p[best_j][3].astype(np.float64)
+            matches.append((lp_raw, np.clip(lp_raw, -clip, clip)))
+        if not matches:
+            continue
+        for lp_raw, lp_c in matches:
+            comb_L.append(lt_c + lp_c)
+            comb_meta.append((hi, f0_i, dt_i, lt_i, (lp_raw,)))
+        if len(matches) == 2:
+            comb_L.append(lt_c + matches[0][1] + matches[1][1])
+            comb_meta.append((hi, f0_i, dt_i, lt_i, (matches[0][0], matches[1][0])))
+    if not comb_L:
+        return []
+    Lc = np.stack(comb_L)
+    bits, ok, nh = ldpc.bp_decode(Lc)
+    ee_c = (1.0 / (1.0 + np.exp(np.abs(Lc)))).sum(1)
+    have_s = {_sender_key(d) for d in found.values()}
+    have_s.discard(None)
+    cells = list(found.values())
+    out, done_hi, bb = {}, set(), None
+    rho_clip = REPEAT[2]
+    for r in range(len(Lc)):
+        hi, f0_i, dt_i, lt_i, lps = comb_meta[r]
+        if hi in done_hi:
+            continue
+        a91, info = None, None
+        if ok[r] and ft8.crc_ok(bits[r, :91]):
+            a91, info = _plausible(bits[r, :91], {"method": "bp_ch", "nhard": int(nh[r])})
+        if a91 is None and osd_order >= 0 and ee_c[r] < osd_gate:
+            cw, crc, dist, nho = ldpc.osd_decode(Lc[r], osd_order)
+            if crc and nho <= osd_max_hard:
+                a91, info = _plausible(cw[:91], {"method": "osd_ch", "nhard": nho, "dist": dist})
+        if a91 is None or not a91[:77].any():
+            continue
+        b77 = a91[:77].copy()
+        d = Decode(b77, f0_i, dt_i, 0.0, info["method"], {**info, "metric": 0, "exp_err": float(ee_c[r])})
+        if d.key in found or d.key in out:
+            continue
+        sk = _sender_key(d)
+        if sk is not None and sk in have_s:
+            continue
+        if any(_is_ghost(d, e) for e in cells + list(out.values())):
+            continue
+        rt, mt = _chase_margin(lt_i, b77, rho_clip)
+        if rt < rho_t_min or mt < margin_t:
+            continue
+        s0 = _codeword(b77)
+        rp = max(
+            float((np.clip(lp, -rho_clip, rho_clip) @ s0) / (np.abs(np.clip(lp, -rho_clip, rho_clip)).sum() + 1e-9))
+            for lp in lps
+        )
+        if rp < rho_p_min:
+            continue
+        if bb is None:
+            bb = fe.Baseband(x)
+        y = bb.downsample(f0_i)
+        start = int(round((ft8.NOMINAL_START + dt_i) * fe.FS_BB))
+        d.snr = estimate_snr(fe.SyncHyp(f0_i, dt_i, y, start, 0.0), b77)
+        d.info.update({"rho_t": rt, "rho_p": rp, "margin_t": mt, "n_slots": 1 + len(lps)})
+        out[d.key] = d
+        if sk is not None:
+            have_s.add(sk)
+        done_hi.add(hi)
+    return list(out.values())
+
+
 @dataclass
 class _Loc:
     """A fine_sync2 starting point that is not a search candidate."""
@@ -457,18 +590,23 @@ def _dt_shift(dts, gate):
     return 0.0 if abs(med) < gate else round(med * fe.FPS) / fe.FPS
 
 
-def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, cand_kw, skip=None, tried=None, p=0):
+def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, cand_kw, skip=None, tried=None, p=0, failed_map=None):
     cands = fe.find_candidates(x, max_cand=max_cand, **cand_kw)
     bb = fe.Baseband(x)
-    hyps, owner = [], []
+    hyps, owner, h_idx = [], [], []
     for ci, c in enumerate(cands):
         if skip is not None and skip(c):
             continue
+        ck = _cand_key(c)
         if tried is not None:
-            tried[_cand_key(c)] = p
-        for h in fe.fine_sync2(bb, c, n_hyp=n_hyp):
+            tried[ck] = p
+        if failed_map is not None and not c.early:
+            for q in range(n_hyp):
+                failed_map.pop((ck, q), None)
+        for q, h in enumerate(fe.fine_sync2(bb, c, n_hyp=n_hyp)):
             hyps.append(h)
             owner.append(ci)
+            h_idx.append(q)
     if not hyps:
         return []
     metrics = llr_fn(hyps)
@@ -489,6 +627,7 @@ def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd
             continue
         # early-DT candidates have weaker sync evidence: no OSD on BP sums or under a-priori bits, no erasure stages
         early = cands[ci].early
+        decoded = False
         for k in range(len(metrics[hi])):
             r = row[(hi, k)]
             # every stage's result must be a message that could really be sent (_plausible); if not, the next stage
@@ -519,7 +658,13 @@ def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd
             if d.key not in known:
                 found.setdefault(d.key, d)
             done_cand.add(ci)
+            decoded = True
             break
+        if not decoded and failed_map is not None and not early:
+            r0 = row[(hi, 0)]
+            ee0 = float(exp_err[r0])
+            if ee0 < CHASE_EE_MAX:
+                failed_map[(_cand_key(cands[ci]), h_idx[hi])] = (float(h.f0), float(h.dt), ee0, L[r0].astype(np.float32))
     # Wide-window OSD erasure and OSD on BP sums can turn a ghost of a strong signal into a CRC-valid random message:
     # at a wrong lag and/or tone bin the NN reads the real signal's tones confidently in the wrong places. Drop such a
     # decode if its data tones mostly equal a neighbour's tones shifted by whole symbols and whole tones (_is_ghost).

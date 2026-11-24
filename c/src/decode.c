@@ -113,6 +113,15 @@ static int prof = -1;
 #define CC_NT 53 /* -(CC_TFAR + CC_GT) .. CC_TFAR + CC_GT */
 #define CC_MAXH ((CC_NEAR + CC_FAR) * 9)
 #define CC_NB_GATE 66.0 /* the peak's own hypothesis first; its 8 neighbours only below this NN expected errors */
+/* cross-slot soft LLR Chase combining (decoder._chase_stage; decoder.CHASE, CHASE_EE_MAX, CHASE_CAP) */
+#define CHASE_DF 2.5
+#define CHASE_DT 0.12
+#define CHASE_CLIP 4.0
+#define CHASE_RHO_T 0.30
+#define CHASE_RHO_P 0.20
+#define CHASE_MARGIN_T 0.05
+#define CHASE_EE_MAX 68.0
+#define CHASE_CAP 256
 #define DEC_CAP 512 /* decodes per slot */
 #define ERASE_GATE 15.0 /* burst-erasure retry for confident NN metrics that still fail */
 /* osd_er ghost test (decoder._is_ghost): neighbour within GHOST_MAX_DF Hz whose tones, shifted by whole symbols and
@@ -146,6 +155,12 @@ static int prof = -1;
 #define SNR_OFFSET 0.23
 
 typedef struct {
+    double f0, dt, exp_err;
+    int ti, q; /* candidate tried_idx and hypothesis index within candidate (overwrite on re-evaluation) */
+    float llr[174];
+} chase_hyp;
+
+typedef struct {
     uint8_t bits77[77];
     double f0, dt, snr;
     int method, metric, pass;
@@ -165,7 +180,9 @@ struct ft8nn_ctx {
         int64_t t; /* slot start, s; INT64_MIN = empty */
         int n;
         dec *d;
-    } hist[CTX_HIST]; /* this context's own decodes of recent slots (ft8nn_decode_at) */
+        int nfail;
+        chase_hyp *fail; /* up to CHASE_CAP finalized failed NN hypotheses of this slot */
+    } hist[CTX_HIST]; /* this context's own decodes and failed hypotheses of recent slots (ft8nn_decode_at) */
     int nv_bb;        /* NN features: baseband samples that carry audio during the current decode, 0 = all */
     int cons;         /* early pass: no CQ a-priori, no OSD on BP sums, no wide-window erasure OSD */
     double fmin, fmax; /* candidate search range, Hz (ft8nn_set_range) */
@@ -220,6 +237,8 @@ ft8nn_ctx *ft8nn_open(const char *onnx_path, int n_threads) {
     for (int i = 0; i < CTX_HIST; i++) {
         c->hist[i].t = INT64_MIN;
         c->hist[i].d = malloc(sizeof(dec) * DEC_CAP);
+        c->hist[i].nfail = 0;
+        c->hist[i].fail = malloc(sizeof(chase_hyp) * CHASE_CAP);
     }
     return c;
 }
@@ -232,7 +251,10 @@ void ft8nn_close(ft8nn_ctx *c) {
     par_free(c->pool);
     if (c->env) api->ReleaseEnv(c->env);
     ht_free(c->ht);
-    for (int i = 0; i < CTX_HIST; i++) free(c->hist[i].d);
+    for (int i = 0; i < CTX_HIST; i++) {
+        free(c->hist[i].d);
+        free(c->hist[i].fail);
+    }
     free(c);
 }
 
@@ -516,7 +538,8 @@ static int any_bits(const uint8_t *b, int n) {
 static int plausible(int method, const uint8_t *a91) {
     if (method < 0) return method;
     int deep = method == FT8NN_OSD || method == FT8NN_OSD_AP || method == FT8NN_OSD_ERASE || method == FT8NN_OSD_BP ||
-               method == FT8NN_OSD_CTX || method == FT8NN_OSD_CC || method == FT8NN_OSD_BP_CC;
+               method == FT8NN_OSD_CTX || method == FT8NN_OSD_CC || method == FT8NN_OSD_BP_CC ||
+               method == FT8NN_OSD_CHASE;
     return plausible77(a91, deep) ? method : -1;
 }
 
@@ -545,16 +568,24 @@ typedef struct {
     int8_t k, method;
     uint8_t a91[91];
     double snr;
+    double ee0; /* NN expected bit errors (metric 0), for Chase failed-hypothesis collection */
+    float nn_llr[174];
     int n_bp, n_osd;
 } hyp_res;
 
 static void decode_hyp(const sync_hyp *hy, const double *L, int early, int cons, const dec *cx, int ncx, hyp_res *r) {
     r->status = 0;
     r->n_bp = r->n_osd = 0;
+    r->ee0 = 174.0;
     for (int k = 0; k < NMET; k++) {
         const double *l = L + (size_t)k * 174;
         double exp_err = 0;
         for (int i = 0; i < 174; i++) exp_err += 1.0 / (1.0 + exp(fabs(l[i])));
+        if (k == 0) {
+            r->ee0 = exp_err;
+            if (!early && exp_err < CHASE_EE_MAX)
+                for (int i = 0; i < 174; i++) r->nn_llr[i] = (float)l[i];
+        }
         uint8_t bits[174], a91[91];
         int nhard, method = -1;
         double dist;
@@ -672,12 +703,50 @@ static void hyp_worker(void *arg, int w) {
 static void report(ft8nn_ctx *c, dec *all, int from, int n, int ctx_too, int pass, ft8nn_pass_cb cb, void *user,
                    ft8nn_decode_t *batch);
 
+static void fmap_clear_ti(chase_hyp *fmap, int *nfmap, int ti) {
+    int w = 0, n = *nfmap;
+    for (int i = 0; i < n; i++)
+        if (fmap[i].ti != ti) fmap[w++] = fmap[i];
+    *nfmap = w;
+}
+
+static void fmap_put(chase_hyp **fmap_p, int *nfmap_p, int *cfmap_p, int ti, int q, double f0, double dt, double ee0,
+                     const float *llr) {
+    chase_hyp *fm = *fmap_p;
+    int n = *nfmap_p;
+    for (int i = 0; i < n; i++) {
+        if (fm[i].ti == ti && fm[i].q == q) {
+            fm[i].f0 = f0;
+            fm[i].dt = dt;
+            fm[i].exp_err = ee0;
+            memcpy(fm[i].llr, llr, sizeof fm[i].llr);
+            return;
+        }
+    }
+    if (n >= *cfmap_p) {
+        int nc = *cfmap_p ? *cfmap_p * 2 : 512;
+        fm = realloc(fm, sizeof(chase_hyp) * (size_t)nc);
+        *fmap_p = fm;
+        *cfmap_p = nc;
+    }
+    chase_hyp *e = &fm[(*nfmap_p)++];
+    e->f0 = f0;
+    e->dt = dt;
+    e->exp_err = ee0;
+    e->ti = ti;
+    e->q = q;
+    memcpy(e->llr, llr, sizeof e->llr);
+}
+
 /* The in-order merge of a pass's hypothesis results, run by the calling thread as chunks complete. */
 typedef struct {
     ft8nn_ctx *c;
     hyp_job *j;
     sync_hyp **hp;
     const int *owner;
+    const int *h_ti;
+    const uint8_t *h_q;
+    const uint8_t *early;
     uint8_t *done_cand;
     dec *all;
     int nall, cap, pass, added, h; /* next hypothesis to merge */
@@ -686,6 +755,8 @@ typedef struct {
     ft8nn_pass_cb cb;
     void *user;
     ft8nn_decode_t *batch;
+    chase_hyp **fmap_p;
+    int *nfmap_p, *cfmap_p;
 } merger;
 
 /* merge hypotheses h .. upto: skip a candidate once decoded and a hypothesis next to a decode of this pass, drop
@@ -708,7 +779,12 @@ static void merge_to(merger *m, int upto) {
         }
         m->n_bp += r->n_bp;
         m->n_osd += r->n_osd;
-        if (r->status != 1) continue;
+        if (r->status != 1) {
+            if (m->fmap_p && !m->early[h] && r->ee0 < CHASE_EE_MAX)
+                fmap_put(m->fmap_p, m->nfmap_p, m->cfmap_p, m->h_ti[h], m->h_q[h], m->hp[h]->f0, m->hp[h]->dt, r->ee0,
+                         r->nn_llr);
+            continue;
+        }
         int known = 0;
         for (int q = 0; q < nall + m->added; q++)
             if (same_payload(all[q].bits77, r->a91)) known = 1;
@@ -760,10 +836,11 @@ static int scaled_max_cand(const ft8nn_ctx *c, int early) {
 
 /* One pass. Appends new decodes (payload not in all[0..nall)) to all; returns count added, -1 on error. Decodes that
  * are final before the pass ends go to cb already (report: pass, then marked final). If post_f0 != NULL, only
- * candidates within REUSE_DF Hz of post_f0[0..n_post) are tried (post-cc/rp targeted pass). */
+ * candidates within REUSE_DF Hz of post_f0[0..n_post) are tried (post-cc/ch/rp targeted pass). */
 static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall, int cap, int pass, int max_cand,
                        const dec *cx, int ncx, signed char *tried, const double *post_f0, int n_post, double dt_shift,
-                       ft8nn_pass_cb cb, void *user, ft8nn_decode_t *batch) {
+                       ft8nn_pass_cb cb, void *user, ft8nn_decode_t *batch, chase_hyp **fmap_p, int *nfmap_p,
+                       int *cfmap_p) {
     if (prof < 0) prof = getenv("FT8NN_PROFILE") != NULL;
     double t0 = tnow(), c0 = tcpu(), t1, t2, t3;
     long n_bp = 0, n_osd = 0, s_bp = 0, s_osd = 0;
@@ -786,10 +863,9 @@ static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall,
             nskip++;
             continue;
         }
-        if (tried) {
-            int ti = tried_idx(&cands[ci]);
-            if (ti >= 0) tried[ti] = (signed char)pass;
-        }
+        int ti = tried_idx(&cands[ci]);
+        if (tried && ti >= 0) tried[ti] = (signed char)pass;
+        if (fmap_p && *fmap_p && !cands[ci].early && ti >= 0) fmap_clear_ti(*fmap_p, nfmap_p, ti);
         sel[ns++] = ci;
     }
     baseband bb;
@@ -808,13 +884,19 @@ static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall,
     /* hypotheses in candidate order, as the serial loop produced them */
     sync_hyp **hp = malloc(sizeof(sync_hyp *) * (size_t)(ns * N_HYP + 1));
     int *owner = malloc(sizeof(int) * (size_t)(ns * N_HYP + 1)), nh = 0;
+    int *h_ti = malloc(sizeof(int) * (size_t)(ns * N_HYP + 1));
+    uint8_t *h_q = malloc((size_t)(ns * N_HYP + 1));
     uint8_t *early = malloc((size_t)(ns * N_HYP + 1));
-    for (int i = 0; i < ns; i++)
+    for (int i = 0; i < ns; i++) {
+        int ti = tried_idx(&cands[sel[i]]);
         for (int q = 0; q < nk[i]; q++) {
             hp[nh] = hyps + (size_t)i * N_HYP + q;
             owner[nh] = i;
+            h_ti[nh] = ti;
+            h_q[nh] = (uint8_t)q;
             early[nh++] = (uint8_t)(cands[sel[i]].early != 0);
         }
+    }
     t2 = tnow();
     t3 = t2;
     int added = 0;
@@ -825,8 +907,9 @@ static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall,
     for (int i = 0; i < nchunk; i++) atomic_init(&cdone[i], 0);
     uint8_t *done_cand = calloc((size_t)ns + 1, 1);
     hyp_job *hj = calloc(1, sizeof *hj);
-    merger m = {.c = c, .j = hj, .hp = hp, .owner = owner, .done_cand = done_cand, .all = all, .nall = nall, .cap = cap,
-                .pass = pass, .cb = cb, .user = user, .batch = batch};
+    merger m = {.c = c, .j = hj, .hp = hp, .owner = owner, .h_ti = h_ti, .h_q = h_q, .early = early,
+                .done_cand = done_cand, .all = all, .nall = nall, .cap = cap, .pass = pass, .cb = cb, .user = user,
+                .batch = batch, .fmap_p = fmap_p, .nfmap_p = nfmap_p, .cfmap_p = cfmap_p};
     *hj = (hyp_job){.c = c, .hp = hp, .early = early, .nh = nh, .cx = cx, .ncx = ncx, .res = res, .cdone = cdone,
                     .between = merge_between, .between_arg = &m};
     atomic_init(&hj->next, 0);
@@ -881,6 +964,8 @@ done:
     free(nk);
     free(hp);
     free(owner);
+    free(h_ti);
+    free(h_q);
     free(early);
     return added;
 }
@@ -1156,6 +1241,191 @@ static int add_alt(uint8_t (*alt)[77], int na, int cap, const uint8_t *b) {
     return na;
 }
 
+static int cmp_chase(const void *a, const void *b) {
+    const chase_hyp *x = a, *y = b;
+    if (x->exp_err != y->exp_err) return x->exp_err < y->exp_err ? -1 : 1;
+    if (x->f0 != y->f0) return x->f0 < y->f0 ? -1 : 1;
+    if (x->dt != y->dt) return x->dt < y->dt ? -1 : 1;
+    if (x->ti != y->ti) return x->ti < y->ti ? -1 : 1;
+    return x->q - y->q;
+}
+
+/* decoder._finalize_failed: filter out hypotheses near any decoded signal, sort by (exp_err, f0, dt), cap CHASE_CAP */
+static int finalize_failed(const chase_hyp *fmap, int nfmap, const dec *all, int nall, chase_hyp *out) {
+    if (nfmap <= 0) return 0;
+    chase_hyp *tmp = malloc(sizeof(chase_hyp) * (size_t)nfmap);
+    int nk = 0;
+    for (int i = 0; i < nfmap; i++) {
+        int near = 0;
+        for (int q = 0; q < nall && !near; q++)
+            if (fabs(fmap[i].f0 - all[q].f0) < 3.0 && fabs(fmap[i].dt - all[q].dt) < 0.05) near = 1;
+        if (!near) tmp[nk++] = fmap[i];
+    }
+    qsort(tmp, (size_t)nk, sizeof(chase_hyp), cmp_chase);
+    int n = nk < CHASE_CAP ? nk : CHASE_CAP;
+    memcpy(out, tmp, sizeof(chase_hyp) * (size_t)n);
+    free(tmp);
+    return n;
+}
+
+static double chase_rho(const double *llr, const uint8_t *cw) {
+    double num = 0.0, sa = 0.0;
+    for (int j = 0; j < 174; j++) {
+        double l = fmax(-REPEAT_CLIP, fmin(REPEAT_CLIP, llr[j]));
+        num += cw[j] ? l : -l;
+        sa += fabs(l);
+    }
+    return num / (sa + 1e-9);
+}
+
+/* decoder._chase_margin: rho(lt, b77) and margin over best sendable successor on lt (or REPEAT_SOLO if none) */
+static void chase_margin(const double *lt, const uint8_t *b77, double *rho_out, double *margin_out) {
+    double l[174], sa = 0.0;
+    for (int j = 0; j < 174; j++) {
+        l[j] = fmax(-REPEAT_CLIP, fmin(REPEAT_CLIP, lt[j]));
+        sa += fabs(l[j]);
+    }
+    double denom = sa + 1e-9;
+    uint8_t cw[174];
+    int tones[NN];
+    encode77(b77, cw, tones);
+    double num = 0.0;
+    for (int j = 0; j < 174; j++) num += cw[j] ? l[j] : -l[j];
+    double r0 = num / denom;
+    *rho_out = r0;
+    if (!std_msg(b77)) {
+        *margin_out = r0 - REPEAT_SOLO;
+        return;
+    }
+    int gv0 = get_bits(b77 + 59, 15);
+    int nalt = 0;
+    double r2 = -1e9;
+    uint8_t a[77];
+    if (gv0 < MAXGRID4) { /* sender's own CQ with this grid */
+        memcpy(a, b77, 77);
+        set_bits(a, 2, 28);
+        a[28] = a[58] = 0;
+        set_bits(a + 59, gv0, 15);
+        if (!same_payload(a, b77)) {
+            encode77(a, cw, tones);
+            double s = 0.0;
+            for (int j = 0; j < 174; j++) s += cw[j] ? l[j] : -l[j];
+            double rv = s / denom;
+            if (rv > r2) r2 = rv;
+            nalt++;
+        }
+    }
+    for (int k = gv0 < MAXGRID4 ? -1 : 0; k < 64; k++) {
+        int gv = k < 0 ? gv0 : k < 3 ? MAXGRID4 + 2 + k : MAXGRID4 + 35 + (k - 3 - 30);
+        for (int r = 0; r < 2; r++) {
+            memcpy(a, b77, 77);
+            a[58] = (uint8_t)r;
+            set_bits(a + 59, gv, 15);
+            if (!sendable(a) || same_payload(a, b77)) continue;
+            encode77(a, cw, tones);
+            double s = 0.0;
+            for (int j = 0; j < 174; j++) s += cw[j] ? l[j] : -l[j];
+            double rv = s / denom;
+            if (rv > r2) r2 = rv;
+            nalt++;
+        }
+    }
+    *margin_out = r0 - (nalt > 0 ? r2 : REPEAT_SOLO);
+}
+
+/* Cross-slot soft LLR Chase combining (decoder._chase_stage). Appends accepted decodes to all[nall..); returns new n. */
+static int chase_stage(ft8nn_ctx *c, const double *x, int n, const chase_hyp *cur, int ncur,
+                       const chase_hyp *const prev[2], const int nprev[2], int np, dec *all, int nall) {
+    if (ncur <= 0 || np <= 0) return nall;
+    double t0 = tnow();
+    baseband bb;
+    int bb_ready = 0, rc = nall;
+    for (int hi = 0; hi < ncur; hi++) {
+        double lt[174], lt_c[174];
+        for (int j = 0; j < 174; j++) {
+            lt[j] = (double)cur[hi].llr[j];
+            lt_c[j] = fmax(-CHASE_CLIP, fmin(CHASE_CLIP, lt[j]));
+        }
+        double lp_raw[2][174], lp_c[2][174];
+        int nm = 0;
+        for (int pi = 0; pi < np; pi++) {
+            int best_j = -1;
+            double best_d = 0.0;
+            for (int j = 0; j < nprev[pi]; j++) {
+                double df = fabs(prev[pi][j].f0 - cur[hi].f0);
+                double dd = fabs(prev[pi][j].dt - cur[hi].dt);
+                if (df <= CHASE_DF && dd <= CHASE_DT) {
+                    double dist = (df / CHASE_DF) * (df / CHASE_DF) + (dd / CHASE_DT) * (dd / CHASE_DT);
+                    if (best_j < 0 || dist < best_d) {
+                        best_j = j;
+                        best_d = dist;
+                    }
+                }
+            }
+            if (best_j >= 0) {
+                for (int j = 0; j < 174; j++) {
+                    lp_raw[nm][j] = (double)prev[pi][best_j].llr[j];
+                    lp_c[nm][j] = fmax(-CHASE_CLIP, fmin(CHASE_CLIP, lp_raw[nm][j]));
+                }
+                nm++;
+            }
+        }
+        if (nm == 0) continue;
+        int ncombo = nm == 2 ? 3 : 1;
+        for (int ci = 0; ci < ncombo; ci++) {
+            double Lc[174], ee_c = 0.0;
+            for (int j = 0; j < 174; j++) {
+                if (ci < nm) Lc[j] = lt_c[j] + lp_c[ci][j];
+                else Lc[j] = lt_c[j] + lp_c[0][j] + lp_c[1][j];
+                ee_c += 1.0 / (1.0 + exp(fabs(Lc[j])));
+            }
+            uint8_t bits[174], a91[91];
+            int nhard, method = -1;
+            double dist;
+            if (bp_decode(Lc, 30, bits, &nhard) && crc_ok(bits)) {
+                memcpy(a91, bits, 91);
+                method = plausible(FT8NN_BP_CHASE, a91);
+            }
+            if (method < 0 && ee_c < OSD_GATE) {
+                if (osd_decode(Lc, OSD_ORDER, bits, &dist, &nhard) && nhard <= OSD_MAX_HARD) {
+                    memcpy(a91, bits, 91);
+                    method = plausible(FT8NN_OSD_CHASE, a91);
+                }
+            }
+            if (method < 0 || !any_bits(a91, 77)) continue;
+            dec d = {.f0 = cur[hi].f0, .dt = cur[hi].dt, .snr = 0.0, .method = method, .metric = 0, .pass = PASSES,
+                     .final = 0, .prior = 0};
+            memcpy(d.bits77, a91, 77);
+            int skip = 0;
+            for (int q = 0; q < rc && !skip; q++)
+                skip = same_payload(all[q].bits77, d.bits77) || same_sender(&all[q], &d) || is_ghost(&d, &all[q]);
+            if (skip) continue;
+            double rt, mt;
+            chase_margin(lt, d.bits77, &rt, &mt);
+            if (rt < CHASE_RHO_T || mt < CHASE_MARGIN_T) continue;
+            uint8_t cw[174];
+            int tones[NN];
+            encode77(d.bits77, cw, tones);
+            double rp = ci < nm ? chase_rho(lp_raw[ci], cw)
+                                : fmax(chase_rho(lp_raw[0], cw), chase_rho(lp_raw[1], cw));
+            if (rp < CHASE_RHO_P) continue;
+            if (!bb_ready) {
+                baseband_init(&bb, x, n, c->pool);
+                bb_ready = 1;
+            }
+            sync_hyp hy = {.f0 = d.f0, .dt = d.dt, .metric = 0.0,
+                           .start = (int)nearbyint((NOMINAL_START + d.dt) * FS_BB)};
+            baseband_downsample(&bb, d.f0, hy.y);
+            d.snr = estimate_snr(&hy, d.bits77);
+            if (rc < DEC_CAP) all[rc++] = d;
+            break; /* hypothesis decoded */
+        }
+    }
+    if (bb_ready) baseband_free(&bb);
+    if (prof) fprintf(stderr, "chase: cur %d -> %d, %.2fs\n", ncur, rc - nall, tnow() - t0);
+    return rc;
+}
+
 static int repeat_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int nall, const dec *cx, int ncx) {
     enum { MAXPRI = 16, MAXALT = 2048 };
     uint8_t *done = calloc((size_t)ncx, 1); /* context entry already in an earlier sender group */
@@ -1366,15 +1636,24 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
     memset(tried, -1, (size_t)TRIED_NB * TRIED_NL * 2);
     ft8nn_decode_t *batch = cb ? malloc(sizeof(ft8nn_decode_t) * DEC_CAP) : NULL;
     int nall = 0, ncx = 0;
-    if (t != INT64_MIN) { /* context: this context's decodes 30 then 60 s earlier */
+    const chase_hyp *ch_prev[2];
+    int ch_nprev[2], n_ch_prev = 0;
+    if (t != INT64_MIN) { /* context & Chase history: 30 then 60 s earlier */
         cx = malloc(sizeof(dec) * 2 * DEC_CAP);
         for (int b = 30; b <= 60; b += 30)
             for (int i = 0; i < CTX_HIST; i++)
                 if (c->hist[i].t == t - b) {
                     memcpy(cx + ncx, c->hist[i].d, sizeof(dec) * c->hist[i].n);
                     ncx += c->hist[i].n;
+                    if (c->hist[i].nfail > 0 && n_ch_prev < 2) {
+                        ch_prev[n_ch_prev] = c->hist[i].fail;
+                        ch_nprev[n_ch_prev++] = c->hist[i].nfail;
+                    }
                 }
     }
+    chase_hyp *fmap = NULL;
+    int nfmap = 0, cfmap = 0;
+    int collect_fail = (t != INT64_MIN && !early);
     if (n_prior > DEC_CAP) n_prior = DEC_CAP;
     for (int q = 0; q < n_prior; q++) { /* decoder.decode_slot prior: subtracted first, kept as found */
         dec *d = &all[nall++];
@@ -1398,13 +1677,15 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
     int mc = scaled_max_cand(c, early);
     for (int p = 0; p < (early ? EARLY_PASSES : PASSES); p++) {
         double shift = DT_RECENTER > 0 ? dt_recenter_shift(all, nall, cx, ncx) : 0.0;
-        int k = decode_pass(c, x, n, all, nall, DEC_CAP, p, mc, cx, ncx, tried, NULL, 0, shift, cb, user, batch);
+        int k = decode_pass(c, x, n, all, nall, DEC_CAP, p, mc, cx, ncx, tried, NULL, 0, shift, cb, user, batch,
+                            collect_fail ? &fmap : NULL, &nfmap, &cfmap);
         if (k < 0) {
             free(x);
             free(all);
             free(cx);
             free(tried);
             free(batch);
+            free(fmap);
             c->nv_bb = c->cons = 0;
             return -1;
         }
@@ -1432,9 +1713,24 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
             free(cx);
             free(tried);
             free(batch);
+            free(fmap);
             c->nv_bb = c->cons = 0;
             return -1;
         }
+        for (int q = nall; q < r; q++) {
+            uint8_t cw[174];
+            int tones[NN];
+            encode77(all[q].bits77, cw, tones);
+            subtract_signal(x, n, tones, all[q].f0, all[q].dt, c->pool);
+            if (n_post < DEC_CAP) post_f0[n_post++] = all[q].f0;
+        }
+        nall = r;
+    }
+    if (collect_fail && n_ch_prev > 0 && nfmap > 0) {
+        chase_hyp *cur_fail = malloc(sizeof(chase_hyp) * CHASE_CAP);
+        int ncur = finalize_failed(fmap, nfmap, all, nall, cur_fail);
+        int r = chase_stage(c, x, n, cur_fail, ncur, ch_prev, ch_nprev, n_ch_prev, all, nall);
+        free(cur_fail);
         for (int q = nall; q < r; q++) {
             uint8_t cw[174];
             int tones[NN];
@@ -1452,6 +1748,7 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
             free(cx);
             free(tried);
             free(batch);
+            free(fmap);
             c->nv_bb = c->cons = 0;
             return -1;
         }
@@ -1464,23 +1761,24 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
         }
         nall = r;
     }
-    if (!early && n_post > 0) { /* targeted pass within REUSE_DF Hz of any subtracted cc or rp decode */
+    if (!early && n_post > 0) { /* targeted pass within REUSE_DF Hz of any subtracted cc, ch, or rp decode */
         double shift = DT_RECENTER > 0 ? dt_recenter_shift(all, nall, cx, ncx) : 0.0;
         int k = decode_pass(c, x, n, all, nall, DEC_CAP, PASSES + 1, mc, cx, ncx, NULL, post_f0, n_post, shift, NULL,
-                            NULL, NULL);
+                            NULL, NULL, collect_fail ? &fmap : NULL, &nfmap, &cfmap);
         if (k < 0) {
             free(x);
             free(all);
             free(cx);
             free(tried);
             free(batch);
+            free(fmap);
             c->nv_bb = c->cons = 0;
             return -1;
         }
         nall += k;
     }
     nall = drop_ctx_dupes(all, 0, nall);
-    report(c, all, 0, nall, 1, -1, cb, user, batch); /* the context decodes that survived, the co-channel and repeat stages' */
+    report(c, all, 0, nall, 1, -1, cb, user, batch); /* the context decodes that survived, the co-channel, chase and repeat stages' */
     free(batch);
     free(cx);
     free(tried);
@@ -1493,7 +1791,9 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
         c->hist[w].t = t;
         c->hist[w].n = nall;
         memcpy(c->hist[w].d, all, sizeof(dec) * nall);
+        c->hist[w].nfail = finalize_failed(fmap, nfmap, all, nall, c->hist[w].fail);
     }
+    free(fmap);
     int nout = 0; /* this decode's own: the prior ones were handed out by the early pass */
     for (int q = 0; q < nall; q++)
         if (!all[q].prior && nout++ < max_out) to_public(&all[q], &out[nout - 1]);

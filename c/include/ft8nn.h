@@ -14,7 +14,8 @@ extern "C" {
 typedef struct ft8nn_ctx ft8nn_ctx;
 
 enum { FT8NN_BP = 0, FT8NN_OSD = 1, FT8NN_BP_AP = 2, FT8NN_OSD_AP = 3, FT8NN_BP_ERASE = 4, FT8NN_OSD_ERASE = 5, FT8NN_OSD_BP = 6,
-       FT8NN_BP_CTX = 7, FT8NN_OSD_CTX = 8, FT8NN_REPEAT = 9, FT8NN_BP_CC = 10, FT8NN_OSD_CC = 11, FT8NN_OSD_BP_CC = 12 };
+       FT8NN_BP_CTX = 7, FT8NN_OSD_CTX = 8, FT8NN_REPEAT = 9, FT8NN_BP_CC = 10, FT8NN_OSD_CC = 11, FT8NN_OSD_BP_CC = 12,
+       FT8NN_BP_CHASE = 13, FT8NN_OSD_CHASE = 14 };
 
 typedef struct {
     char text[48];      /* decoded message, WSJT-X formatting; hashed calls as <CALL> or <...> */
@@ -32,7 +33,9 @@ typedef struct {
                            its frequency and time after everything else is subtracted; ft8nn_decode_at only),
                            FT8NN_BP_CC / FT8NN_OSD_CC / FT8NN_OSD_BP_CC (co-channel retry: a second signal found
                            under a decode's own frequency and time once everything decoded is subtracted, whose sync
-                           the subtraction took away; BP, OSD, OSD on BP sums) */
+                           the subtraction took away; BP, OSD, OSD on BP sums),
+                           FT8NN_BP_CHASE / FT8NN_OSD_CHASE (cross-slot soft LLR Chase combining of failed NN
+                           hypotheses from 30/60 s earlier at the same (f0, dt); ft8nn_decode_at only) */
     int metric;         /* soft metric that decoded it: 0 = NN, 1..3 = classical nsym 1..3 */
     int pass;           /* subtraction pass, 0-based */
 } ft8nn_decode_t;

@@ -1,5 +1,40 @@
 # Status and plan (resume here)
 
+## Cross-slot soft LLR Chase combining — done 2026-11-24 (tag `nn_v3_chase`)
+
+Weak stations repeating the same transmission 30 or 60 s apart (same parity) frequently fail single-slot BP/OSD in
+both slots even though their neural soft LLRs carry strong correlated bit evidence (`exp_err < 68` vs noise ~70).
+Because `reuse_df` skips unchanged candidates in later passes, caching each failed non-early candidate's last NN LLR
+vector (`float32[174]`, capped at `256` lowest-`exp_err` entries per slot after filtering within `3 Hz / 0.05 s` of
+any decoded signal) costs **zero extra NN calls**.
+Changes (`ft8nn/decoder.py`, `bench/run_real.py`, `c/include/ft8nn.h`, `c/src/decode.c`, `c/tools/ft8nn_cli.c`,
+`tests/test_chase.py`):
+- `_chase_stage` / `chase_stage` (methods `bp_ch` / `osd_ch`, C `FT8NN_BP_CHASE` / `FT8NN_OSD_CHASE`) runs after
+  `_cochannel_stage` and before `_repeat_stage`, matching failed hypotheses across `t-30` and `t-60` within
+  `±2.5 Hz × ±0.12 s`, combining clipped LLRs (`±4.0`) for 2-slot and 3-slot pairs/triples, and decoding with BP +
+  gated OSD-2 + `_plausible` + `_is_ghost`.
+- Stale-message & noise guard (tuned on validation run 1: 433 strict new decodes = 335 slot-confirmed, 92 active, 0
+  unconfirmed; 0 false on 8× cross-band shuffle null of 106k pairs; 0 `jt9` disagreements): rejects any sender already
+  decoded in slot `t`, requires uncombined slot agreement `rho_t >= 0.30` and `rho_p >= 0.20` (clipped `±2.0`), and
+  requires the combined codeword to beat all sendable `_successors(b77)` on slot `t`'s own LLRs by `margin_t >= 0.05`
+  (or beat `REPEAT_SOLO = 0.35`, i.e. `rho_t >= 0.40`, for CQs and non-standard messages).
+- Accepted Chase decodes are subtracted and fed into `post_pass` and future `t+30`/`t+60` `context`, unlocking
+  substantial downstream `rp` and `bp_cx`/`osd_cx` decodes as well.
+Results vs `nn_v3_opt3` (`tools/ab_run2.sh nn_v3_chase` + `tools/validate_full.sh nn_v3_chase`, M1 Pro, 8 workers, no
+sleep events):
+- noise (100 slots / 998): **0 false** (plus 0 false on a 30-slot continuous noise chain);
+- validation run 2 (unseen): 29,910 / 21,975 / 1 → **30,380 / 22,326 / 1** (**+470 / +351 slot-confirmed**, same
+  `CQ CR4UVW PI49`; 8/8 `jt9` same-sender overlap exact match, 0 stale);
+- validation run 1: 35,104 / 26,879 / 1 → **35,729 / 27,372 / 1** (**+625 / +493 slot-confirmed**, same
+  `CQ KR9ZUC/R AO63`);
+- training recordings: 18,782 (jt9-only 183) → **19,228 (jt9-only 164)** (**+446, −19 jt9-only**);
+- AWGN: 50% −22.49 / 90% −21.24 dB (identical, 0 false);
+- golden C == Python (`MallocScribble`, `--threads 4`): 00_40m 851/851, 08_80m 634/634, run-2 02_80m 759/759 (and
+  run-2 00_40m 958/958 `--stream`), AWGN 429/429; `tools/ci_smoke.py` 51/51; `wsjtx/test_sidecar.sh` all checks;
+  `pytest` 107/107. `tools/golden_c.py` default `--tag` updated to `nn_v3_chase`.
+Next: Option 5 — stronger single-slot LDPC / OSD (`argmin` OSD-3 / wider `k2`, damped/scaled BP on trapping sets,
+spike-targeted erasure).
+
 ## Bandwidth-scaled `max_cand` and post-`cc`/`rp` targeted pass — done 2026-11-24 (tag `nn_v3_opt3`)
 
 A residual probe on validation run 1 (subtracting all `nn_v3_ccpara` decodes and running one pass with `max_cand=1500`)
