@@ -1,5 +1,34 @@
 # Status and plan (resume here)
 
+## Co-channel parabolic centring — done 2026-11-24 (tag `nn_v3_ccpara`)
+
+In `_cochannel_stage` (`ft8nn/decoder.py`, C `cc_search` in `c/src/decode.c`), each local maximum of `data_sync`
+(step 0.5 Hz × 2 baseband samples) was used raw as the centre of the 3×3 NN refinement (`±0.4 Hz × ±1 sample`).
+`data_sync`'s 32-sample window peaks ~1 sample late relative to symbol-aligned NN features (run 1 `01_40m` + `02_40m`
+neighbour decodes skewed 38 at `b = −1` vs 10 at `b = +1`, centre hit rate 67.7%). Now each peak uses the same
+3-point log-parabolic sub-grid interpolation as `fine_sync2` in frequency (`df0 = dfs[i] + _parabolic(M[:, j], i) * 0.5`)
+and time (`s0 = start0 + round(dts[j] + _parabolic(M[i, :], j) * 2 - 1.0)`), with zero extra FFTs: centre hits rise
+to 77.1% and `−1/+1` balance to 16 vs 14.
+Results vs `nn_v3_f4bp` (`tools/ab_run2.sh nn_v3_ccpara` + `tools/validate_full.sh nn_v3_ccpara`, M1 Pro, 8 workers,
+no sleep events):
+- noise (100 slots / 998): **0 false**;
+- validation run 2 (unseen): 29,743 / 21,858 / 1 → **29,750 / 21,860 / 1** (+7 / +2 slot-confirmed, same `CQ CR4UVW PI49`);
+- validation run 1: 34,765 / 26,638 / 1 → **34,789 / 26,652 / 1** (+24 / +14 slot-confirmed, same `CQ KR9ZUC/R AO63`);
+- training recordings: 18,724 (jt9-only 195) → **18,733 (jt9-only 193)** (+9, −2 jt9-only);
+- AWGN: 50% −22.49 / 90% −21.24 dB (identical, 0 false);
+- golden C == Python (`MallocScribble`, `--threads 4`): 00_40m 821/821, 08_80m 629/629, run-2 02_80m 753/753 (and
+  run-2 00_40m 937/937 `--stream`), AWGN 429/429; `tools/ci_smoke.py` 51/51; `wsjtx/test_sidecar.sh` all checks;
+  `pytest` 103/103. `tools/golden_c.py` default `--tag` updated to `nn_v3_ccpara`.
+Also tried and rejected on run 1 (never touched run 2):
+- **Clean-first pass 0** (`cp0_bp4` 34,714 / 26,610 / 0; `cp0_bp5` 34,720 / 26,612 / 0; `cp0_cons4` 34,740 / 26,615 / 0
+  vs 34,765 / 26,638 / 1): deferring deep stages out of pass 0 eliminates run 1's false decode (`1 → 0`) but loses
+  23–28 slot-confirmed decodes because pass-0 subtraction perturbs `find_candidates`'s 1-D peak-picker on ~12 weak
+  pass-0 signals (and their context chains).
+- **Costas-safe subtraction** (masking Costas arrays in `subtract.py` and extrapolating `a(t)` from data symbols):
+  rescued 15/15 vs 12/15 synthetic AWGN co-channel pairs, but on 12 real fading 40 m slots (`02_40m`) dropped decodes
+  616 → 469 (−147; pass-0 residual RMS 0.28 → 0.46) because 1.12 s phase extrapolation fails under real HF fading.
+Next: Option 3 — diagnose the 106 residual-OK budget/order misses and fix wideband `max_cand` candidate starvation.
+
 ## Live comparison: remote decodes from the skimmer add-on where there is one — done 2026-11-16
 
 The remote column used to come from UberSDR's spot feed (`/ws/dxcluster`, `subscribe_digital_spots`), which sends each

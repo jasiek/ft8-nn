@@ -343,9 +343,14 @@ def _cochannel_stage(x, llr_fn, found, near, far, span, tnear, tfar, min_score, 
         for z, (k, zone) in enumerate(zones):
             fi, ti = np.nonzero(lm & zone)
             for rank, o in enumerate(np.argsort(-M[fi, ti], kind="stable")[:k]):
+                i, j = int(fi[o]), int(ti[o])
+                # Parabolic sub-grid centring on M (as fine_sync2); data_sync's 32-sample window peaks ~1 sample late
+                # relative to symbol-aligned NN features, so subtracting 1.0 centres the 3x3 refinement symmetrically.
+                df0 = dfs[i] + fe._parabolic(M[:, j], i) * gf
+                s0 = start0 + int(round(dts[j] + fe._parabolic(M[i, :], j) * gt - 1.0))
                 for a, b in offs:
-                    df, s = dfs[fi[o]] + a, start0 + int(dts[ti[o]]) + b
-                    hyps.append(fe.SyncHyp(d.f0 + df, s / fe.FS_BB - ft8.NOMINAL_START, fe._rotate(y0, df), s, float(M[fi[o], ti[o]])))
+                    df, s = df0 + a, s0 + b
+                    hyps.append(fe.SyncHyp(d.f0 + df, s / fe.FS_BB - ft8.NOMINAL_START, fe._rotate(y0, df), s, float(M[i, j])))
                     group.append((ci, z, rank))
     out, outcome = {}, {}
     if hyps:

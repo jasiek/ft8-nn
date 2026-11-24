@@ -924,6 +924,17 @@ typedef struct {
     int dts[CC_NT];
 } cc_job;
 
+/* frontend._parabolic: log-parabolic sub-grid offset at index i (clamped to +-0.5 grid units) */
+static double cc_parabolic(const double *m, int len, int stride, int i) {
+    if (i <= 0 || i >= len - 1) return 0.0;
+    double a = log(fmax(m[(i - 1) * stride], 1e-30)), b = log(fmax(m[i * stride], 1e-30)),
+           c = log(fmax(m[(i + 1) * stride], 1e-30));
+    double den = a - 2 * b + c;
+    if (!(den < 0)) return 0.0;
+    double o = 0.5 * (a - c) / den;
+    return o < -0.5 ? -0.5 : (o > 0.5 ? 0.5 : o);
+}
+
 static void cc_search(void *arg, int ci) {
     cc_job *j = arg;
     const dec *d = &j->cells[ci];
@@ -963,12 +974,15 @@ static void cc_search(void *arg, int ci) {
             }
             if (bi < 0) break;
             used[bi] = 1;
+            int fi = pk[bi] / CC_NT, ti = pk[bi] % CC_NT;
+            double df0 = cc_dfs[fi] + cc_parabolic(M + ti, CC_NF, CC_NT, fi) * CC_GF;
+            int s0 = start0 + (int)nearbyint((double)cc_dts[ti] + cc_parabolic(M + fi * CC_NT, CC_NT, 1, ti) * CC_GT - 1.0);
             static const double oa[9] = {0, -CC_RDF, -CC_RDF, -CC_RDF, 0, 0, CC_RDF, CC_RDF, CC_RDF};
             static const int ob[9] = {0, -CC_RDT, 0, CC_RDT, -CC_RDT, CC_RDT, -CC_RDT, 0, CC_RDT};
             for (int o = 0; o < 9; o++) {
                 cc_spec *s = &j->spec[(size_t)ci * CC_MAXH + ns++];
-                s->df = cc_dfs[pk[bi] / CC_NT] + oa[o];
-                s->start = start0 + cc_dts[pk[bi] % CC_NT] + ob[o];
+                s->df = df0 + oa[o];
+                s->start = s0 + ob[o];
                 s->cell = ci;
                 s->group = ng;
             }
