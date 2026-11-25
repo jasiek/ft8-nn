@@ -1,5 +1,40 @@
 # Status and plan (resume here)
 
+## Fallback OSD-3 in verified stages and wider BP-only burst erasure — done 2026-11-24 (tag `nn_v3_opt5b`)
+
+Offline probing of all 6,056 strict-failed run-1 residual neural hypotheses (`exp_err < 45`) found:
+- Damped (`beta=0.5`), layered (serial check-node), clipped (`±3`/`±4`), scaled (`0.5×`), and 60-iter BP added **0**
+  decodes beyond existing `bp + osd-2 + osd_bp`.
+- Global `argmin` OSD-3 (`k2=60, k3=28`) on all OSD stages (`nn_v3_opt5`) gained `+94` (`+60` slot) on unseen run 2
+  with `0` noise false decodes, but **failed** the run-2 gate: unpinned `osd0` admitted `1` new unconfirmed decode
+  (`HY3TBG 5V5SMW CQ25` at `dt=2.30 s`) and displaced `39` real order-2 decodes. Rejected.
+- Keeping unpinned stages (`osd`, `osd_bp`, `osd_ap`, `osd_cc`) at `order=2 (k2=40)` and applying strict fallback
+  `order=3 (k2=60, k3=28)` (with exact pivot-reliability lower-bound pruning `p_rel_sum < bd + 1e-12`, bit-identical
+  to exhaustive evaluation) ONLY after `order=2` fails inside the two multi-constraint verified stages (`_try_ctx`
+  with 32–61 pinned bits + CRC-14, and `_chase_stage` with 2-slot `rho_t/rho_p/margin_t` verification), plus raising
+  **BP-only** burst erasure to `erase_bp_gate=30.0` (while keeping wide-window `osd_er` strictly at `15.0`; `0 / 5,000`
+  false on worst-case `exp_err ~ 33` noise, `0` false on run-1 wrong-band context & cross-band Chase nulls):
+Changes (`ft8nn/ldpc.py`, `ft8nn/decoder.py`, `c/src/ldpc.c`, `c/src/decode.c`, `tests/test_ldpc.py`):
+- `osd_decode(llr, order=3)`: adds `k2=60` pairs and `k3=28` triples with exact lower-bound pruning (`order=2` keeps
+  `k2=40`).
+- `_try_ctx` / `try_ctx` and `_chase_stage` / `chase_stage`: try `order=2` first, fall back to `order=3` on failure.
+- `_decode_pass` / `decode_hyp`: run BP-only burst erasure (`bp_er`) for `exp_err < 30.0`; wide-window `osd_er` stays
+  gated at `exp_err < 15.0`.
+Results vs `nn_v3_chase` (`tools/ab_run2.sh nn_v3_opt5b` + `tools/validate_full.sh nn_v3_opt5b`, M1 Pro, 8 workers,
+no sleep events):
+- noise (100 slots / 998): **0 false**;
+- validation run 2 (unseen): 30,380 / 22,326 / 1 → **30,454 / 22,373 / 1** (**+74 / +47 slot-confirmed**, same
+  `CQ CR4UVW PI49`);
+- validation run 1: 35,729 / 27,372 / 1 → **35,850 / 27,450 / 1** (**+121 / +78 slot-confirmed**, same
+  `CQ KR9ZUC/R AO63`);
+- training recordings: 19,228 (jt9-only 164) → **19,286 (jt9-only 161)** (**+58, −3 jt9-only**);
+- AWGN: 50% −22.49 → **−22.50 dB** / 90% −21.24 → **−21.28 dB** (`0` false);
+- golden C == Python (`MallocScribble`, `--threads 4`): 00_40m 854/854, 08_80m 634/634, run-2 02_80m 760/760 (and
+  run-2 00_40m 961/961 `--stream`), AWGN 429/429; `tools/ci_smoke.py` 51/51; `wsjtx/test_sidecar.sh` all checks;
+  `pytest` 108/108. `tools/golden_c.py` default `--tag` updated to `nn_v3_opt5b`.
+Next: Option 6 — context & repeat-stage extensions (clear-winning successors in `_repeat_stage`, longer station
+memory 90–300 s, `i3=4` non-standard calls in context/repeat).
+
 ## Cross-slot soft LLR Chase combining — done 2026-11-24 (tag `nn_v3_chase`)
 
 Weak stations repeating the same transmission 30 or 60 s apart (same parity) frequently fail single-slot BP/OSD in

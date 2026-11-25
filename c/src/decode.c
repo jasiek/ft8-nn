@@ -123,7 +123,8 @@ static int prof = -1;
 #define CHASE_EE_MAX 68.0
 #define CHASE_CAP 256
 #define DEC_CAP 512 /* decodes per slot */
-#define ERASE_GATE 15.0 /* burst-erasure retry for confident NN metrics that still fail */
+#define ERASE_GATE 15.0 /* wide-window OSD-0 erasure retry gate (decoder.erase_gate) */
+#define ERASE_BP_GATE 30.0 /* BP-only burst-erasure retry gate (decoder.erase_bp_gate) */
 /* osd_er ghost test (decoder._is_ghost): neighbour within GHOST_MAX_DF Hz whose tones, shifted by whole symbols and
  * tones, equal the decode's data tones on >= GHOST_MATCH of >= GHOST_MIN_SYMS comparable symbols */
 #define GHOST_MAX_DF 50.0
@@ -401,16 +402,22 @@ static int try_ctx(const double *llr, const dec *cx, int ncx, double f0, double 
     uint8_t bits[174];
     int nh;
     for (int q = 0; q < np; q++) {
-        int lo = pk[q] ? 29 : 0, method;
+        int lo = pk[q] ? 29 : 0;
         memcpy(l2, llr, sizeof l2);
         for (int i = lo; i < 58; i++) l2[i] = pb[q][i] ? mag : -mag;
         for (int i = 74; i < 77; i++) l2[i] = pb[q][i] ? mag : -mag;
-        if (bp_decode(l2, 30, bits, &nh) && crc_ok(bits)) method = FT8NN_BP_CTX;
-        else if (osd_decode(l2, OSD_ORDER, bits, &dist, &nh)) method = FT8NN_OSD_CTX;
-        else continue;
-        if (memcmp(bits + lo, pb[q] + lo, 58 - lo) || memcmp(bits + 74, pb[q] + 74, 3)) continue;
-        memcpy(a91, bits, 91);
-        return method;
+        if (bp_decode(l2, 30, bits, &nh) && crc_ok(bits) &&
+            !memcmp(bits + lo, pb[q] + lo, 58 - lo) && !memcmp(bits + 74, pb[q] + 74, 3)) {
+            memcpy(a91, bits, 91);
+            return FT8NN_BP_CTX;
+        }
+        if ((osd_decode(l2, OSD_ORDER, bits, &dist, &nh) &&
+             !memcmp(bits + lo, pb[q] + lo, 58 - lo) && !memcmp(bits + 74, pb[q] + 74, 3)) ||
+            (osd_decode(l2, 3, bits, &dist, &nh) &&
+             !memcmp(bits + lo, pb[q] + lo, 58 - lo) && !memcmp(bits + 74, pb[q] + 74, 3))) {
+            memcpy(a91, bits, 91);
+            return FT8NN_OSD_CTX;
+        }
     }
     return -1;
 }
@@ -607,7 +614,8 @@ static void decode_hyp(const sync_hyp *hy, const double *L, int early, int cons,
             method = plausible(try_ctx(l, cx, ncx, hy->f0, hy->dt, a91), a91);
         if (method < 0 && k == 0 && !cons && exp_err < AP_GATE)
             method = plausible(try_ap(l, a91, early ? -1 : OSD_ORDER), a91);
-        if (method < 0 && k == 0 && exp_err < ERASE_GATE && !early) method = plausible(try_erase(l, a91, !cons), a91);
+        if (method < 0 && k == 0 && exp_err < ERASE_BP_GATE && !early)
+            method = plausible(try_erase(l, a91, !cons && exp_err < ERASE_GATE), a91);
         if (method < 0) continue;
         if (!any_bits(a91, 77)) {
             r->status = 2;
@@ -1388,6 +1396,10 @@ static int chase_stage(ft8nn_ctx *c, const double *x, int n, const chase_hyp *cu
             }
             if (method < 0 && ee_c < OSD_GATE) {
                 if (osd_decode(Lc, OSD_ORDER, bits, &dist, &nhard) && nhard <= OSD_MAX_HARD) {
+                    memcpy(a91, bits, 91);
+                    method = plausible(FT8NN_OSD_CHASE, a91);
+                }
+                if (method < 0 && osd_decode(Lc, 3, bits, &dist, &nhard) && nhard <= OSD_MAX_HARD) {
                     memcpy(a91, bits, 91);
                     method = plausible(FT8NN_OSD_CHASE, a91);
                 }

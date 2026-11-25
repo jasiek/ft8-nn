@@ -134,13 +134,44 @@ def _gf2_reduce(Gp):
     return G.astype(np.uint8), np.array(pivots)
 
 
-def osd_decode(llr, order=2, k2=40):
-    """Ordered-statistics decoding of one 174-LLR vector.
+_OSD_PAIRS = {}
+_OSD_TRIPS = {}
+
+
+def _osd_pairs(k2):
+    if k2 not in _OSD_PAIRS:
+        lo = 91 - k2
+        i, j = np.triu_indices(k2, 1)
+        _OSD_PAIRS[k2] = (lo + i, lo + j)
+    return _OSD_PAIRS[k2]
+
+
+def _osd_trips(k3):
+    if k3 not in _OSD_TRIPS:
+        lo = 91 - k3
+        a, b, c = [], [], []
+        for i in range(k3):
+            for j in range(i + 1, k3):
+                for k in range(j + 1, k3):
+                    a.append(lo + i)
+                    b.append(lo + j)
+                    c.append(lo + k)
+        _OSD_TRIPS[k3] = (np.array(a, np.intp), np.array(b, np.intp), np.array(c, np.intp))
+    return _OSD_TRIPS[k3]
+
+
+def osd_decode(llr, order=2, k2=None, k3=28):
+    """Ordered-statistics decoding of one 174-LLR vector (exact single-argmin ML search).
 
     order 0: hard decision on the most reliable basis; 1: + all single flips; 2: + pairs among the
-    k2 least reliable basis positions. Returns (bits174, ok_crc, dist, n_hard_errors), where dist is
-    the reliability-weighted distance (sum |llr| over disagreeing positions).
+    k2 least reliable basis positions (default 40 for order 2, 60 for order 3); 3: + triples among
+    the k3 least reliable basis positions (default 28). Uses exact lower-bound pruning on the
+    flipped pivot reliabilities (bit-identical to exhaustive evaluation). Returns (bits174, ok_crc,
+    dist, n_hard_errors), where dist is the reliability-weighted distance (sum |llr| over
+    disagreeing positions).
     """
+    if k2 is None:
+        k2 = 60 if order >= 3 else 40
     llr = np.asarray(llr, np.float64)
     rel = np.abs(llr)
     hard = (llr > 0).astype(np.uint8)
@@ -153,17 +184,37 @@ def osd_decode(llr, order=2, k2=40):
     cands = [c0[None, :]]
     if order >= 1:
         cands.append(c0[None, :] ^ Gr)  # flip each info bit
-    if order >= 2:
-        # least reliable basis positions are the last pivots (pivots are in reliability order)
-        low = np.arange(91)[-k2:]
-        i, j = np.triu_indices(len(low), 1)
-        cands.append(c0[None, :] ^ Gr[low[i]] ^ Gr[low[j]])
-    C = np.concatenate(cands).astype(np.uint8)
-    dist = ((C != hp[None, :]) * rp[None, :]).sum(-1)
-    best = int(np.argmin(dist))
+    C01 = np.concatenate(cands).astype(np.uint8)
+    d01 = ((C01 != hp[None, :]) * rp[None, :]).sum(-1)
+    best = int(np.argmin(d01))
+    bd = float(d01[best])
+    bw = C01[best]
+
+    p_rel = rp[piv]
+    if order >= 2 and k2 >= 2:
+        gi, gj = _osd_pairs(k2)
+        keep = (p_rel[gi] + p_rel[gj]) < bd + 1e-12
+        if keep.any():
+            C2 = (c0[None, :] ^ Gr[gi[keep]] ^ Gr[gj[keep]]).astype(np.uint8)
+            d2 = ((C2 != hp[None, :]) * rp[None, :]).sum(-1)
+            m2 = int(np.argmin(d2))
+            if float(d2[m2]) < bd:
+                bd = float(d2[m2])
+                bw = C2[m2]
+    if order >= 3 and k3 >= 3:
+        ga, gb, gc = _osd_trips(k3)
+        keep = (p_rel[ga] + p_rel[gb] + p_rel[gc]) < bd + 1e-12
+        if keep.any():
+            C3 = (c0[None, :] ^ Gr[ga[keep]] ^ Gr[gb[keep]] ^ Gr[gc[keep]]).astype(np.uint8)
+            d3 = ((C3 != hp[None, :]) * rp[None, :]).sum(-1)
+            m3 = int(np.argmin(d3))
+            if float(d3[m3]) < bd:
+                bd = float(d3[m3])
+                bw = C3[m3]
+
     cw = np.empty(174, np.uint8)
-    cw[perm] = C[best]
-    return cw, ft8.crc_ok(cw[:91]), float(dist[best]), int((cw != hard).sum())
+    cw[perm] = bw
+    return cw, ft8.crc_ok(cw[:91]), bd, int((cw != hard).sum())
 
 
 def decode(llr, bp_iters=30, osd_order=2, osd_max_hard=40):

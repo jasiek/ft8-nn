@@ -128,7 +128,7 @@ def _scaled_max_cand(max_cand, cand_kw):
     return max(max_cand, min(1200, int(round(max_cand * 1.5 * w / (fe.FMAX_DEFAULT - fe.FMIN_DEFAULT)))))
 
 
-def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=4, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, context=(), ctx_gate=48.0, cand_kw=None, reuse_df=62.5, dt_recenter=0.8, repeat=REPEAT, cochannel=COCHANNEL, prior=(), scale_cand=True, post_pass=True, chase=CHASE, chase_hist=(), failed_out=None):
+def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=4, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, erase_gate=15.0, erase_bp_gate=30.0, erase_osd_dmax=3.0, osd_snaps=2, context=(), ctx_gate=48.0, cand_kw=None, reuse_df=62.5, dt_recenter=0.8, repeat=REPEAT, cochannel=COCHANNEL, prior=(), scale_cand=True, post_pass=True, chase=CHASE, chase_hist=(), failed_out=None):
     """Decode one 15 s slot (real audio @12 kHz, any scale), with multi-pass subtraction.
 
     llr_fn(hyps) -> per-hypothesis list of LLR vectors to try in order (first success wins).
@@ -184,7 +184,7 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
             sh = _dt_shift([d.dt for d in found.values()] + [c[1] for c in context], dt_recenter)
             if sh:
                 ckw["dt_shift"] = sh
-        new = _decode_pass(x, llr_fn, mc, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, ckw, skip, tried, p, failed_map)
+        new = _decode_pass(x, llr_fn, mc, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_bp_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, ckw, skip, tried, p, failed_map)
         for d in new:
             d.info["pass"] = p
             found[d.key] = d
@@ -221,7 +221,7 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
             sh = _dt_shift([d.dt for d in found.values()] + [c[1] for c in context], dt_recenter)
             if sh:
                 ckw["dt_shift"] = sh
-        new = _decode_pass(x, llr_fn, mc, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, ckw, skip, None, passes + 1, failed_map)
+        new = _decode_pass(x, llr_fn, mc, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_bp_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, ckw, skip, None, passes + 1, failed_map)
         for d in new:
             d.info["pass"] = passes + 1
             found[d.key] = d
@@ -529,6 +529,10 @@ def _chase_stage(x, cur_failed, chase_hist, found, df_max, dt_max, clip, rho_t_m
             cw, crc, dist, nho = ldpc.osd_decode(Lc[r], osd_order)
             if crc and nho <= osd_max_hard:
                 a91, info = _plausible(cw[:91], {"method": "osd_ch", "nhard": nho, "dist": dist})
+            if a91 is None and osd_order == 2:
+                cw, crc, dist, nho = ldpc.osd_decode(Lc[r], 3)
+                if crc and nho <= osd_max_hard:
+                    a91, info = _plausible(cw[:91], {"method": "osd_ch", "nhard": nho, "dist": dist})
         if a91 is None or not a91[:77].any():
             continue
         b77 = a91[:77].copy()
@@ -590,7 +594,7 @@ def _dt_shift(dts, gate):
     return 0.0 if abs(med) < gate else round(med * fe.FPS) / fe.FPS
 
 
-def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, cand_kw, skip=None, tried=None, p=0, failed_map=None):
+def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_bp_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, cand_kw, skip=None, tried=None, p=0, failed_map=None):
     cands = fe.find_candidates(x, max_cand=max_cand, **cand_kw)
     bb = fe.Baseband(x)
     hyps, owner, h_idx = [], [], []
@@ -647,8 +651,8 @@ def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd
                     a91, info = _plausible(*_try_ctx(L[r], pats))
             if a91 is None and k == 0 and ap and exp_err[r] < ap_gate:
                 a91, info = _plausible(*_try_ap(L[r], ap, -1 if early else osd_order, osd_max_hard))
-            if a91 is None and k == 0 and exp_err[r] < erase_gate and not early:
-                a91, info = _plausible(*_try_erase(L[r], erase_osd_dmax))
+            if a91 is None and k == 0 and erase_gate > 0 and exp_err[r] < max(erase_gate, erase_bp_gate) and not early:
+                a91, info = _plausible(*_try_erase(L[r], erase_osd_dmax if exp_err[r] < erase_gate else 0.0))
             if a91 is None:
                 continue
             if not a91[:77].any():  # all-zero payload: classic false decode
@@ -780,23 +784,22 @@ def _try_osd_bp(llr, n, osd_order, osd_max_hard):
 
 
 def _try_ctx(llr, patterns):
-    """Context a-priori: pin each pattern's bits (as _try_ap), BP then OSD-2; first CRC pass that keeps the pinned
-    bits wins. No hard-error limit: the wrong-context test (0 false of 211,315) was run without one."""
+    """Context a-priori: pin each pattern's bits (as _try_ap), BP then OSD-2, then fallback OSD-3; first CRC pass
+    that keeps the pinned bits wins. No hard-error limit: the wrong-context test (0 false of 211,315) was run without one."""
     mag = 1.01 * float(np.abs(llr).max())
     hard = (llr > 0).astype(np.uint8)
     for kind, idx, val in patterns:
         l2 = llr.copy()
         l2[idx] = np.where(val == 1, mag, -mag)
         bits, ok, _ = ldpc.bp_decode(l2[None])
-        if ok[0] and ft8.crc_ok(bits[0, :91]):
-            cw, info = bits[0], {"method": "bp_cx"}
-        else:
-            cw, crc, dist, _ = ldpc.osd_decode(l2, 2)
-            if not crc:
+        if ok[0] and ft8.crc_ok(bits[0, :91]) and (bits[0, idx] == val).all():
+            return bits[0, :91], {"method": "bp_cx", "ctx": kind, "nhard": int((bits[0] != hard).sum())}
+        cw, crc, dist, _ = ldpc.osd_decode(l2, 2)
+        if not (crc and (cw[idx] == val).all()):
+            cw, crc, dist, _ = ldpc.osd_decode(l2, 3)
+            if not (crc and (cw[idx] == val).all()):
                 continue
-            info = {"method": "osd_cx", "dist": dist}
-        if (cw[idx] == val).all():
-            return cw[:91], {**info, "ctx": kind, "nhard": int((cw != hard).sum())}
+        return cw[:91], {"method": "osd_cx", "dist": dist, "ctx": kind, "nhard": int((cw != hard).sum())}
     return None, None
 
 

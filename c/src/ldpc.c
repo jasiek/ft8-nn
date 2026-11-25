@@ -252,13 +252,36 @@ int osd_decode(const double *llr, int order, uint8_t *cw, double *dist, int *nha
             for (int w = 0; w < 3; w++) c[w] = c0[w] ^ Gr[i][w];
             TRY();
         }
+    double p_rel[91];
+    for (int i = 0; i < 91; i++) p_rel[i] = rp[piv[i]];
     if (order >= 2) {
-        const int k2 = 40, lo = 91 - k2;
-        for (int i = 0; i < k2; i++)
+        const int k2 = order >= 3 ? 60 : 40, lo = 91 - k2;
+        for (int i = 0; i < k2; i++) {
+            double ri_p = p_rel[lo + i];
             for (int j = i + 1; j < k2; j++) {
+                if (ri_p + p_rel[lo + j] >= bd + 1e-12) continue;
                 for (int w = 0; w < 3; w++) c[w] = c0[w] ^ Gr[lo + i][w] ^ Gr[lo + j][w];
                 TRY();
             }
+        }
+    }
+    if (order >= 3) {
+        const int k3 = 28, lo = 91 - k3;
+        for (int a = 0; a < k3; a++) {
+            double ra = p_rel[lo + a];
+            if (ra >= bd + 1e-12) continue;
+            for (int b = a + 1; b < k3; b++) {
+                double rab = ra + p_rel[lo + b];
+                if (rab >= bd + 1e-12) continue;
+                uint64_t cab[3];
+                for (int w = 0; w < 3; w++) cab[w] = c0[w] ^ Gr[lo + a][w] ^ Gr[lo + b][w];
+                for (int k = b + 1; k < k3; k++) {
+                    if (rab + p_rel[lo + k] >= bd + 1e-12) continue;
+                    for (int w = 0; w < 3; w++) c[w] = cab[w] ^ Gr[lo + k][w];
+                    TRY();
+                }
+            }
+        }
     }
 #undef TRY
     int nh = 0;
