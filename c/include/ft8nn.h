@@ -15,7 +15,7 @@ typedef struct ft8nn_ctx ft8nn_ctx;
 
 enum { FT8NN_BP = 0, FT8NN_OSD = 1, FT8NN_BP_AP = 2, FT8NN_OSD_AP = 3, FT8NN_BP_ERASE = 4, FT8NN_OSD_ERASE = 5, FT8NN_OSD_BP = 6,
        FT8NN_BP_CTX = 7, FT8NN_OSD_CTX = 8, FT8NN_REPEAT = 9, FT8NN_BP_CC = 10, FT8NN_OSD_CC = 11, FT8NN_OSD_BP_CC = 12,
-       FT8NN_BP_CHASE = 13, FT8NN_OSD_CHASE = 14 };
+       FT8NN_BP_CHASE = 13, FT8NN_OSD_CHASE = 14, FT8NN_BP_RF = 15, FT8NN_OSD_RF = 16, FT8NN_OSD_BP_RF = 17 };
 
 typedef struct {
     char text[48];      /* decoded message, WSJT-X formatting; hashed calls as <CALL> or <...> */
@@ -27,15 +27,17 @@ typedef struct {
                            FT8NN_BP_ERASE (BP with a burst of symbols erased: message changed mid-frame),
                            FT8NN_OSD_ERASE (OSD-0 with a wider burst of 20-24 symbols erased),
                            FT8NN_OSD_BP (OSD on the summed BP posteriors of the first iterations),
-                           FT8NN_BP_CTX / FT8NN_OSD_CTX (context a-priori: calls of a message decoded 30 or
-                           60 s earlier near this frequency; ft8nn_decode_at only),
-                           FT8NN_REPEAT (a message decoded 30 or 60 s earlier, tested whole against the audio at
-                           its frequency and time after everything else is subtracted; ft8nn_decode_at only),
+                           FT8NN_BP_CTX / FT8NN_OSD_CTX (context a-priori: calls of a message decoded 30..180 s
+                           earlier near this frequency; ft8nn_decode_at only),
+                           FT8NN_REPEAT (a message or clear-winning successor from 30..180 s earlier, tested whole
+                           against the audio after everything else is subtracted; ft8nn_decode_at only),
                            FT8NN_BP_CC / FT8NN_OSD_CC / FT8NN_OSD_BP_CC (co-channel retry: a second signal found
                            under a decode's own frequency and time once everything decoded is subtracted, whose sync
                            the subtraction took away; BP, OSD, OSD on BP sums),
                            FT8NN_BP_CHASE / FT8NN_OSD_CHASE (cross-slot soft LLR Chase combining of failed NN
-                           hypotheses from 30/60 s earlier at the same (f0, dt); ft8nn_decode_at only) */
+                           hypotheses from 30/60 s earlier at the same (f0, dt); ft8nn_decode_at only),
+                           FT8NN_BP_RF / FT8NN_OSD_RF / FT8NN_OSD_BP_RF (micro-shift 3x3 TTA refinement on failed
+                           non-early NN hypotheses with exp_err < 45) */
     int metric;         /* soft metric that decoded it: 0 = NN, 1..3 = classical nsym 1..3 */
     int pass;           /* subtraction pass, 0-based */
 } ft8nn_decode_t;

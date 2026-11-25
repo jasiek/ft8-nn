@@ -1,5 +1,34 @@
 # Status and plan (resume here)
 
+## Micro-shift 3×3 TTA refinement on failed low-error hypotheses — done 2026-11-25 (tag `nn_v3_opt8`)
+
+Weak or fading signals whose Costas `fine_sync2` lands ~`0.4 Hz` or `5 ms` off-centre fail single-slot decoding
+despite low NN expected bit errors (`exp_err < 45`, ~4–6 failed non-early hypotheses per busy slot, `0` on pure
+noise). Running a 3×3 micro-shift probe on validation run 1 found that picking the single cleanest neighbour beats
+LLR averaging (`+37` vs `+22` on 3 busy stations) and yields `+81` strict new decodes (`58` slot, `20` active, `0`
+unconf, `3` n/a = `100.0%` confirmed) across all 9 run-1 stations at ~1% extra NN calls.
+Changes (`ft8nn/decoder.py`, `bench/run_real.py`, `c/include/ft8nn.h`, `c/src/decode.c`, `c/tools/ft8nn_cli.c`,
+`tests/test_refine.py`):
+- `_refine_stage` / `refine_stage` (`REFINE = (45.0, 1.0, 0.4, 1, 64)`, methods `bp_rf` / `osd_rf` / `osd_bp_rf`, C
+  `FT8NN_BP_RF` / `FT8NN_OSD_RF` / `FT8NN_OSD_BP_RF`): runs after `_cochannel_stage` and before `_chase_stage`
+  (disabled on early passes) on up to `64` deduplicated (`1.5 Hz / 0.04 s`) failed non-early hypotheses with
+  `exp_err < 45.0`; evaluates the 8 surrounding `±0.4 Hz × ±1 sample` offsets in one NN batch; if the lowest-`exp_err`
+  neighbour improves `exp_err` by `≥ 1.0`, decodes it with BP → OSD-2 → `osd_bp`, plausibility, and `_is_ghost`.
+  Accepted decodes are subtracted and fed into `post_pass` and future context.
+Results vs `nn_v3_opt6` (`tools/ab_run2.sh nn_v3_opt8` + `tools/validate_full.sh nn_v3_opt8`, M1 Pro, 8 workers, no
+sleep events):
+- noise (100 slots / 998): **0 false**;
+- validation run 2 (unseen): 31,133 / 22,794 / 1 → **31,216 / 22,851 / 1** (**+83 / +57 slot-confirmed**, `+84 / −1`,
+  same `CQ CR4UVW PI49`);
+- validation run 1: 36,996 / 28,236 / 1 → **37,114 / 28,322 / 1** (**+118 / +86 slot-confirmed**, same
+  `CQ KR9ZUC/R AO63`);
+- training recordings: 19,768 (jt9-only 127) → **19,817 (jt9-only 119)** (**+49, −8 jt9-only**, `ours/jt9 = 1.260`);
+- AWGN: 50% −22.50 → **−22.55 dB** / 90% −21.28 → **−21.30 dB** (`0` false);
+- golden C == Python (`MallocScribble`, `--threads 4`): 00_40m 866/866, 08_80m 639/639, run-2 02_80m 773/773 (and
+  run-2 00_40m 986/986 `--stream`), AWGN 430/430; `tools/ci_smoke.py` 51/51; `wsjtx/test_sidecar.sh` all checks;
+  `pytest` 111/111. `tools/golden_c.py` default `--tag` updated to `nn_v3_opt8`.
+Next: Option 7 — next-generation neural demodulator (`models/v4`).
+
 ## Context & repeat-stage extensions: 3-minute memory, clear-winning successors, and `i3=4` — done 2026-11-25 (tag `nn_v3_opt6`)
 
 Three orthogonal extensions to context a-priori (`_try_ctx` / `try_ctx`) and the repeat stage (`_repeat_stage` /

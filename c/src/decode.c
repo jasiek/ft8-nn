@@ -126,6 +126,12 @@ static int prof = -1;
 #define CHASE_MARGIN_T 0.05
 #define CHASE_EE_MAX 68.0
 #define CHASE_CAP 256
+/* micro-shift 3x3 TTA refinement (decoder._refine_stage; decoder.REFINE) */
+#define RF_EE_MAX 45.0
+#define RF_MIN_DROP 1.0
+#define RF_RDF 0.4
+#define RF_RDT 1
+#define RF_MAX_SEEDS 64
 #define DEC_CAP 512 /* decodes per slot */
 #define ERASE_GATE 15.0 /* wide-window OSD-0 erasure retry gate (decoder.erase_gate) */
 #define ERASE_BP_GATE 30.0 /* BP-only burst-erasure retry gate (decoder.erase_bp_gate) */
@@ -581,7 +587,7 @@ static int plausible(int method, const uint8_t *a91) {
     if (method < 0) return method;
     int deep = method == FT8NN_OSD || method == FT8NN_OSD_AP || method == FT8NN_OSD_ERASE || method == FT8NN_OSD_BP ||
                method == FT8NN_OSD_CTX || method == FT8NN_OSD_CC || method == FT8NN_OSD_BP_CC ||
-               method == FT8NN_OSD_CHASE;
+               method == FT8NN_OSD_CHASE || method == FT8NN_OSD_RF || method == FT8NN_OSD_BP_RF;
     return plausible77(a91, deep) ? method : -1;
 }
 
@@ -1376,6 +1382,121 @@ static void chase_margin(const double *lt, const uint8_t *b77, double *rho_out, 
     *margin_out = r0 - (nalt > 0 ? r2 : REPEAT_SOLO);
 }
 
+/* Micro-shift 3x3 TTA refinement (decoder._refine_stage): for up to RF_MAX_SEEDS deduplicated failed non-early
+ * hypotheses with exp_err < RF_EE_MAX, evaluate the 8 surrounding (+-RF_RDF Hz x +-RF_RDT sample) offsets; if the
+ * cleanest neighbour lowers exp_err by at least RF_MIN_DROP, decode it with BP -> OSD-2 -> osd_bp (ghost-filtered). */
+typedef struct {
+    ft8nn_ctx *c;
+    sync_hyp *hyps;
+    double *llr;
+    int nh;
+    atomic_int next, err;
+} rf_job;
+
+static void rf_worker(void *arg, int w) {
+    (void)w;
+    rf_job *j = arg;
+    float *feat = malloc(sizeof(float) * NN_BATCH * NN * NFEAT);
+    sync_hyp *hp[NN_CHUNK];
+    for (;;) {
+        int i0 = atomic_fetch_add(&j->next, NN_CHUNK);
+        if (i0 >= j->nh || atomic_load(&j->err)) break;
+        int b = j->nh - i0 < NN_CHUNK ? j->nh - i0 : NN_CHUNK;
+        for (int i = 0; i < b; i++) hp[i] = &j->hyps[i0 + i];
+        if (run_nn(j->c, hp, b, j->llr + (size_t)i0 * 174, feat)) {
+            atomic_store(&j->err, 1);
+            break;
+        }
+    }
+    free(feat);
+}
+
+static int refine_stage(ft8nn_ctx *c, const double *x, int n, const chase_hyp *cur, int ncur, dec *all, int nall) {
+    double sf[RF_MAX_SEEDS], sd[RF_MAX_SEEDS], see[RF_MAX_SEEDS];
+    int ns = 0;
+    for (int i = 0; i < ncur && ns < RF_MAX_SEEDS; i++) {
+        if (cur[i].exp_err >= RF_EE_MAX) break; /* sorted ascending by exp_err */
+        int dup = 0;
+        for (int q = 0; q < ns && !dup; q++) dup = fabs(cur[i].f0 - sf[q]) < 1.5 && fabs(cur[i].dt - sd[q]) < 0.04;
+        if (dup) continue;
+        sf[ns] = cur[i].f0;
+        sd[ns] = cur[i].dt;
+        see[ns++] = cur[i].exp_err;
+    }
+    if (!ns) return nall;
+    double t0 = tnow();
+    baseband bb;
+    baseband_init(&bb, x, n, c->pool);
+    int nh = ns * 8;
+    sync_hyp *hyps = malloc(sizeof(sync_hyp) * (size_t)nh);
+    static const double oa[8] = {-RF_RDF, -RF_RDF, -RF_RDF, 0.0, 0.0, RF_RDF, RF_RDF, RF_RDF};
+    static const int ob[8] = {-RF_RDT, 0, RF_RDT, -RF_RDT, RF_RDT, -RF_RDT, 0, RF_RDT};
+    cplx y0[NBB];
+    for (int si = 0; si < ns; si++) {
+        baseband_downsample(&bb, sf[si], y0);
+        int s0 = (int)nearbyint((NOMINAL_START + sd[si]) * FS_BB);
+        for (int o = 0; o < 8; o++) {
+            sync_hyp *hy = &hyps[si * 8 + o];
+            memcpy(hy->y, y0, sizeof hy->y);
+            bb_rotate(hy->y, oa[o]);
+            hy->start = s0 + ob[o];
+            hy->f0 = sf[si] + oa[o];
+            hy->dt = hy->start / FS_BB - NOMINAL_START;
+            hy->metric = 0.0;
+        }
+    }
+    baseband_free(&bb);
+    double *llr = malloc(sizeof(double) * (size_t)nh * 174);
+    rf_job rj = {.c = c, .hyps = hyps, .llr = llr, .nh = nh};
+    atomic_init(&rj.next, 0);
+    atomic_init(&rj.err, 0);
+    par_run(c->pool, rf_worker, &rj);
+    int rc = atomic_load(&rj.err) ? -1 : nall;
+    for (int si = 0; rc >= 0 && si < ns; si++) {
+        int bi = 8 * si;
+        double eeb = 1e9;
+        for (int o = 0; o < 8; o++) {
+            const double *l = llr + (size_t)(8 * si + o) * 174;
+            double e = 0.0;
+            for (int j = 0; j < 174; j++) e += 1.0 / (1.0 + exp(fabs(l[j])));
+            if (e < eeb) {
+                eeb = e;
+                bi = 8 * si + o;
+            }
+        }
+        if (see[si] - eeb < RF_MIN_DROP) continue;
+        const double *l = llr + (size_t)bi * 174;
+        const sync_hyp *hy = &hyps[bi];
+        uint8_t bits[174], a91[91];
+        int nhard, method = -1;
+        double dist;
+        if (bp_decode(l, 30, bits, &nhard) && crc_ok(bits)) {
+            memcpy(a91, bits, 91);
+            method = plausible(FT8NN_BP_RF, a91);
+        }
+        if (method < 0 && eeb < OSD_GATE) {
+            if (osd_decode(l, OSD_ORDER, bits, &dist, &nhard) && nhard <= OSD_MAX_HARD) {
+                memcpy(a91, bits, 91);
+                method = plausible(FT8NN_OSD_RF, a91);
+            }
+            if (method < 0 && OSD_SNAPS > 0 && try_osd_bp(l, a91) >= 0) method = plausible(FT8NN_OSD_BP_RF, a91);
+        }
+        if (method < 0 || !any_bits(a91, 77)) continue;
+        dec d = {.f0 = hy->f0, .dt = hy->dt, .snr = 0.0, .method = method, .metric = 0, .pass = PASSES,
+                 .final = 0, .prior = 0};
+        memcpy(d.bits77, a91, 77);
+        int skip = 0;
+        for (int q = 0; q < rc && !skip; q++) skip = same_payload(all[q].bits77, d.bits77) || is_ghost(&d, &all[q]);
+        if (skip || rc >= DEC_CAP) continue;
+        d.snr = estimate_snr(hy, d.bits77);
+        all[rc++] = d;
+    }
+    if (prof && rc >= 0) fprintf(stderr, "refine: seeds %d -> %d, %.2fs\n", ns, rc - nall, tnow() - t0);
+    free(hyps);
+    free(llr);
+    return rc;
+}
+
 /* Cross-slot soft LLR Chase combining (decoder._chase_stage). Appends accepted decodes to all[nall..); returns new n. */
 static int chase_stage(ft8nn_ctx *c, const double *x, int n, const chase_hyp *cur, int ncur,
                        const chase_hyp *const prev[2], const int nprev[2], int np, dec *all, int nall) {
@@ -1739,7 +1860,7 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
     }
     chase_hyp *fmap = NULL;
     int nfmap = 0, cfmap = 0;
-    int collect_fail = (t != INT64_MIN && !early);
+    int collect_fail = !early;
     if (n_prior > DEC_CAP) n_prior = DEC_CAP;
     for (int q = 0; q < n_prior; q++) { /* decoder.decode_slot prior: subtracted first, kept as found */
         dec *d = &all[nall++];
@@ -1812,7 +1933,31 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
         }
         nall = r;
     }
-    if (collect_fail && n_ch_prev > 0 && nfmap > 0) {
+    if (collect_fail && nfmap > 0) {
+        chase_hyp *cur_fail = malloc(sizeof(chase_hyp) * CHASE_CAP);
+        int ncur = finalize_failed(fmap, nfmap, all, nall, cur_fail);
+        int r = refine_stage(c, x, n, cur_fail, ncur, all, nall);
+        free(cur_fail);
+        if (r < 0) {
+            free(x);
+            free(all);
+            free(cx);
+            free(tried);
+            free(batch);
+            free(fmap);
+            c->nv_bb = c->cons = 0;
+            return -1;
+        }
+        for (int q = nall; q < r; q++) {
+            uint8_t cw[174];
+            int tones[NN];
+            encode77(all[q].bits77, cw, tones);
+            subtract_signal(x, n, tones, all[q].f0, all[q].dt, c->pool);
+            if (n_post < DEC_CAP) post_f0[n_post++] = all[q].f0;
+        }
+        nall = r;
+    }
+    if (t != INT64_MIN && collect_fail && n_ch_prev > 0 && nfmap > 0) {
         chase_hyp *cur_fail = malloc(sizeof(chase_hyp) * CHASE_CAP);
         int ncur = finalize_failed(fmap, nfmap, all, nall, cur_fail);
         int r = chase_stage(c, x, n, cur_fail, ncur, ch_prev, ch_nprev, n_ch_prev, all, nall);

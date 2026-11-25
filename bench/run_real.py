@@ -163,7 +163,7 @@ def _decode_early_final(path, context=(), chase_hist=(), failed_out=None):
     kw = dict(n_hyp=_NHYP, erase_gate=_EG, context=context, cand_kw=_CKW, reuse_df=_RDF, dt_recenter=_DTR)
     xe = x[:_EF]
     early = decoder.decode_slot(xe / (np.std(xe) + 1e-9), llr_fn=_LLR_E, erase_osd_dmax=0, osd_snaps=0, ap=(),
-                                passes=decoder.EARLY_PASSES, repeat=None, cochannel=None, chase=None, scale_cand=False, post_pass=False, **kw)
+                                passes=decoder.EARLY_PASSES, repeat=None, cochannel=None, chase=None, refine=None, scale_cand=False, post_pass=False, **kw)
     ds = decoder.decode_slot(x / (np.std(x) + 1e-9), llr_fn=_LLR, erase_osd_dmax=_EOD, osd_snaps=_OSN, prior=early,
                              passes=_NP, repeat=_RP, cochannel=_CC, chase=_CH, chase_hist=chase_hist, failed_out=failed_out, **kw)
     return Path(path).stem, [(d.bits77, d.f0, d.dt, d.method, d.info.get("metric"), d.snr) for d in ds]

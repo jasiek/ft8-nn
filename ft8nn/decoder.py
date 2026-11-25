@@ -87,6 +87,11 @@ COCHANNEL = (2, 1, 8.0, 24, 50, 3.0, 66.0)
 CHASE = (2.5, 0.12, 4.0, 0.30, 0.20, 0.05)
 CHASE_EE_MAX = 68.0  # keep failed non-early NN hypotheses below this expected-error ceiling (noise ~70)
 CHASE_CAP = 256      # max failed hypotheses kept per slot (lowest exp_err first)
+# Micro-shift TTA refinement (_refine_stage): for failed non-early NN hypotheses with exp_err < ee_max, test the 8
+# surrounding 3x3 offsets (+-df Hz x +-dt baseband samples); if the cleanest neighbour improves exp_err by at least
+# min_drop, decode it with BP -> OSD-2 -> osd_bp (ghost-filtered). Tuned on validation run 1: +81 strict new decodes
+# (58 slot, 20 active, 0 unconf, 3 n/a = 100.0% confirmed) at ~1% extra NN calls.
+REFINE = (45.0, 1.0, 0.4, 1, 64)  # (ee_max, min_drop, df Hz, dt baseband samples, max seeds/slot)
 
 
 def context_patterns(context, f0, dt):
@@ -142,7 +147,7 @@ def _scaled_max_cand(max_cand, cand_kw):
     return max(max_cand, min(1200, int(round(max_cand * 1.5 * w / (fe.FMAX_DEFAULT - fe.FMIN_DEFAULT)))))
 
 
-def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=4, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, erase_gate=15.0, erase_bp_gate=30.0, erase_osd_dmax=3.0, osd_snaps=2, context=(), ctx_gate=48.0, cand_kw=None, reuse_df=62.5, dt_recenter=0.8, repeat=REPEAT, cochannel=COCHANNEL, prior=(), scale_cand=True, post_pass=True, chase=CHASE, chase_hist=(), failed_out=None):
+def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=4, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, erase_gate=15.0, erase_bp_gate=30.0, erase_osd_dmax=3.0, osd_snaps=2, context=(), ctx_gate=48.0, cand_kw=None, reuse_df=62.5, dt_recenter=0.8, repeat=REPEAT, cochannel=COCHANNEL, prior=(), scale_cand=True, post_pass=True, chase=CHASE, chase_hist=(), failed_out=None, refine=REFINE):
     """Decode one 15 s slot (real audio @12 kHz, any scale), with multi-pass subtraction.
 
     llr_fn(hyps) -> per-hypothesis list of LLR vectors to try in order (first success wins).
@@ -187,7 +192,7 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
         subtract(x, ft8.encode77(d.bits77)[1], d.f0, d.dt)
     mc = _scaled_max_cand(max_cand, cand_kw) if scale_cand else max_cand
     tried, subs = {}, []  # candidate key -> pass last tried; (f0, pass) of every subtracted decode
-    failed_map = {} if (chase or failed_out is not None) else None
+    failed_map = {} if (chase or refine or failed_out is not None) else None
     for p in range(passes):
         skip = None
         if reuse_df and p:
@@ -209,6 +214,13 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
     post_f0s = []
     if cochannel and found:
         for d in _cochannel_stage(x, llr_fn, found, *cochannel, osd_order, osd_max_hard, osd_gate, osd_snaps):
+            d.info["pass"] = passes
+            found[d.key] = d
+            subtract(x, ft8.encode77(d.bits77)[1], d.f0, d.dt)
+            post_f0s.append(d.f0)
+    if refine and failed_map:
+        cur_failed = _finalize_failed(failed_map, found)
+        for d in _refine_stage(x, llr_fn, cur_failed, found, *refine, osd_order, osd_max_hard, osd_gate, osd_snaps):
             d.info["pass"] = passes
             found[d.key] = d
             subtract(x, ft8.encode77(d.bits77)[1], d.f0, d.dt)
@@ -501,6 +513,71 @@ def _cochannel_stage(x, llr_fn, found, near, far, span, tnear, tfar, min_score, 
             done.add(g)
     if log is not None:
         log += [(ci, best[ci], outcome.get(ci, "")) for ci in range(len(cells))]
+    return list(out.values())
+
+
+def _refine_stage(x, llr_fn, cur_failed, found, ee_max, min_drop, rdf, rdt, max_seeds, osd_order, osd_max_hard, osd_gate, osd_snaps):
+    """Micro-shift TTA refinement on failed non-early NN hypotheses with exp_err < ee_max: evaluate the 8 surrounding
+    3x3 offsets (+-rdf Hz x +-rdt baseband samples) in one NN batch; for each seed whose cleanest neighbour improves
+    exp_err by at least min_drop, try BP -> OSD-2 -> osd_bp with plausibility and ghost checks."""
+    seeds = []
+    for f0_i, dt_i, ee_i, _ in cur_failed:
+        if ee_i >= ee_max:
+            break  # cur_failed is sorted ascending by exp_err
+        if any(abs(f0_i - sf) < 1.5 and abs(dt_i - sd) < 0.04 for sf, sd, _ in seeds):
+            continue
+        seeds.append((f0_i, dt_i, ee_i))
+        if len(seeds) >= max_seeds:
+            break
+    if not seeds:
+        return []
+    offs = [(a, b) for a in (-rdf, 0.0, rdf) for b in (-rdt, 0, rdt) if (a, b) != (0.0, 0)]
+    bb = fe.Baseband(x)
+    hyps = []
+    for f0_i, dt_i, _ in seeds:
+        y0 = bb.downsample(f0_i)
+        s0 = int(round((ft8.NOMINAL_START + dt_i) * fe.FS_BB))
+        for df, ds in offs:
+            s = s0 + ds
+            hyps.append(fe.SyncHyp(f0_i + df, s / fe.FS_BB - ft8.NOMINAL_START, fe._rotate(y0, df), s, 0.0))
+    nn = _nn_only(llr_fn)
+    L = np.stack([l[0] for l in nn(hyps)])  # (len(seeds)*8, 174)
+    ee = (1.0 / (1.0 + np.exp(np.abs(L)))).sum(1)
+    best_idx = []
+    for si, (_, _, ee0) in enumerate(seeds):
+        sl = slice(8 * si, 8 * si + 8)
+        bi = 8 * si + int(np.argmin(ee[sl]))
+        if ee0 - float(ee[bi]) >= min_drop:
+            best_idx.append(bi)
+    if not best_idx:
+        return []
+    Lb = L[best_idx]
+    eeb = ee[best_idx]
+    bits, ok, nh = ldpc.bp_decode(Lb)
+    cells = list(found.values())
+    out = {}
+    for k, bi in enumerate(best_idx):
+        h = hyps[bi]
+        a91, info = None, None
+        if ok[k] and ft8.crc_ok(bits[k, :91]):
+            a91, info = _plausible(bits[k, :91], {"method": "bp_rf", "nhard": int(nh[k])})
+        if a91 is None and osd_order >= 0 and eeb[k] < osd_gate:
+            cw, crc, dist, nho = ldpc.osd_decode(Lb[k], osd_order)
+            if crc and nho <= osd_max_hard:
+                a91, info = _plausible(cw[:91], {"method": "osd_rf", "nhard": nho, "dist": dist})
+            if a91 is None and osd_snaps:
+                a91, info = _try_osd_bp(Lb[k], osd_snaps, osd_order, osd_max_hard)
+                if a91 is not None:
+                    a91, info = _plausible(a91, {**info, "method": "osd_bp_rf"})
+        if a91 is None or not a91[:77].any():
+            continue
+        d = Decode(a91[:77].copy(), h.f0, h.dt, 0.0, info["method"], {**info, "metric": 0, "exp_err": float(eeb[k])})
+        if d.key in found or d.key in out:
+            continue
+        if any(_is_ghost(d, e) for e in cells + list(out.values())):
+            continue
+        d.snr = estimate_snr(h, d.bits77)
+        out[d.key] = d
     return list(out.values())
 
 
