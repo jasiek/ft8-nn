@@ -117,7 +117,8 @@ def _decode_chain(paths):
     prior = _load_decodes(Path(_PRIOR[0]) / station / f"decodes_{_PRIOR[1]}.txt") if _PRIOR else {}
     for path in paths:
         t = _slot_time(Path(path).stem)
-        ctx = [c for b in (30, 60) for c in done.get(t - timedelta(seconds=b), [])] if t and _CTX else []
+        from ft8nn import decoder as _dec
+        ctx = [c for b in _dec.CTX_AGES for c in done.get(t - timedelta(seconds=b), [])] if t and _CTX else []
         chist = [fail_hist[t - timedelta(seconds=b)] for b in (30, 60) if t and _CTX and _CH and (t - timedelta(seconds=b)) in fail_hist]
         failed_out = [] if (t and _CTX and _CH and not _CTXF) else None
         stem, res = _decode_early_final(path, ctx, chist, failed_out) if _EF else _decode(path, ctx, prior.get(Path(path).stem, ()), chist, failed_out)

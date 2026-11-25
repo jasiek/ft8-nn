@@ -84,16 +84,20 @@ static int prof = -1;
 #define OSD_GATE 40.0
 #define OSD_SNAPS 2 /* OSD on BP posterior sums after iterations 1..OSD_SNAPS when OSD fails (decoder.osd_snaps) */
 #define AP_GATE 44.0
-/* context a-priori (decoder._try_ctx): decodes 30 and 60 s earlier within CTX_DF Hz and CTX_DDT s of a hypothesis */
+/* context a-priori (decoder._try_ctx): decodes 30..180 s earlier within CTX_DF Hz and CTX_DDT s of a hypothesis */
 #define CTX_GATE 48.0
 #define CTX_DF 10.0
 #define CTX_DDT 0.5
-#define CTX_HIST 4 /* slots of history kept per context */
-/* repeat stage (decoder._repeat_stage): context message tested as a whole known codeword on the residual */
+#define CTX_MAX_HARD 52 /* hard-error cap for osd_cx against channel LLRs (decoder.CTX_MAX_HARD) */
+#define CTX_AGES 6      /* same-parity periods kept in context: 30, 60, 90, 120, 150, 180 s (decoder.CTX_AGES) */
+#define CTX_HIST 12     /* slots of history kept per context (6 even + 6 odd = 3 min) */
+/* repeat stage (decoder._repeat_stage): context message or clear-winning successor tested as whole codeword */
 #define REPEAT_RHO 0.40
 #define REPEAT_MARGIN 0.15
 #define REPEAT_CLIP 2.0
 #define REPEAT_SOLO 0.35 /* runner-up rho when a sender has no sendable competitor (decoder.REPEAT_SOLO) */
+#define REPEAT_SUCC_RHO 0.55 /* clear-winning successor thresholds (k1 not in prior; decoder.REPEAT_SUCC) */
+#define REPEAT_SUCC_MARGIN 0.20
 #define MAXGRID4 32400
 #define NTOKENS_CQ 2063592u /* message.NTOKENS: call fields 2..NTOKENS-1 are CQ / CQ nnn / CQ ABCD */
 /* co-channel retry (decoder._cochannel_stage; decoder.COCHANNEL, COCHANNEL_GRID, COCHANNEL_REFINE): at each decode's
@@ -375,57 +379,88 @@ static void ap_init(void) {
 
 /* standard message (i3 = 1 or 2): call fields at bits 0..28 and 29..57 */
 static int std_msg(const uint8_t *b) { return !b[74] && (b[75] ^ b[76]); }
+/* non-standard callsign message (i3 = 4): h12 (0..11), c58 (12..69), iflip (70), nrpt (71..72), icq (73) */
+static int i4_msg(const uint8_t *b) { return b[74] && !b[75] && !b[76]; }
 
-/* Context a-priori (decoder.context_patterns + _try_ctx): for each context message within CTX_DF / CTX_DDT, pattern
- * pair (bits 0..57 + i3) then sender (29..57 + i3), deduplicated in order; pin, BP, else OSD-2; first CRC pass that
- * keeps the pinned bits wins. Returns FT8NN_BP_CTX, FT8NN_OSD_CTX or -1. */
+/* Context a-priori (decoder.context_patterns + _try_ctx): for each context message within CTX_DF / CTX_DDT,
+ * standard (i3 1/2): pair (0..57 + i3) then sender (29..57 + i3);
+ * non-standard (i3 4): i4_pair (0..70 + i3, QSO only) then i4_call (12..69 + i3).
+ * Deduplicated in order; pin, BP, else OSD-2, else OSD-3 (osd_cx capped at CTX_MAX_HARD channel hard errors). */
 static int try_ctx(const double *llr, const dec *cx, int ncx, double f0, double dt, uint8_t *a91) {
-    enum { MAXP = 64 };
+    enum { MAXP = 256 };
     const uint8_t *pb[MAXP];
     int pk[MAXP], np = 0;
+    static const int pat_lo[4] = {0, 29, 0, 12}, pat_hi[4] = {58, 58, 71, 70};
     for (int i = 0; i < ncx && np < MAXP; i++) {
-        if (fabs(cx[i].f0 - f0) > CTX_DF || fabs(cx[i].dt - dt) > CTX_DDT || !std_msg(cx[i].bits77)) continue;
-        for (int kind = 0; kind < 2 && np < MAXP; kind++) {
-            int lo = kind ? 29 : 0, dup = 0;
+        const uint8_t *b = cx[i].bits77;
+        if (fabs(cx[i].f0 - f0) > CTX_DF || fabs(cx[i].dt - dt) > CTX_DDT) continue;
+        int kinds[2], nk = 0;
+        if (std_msg(b)) {
+            kinds[0] = 0;
+            kinds[1] = 1;
+            nk = 2;
+        } else if (i4_msg(b)) {
+            if (!b[73]) kinds[nk++] = 2;
+            kinds[nk++] = 3;
+        } else {
+            continue;
+        }
+        for (int ki = 0; ki < nk && np < MAXP; ki++) {
+            int kind = kinds[ki], lo = pat_lo[kind], len = pat_hi[kind] - lo, dup = 0;
             for (int q = 0; q < np && !dup; q++)
-                dup = pk[q] == kind && !memcmp(pb[q] + lo, cx[i].bits77 + lo, 58 - lo) && !memcmp(pb[q] + 74, cx[i].bits77 + 74, 3);
+                dup = pk[q] == kind && !memcmp(pb[q] + lo, b + lo, (size_t)len) && !memcmp(pb[q] + 74, b + 74, 3);
             if (!dup) {
-                pb[np] = cx[i].bits77;
+                pb[np] = b;
                 pk[np++] = kind;
             }
         }
     }
     if (!np) return -1;
     double mag = 0, l2[174], dist;
-    for (int i = 0; i < 174; i++) mag = fmax(mag, fabs(llr[i]));
+    uint8_t hard[174];
+    for (int i = 0; i < 174; i++) {
+        mag = fmax(mag, fabs(llr[i]));
+        hard[i] = llr[i] > 0;
+    }
     mag *= 1.01;
     uint8_t bits[174];
     int nh;
     for (int q = 0; q < np; q++) {
-        int lo = pk[q] ? 29 : 0;
+        int lo = pat_lo[pk[q]], hi = pat_hi[pk[q]], len = hi - lo;
         memcpy(l2, llr, sizeof l2);
-        for (int i = lo; i < 58; i++) l2[i] = pb[q][i] ? mag : -mag;
+        for (int i = lo; i < hi; i++) l2[i] = pb[q][i] ? mag : -mag;
         for (int i = 74; i < 77; i++) l2[i] = pb[q][i] ? mag : -mag;
         if (bp_decode(l2, 30, bits, &nh) && crc_ok(bits) &&
-            !memcmp(bits + lo, pb[q] + lo, 58 - lo) && !memcmp(bits + 74, pb[q] + 74, 3)) {
+            !memcmp(bits + lo, pb[q] + lo, (size_t)len) && !memcmp(bits + 74, pb[q] + 74, 3)) {
             memcpy(a91, bits, 91);
             return FT8NN_BP_CTX;
         }
-        if ((osd_decode(l2, OSD_ORDER, bits, &dist, &nh) &&
-             !memcmp(bits + lo, pb[q] + lo, 58 - lo) && !memcmp(bits + 74, pb[q] + 74, 3)) ||
-            (osd_decode(l2, 3, bits, &dist, &nh) &&
-             !memcmp(bits + lo, pb[q] + lo, 58 - lo) && !memcmp(bits + 74, pb[q] + 74, 3))) {
-            memcpy(a91, bits, 91);
-            return FT8NN_OSD_CTX;
+        for (int ord = OSD_ORDER; ord <= 3; ord++) {
+            if (!osd_decode(l2, ord, bits, &dist, &nh)) continue;
+            int nh_ch = 0;
+            for (int i = 0; i < 174; i++) nh_ch += bits[i] != hard[i];
+            if (nh_ch <= CTX_MAX_HARD && !memcmp(bits + lo, pb[q] + lo, (size_t)len) &&
+                !memcmp(bits + 74, pb[q] + 74, 3)) {
+                memcpy(a91, bits, 91);
+                return FT8NN_OSD_CTX;
+            }
         }
     }
     return -1;
 }
 
 static int is_ctx(int m) { return m == FT8NN_BP_CTX || m == FT8NN_OSD_CTX; }
-static int same_sender(const dec *a, const dec *b) {
-    return std_msg(a->bits77) && std_msg(b->bits77) && !memcmp(a->bits77 + 29, b->bits77 + 29, 29);
+static int same_sender_bits(const uint8_t *a, const uint8_t *b) {
+    if (std_msg(a) && std_msg(b)) return !memcmp(a + 29, b + 29, 29);
+    if (i4_msg(a) && i4_msg(b)) {
+        int ac = a[73] || !a[70], bc = b[73] || !b[70];
+        if (ac != bc) return 0;
+        if (ac) return !memcmp(a + 12, b + 12, 58);
+        return !memcmp(a, b, 12) && !memcmp(a + 12, b + 12, 58);
+    }
+    return 0;
 }
+static int same_sender(const dec *a, const dec *b) { return same_sender_bits(a->bits77, b->bits77); }
 
 /* A station sends one message per slot (decoder._drop_ctx_dupes): drop a context decode in all[from..n) whose sender
  * a non-context decode in all[0..n) or an earlier kept context decode in all[from..) has. Returns the new n. */
@@ -1439,8 +1474,9 @@ static int chase_stage(ft8nn_ctx *c, const double *x, int n, const chase_hyp *cu
 }
 
 static int repeat_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int nall, const dec *cx, int ncx) {
-    enum { MAXPRI = 16, MAXALT = 2048 };
+    enum { MAXPRI = 64, MAXALT = 2048 };
     uint8_t *done = calloc((size_t)ncx, 1); /* context entry already in an earlier sender group */
+    int *mem = malloc(sizeof(int) * (size_t)ncx);
     uint8_t(*alt)[77] = malloc(sizeof *alt * MAXALT);
     double *S = malloc(sizeof(double) * MAXALT * 174), *rho = malloc(sizeof(double) * MAXALT);
     sync_hyp *hyps = malloc(sizeof(sync_hyp) * N_HYP), *hp[N_HYP];
@@ -1450,16 +1486,17 @@ static int repeat_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int nall
     int bb_ready = 0, rc = nall;
     for (int g = 0; g < ncx; g++) {
         const uint8_t *b0 = cx[g].bits77;
-        if (done[g] || !std_msg(b0)) continue;
+        int is_i4 = i4_msg(b0);
+        if (done[g] || (!std_msg(b0) && !is_i4)) continue;
         int skip = 0;
         for (int q = 0; q < nall && !skip; q++) skip = same_payload(all[q].bits77, b0);
         if (skip) continue;
-        for (int q = 0; q < nall && !skip; q++) skip = std_msg(all[q].bits77) && !memcmp(all[q].bits77 + 29, b0 + 29, 29);
+        for (int q = 0; q < nall && !skip; q++) skip = same_sender_bits(all[q].bits77, b0);
         if (skip) continue;
         /* the sender group: g and every later eligible context entry with the same sender, in context order */
-        int mem[2 * DEC_CAP], nm = 0;
+        int nm = 0;
         for (int i = g; i < ncx; i++) {
-            if (done[i] || !std_msg(cx[i].bits77) || memcmp(cx[i].bits77 + 29, b0 + 29, 29)) continue;
+            if (done[i] || !same_sender_bits(cx[i].bits77, b0)) continue;
             int known = 0;
             for (int q = 0; q < nall && !known; q++) known = same_payload(all[q].bits77, cx[i].bits77);
             done[i] = 1;
@@ -1468,35 +1505,57 @@ static int repeat_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int nall
         /* alternatives: earlier messages first (deduplicated), then the competitors */
         int na = 0;
         for (int i = 0; i < nm; i++) na = add_alt(alt, na, MAXPRI, cx[mem[i]].bits77);
-        int npri = na, grids[MAXPRI], ng = 0;
-        for (int i = 0; i < npri; i++) {
-            int gv = get_bits(alt[i] + 59, 15), dup = 0;
-            for (int j = 0; j < ng; j++) dup |= grids[j] == gv;
-            if (gv < MAXGRID4 && !dup) grids[ng++] = gv;
-        }
-        for (int i = 1; i < ng; i++) /* sorted, as decoder.py */
-            for (int j = i; j > 0 && grids[j - 1] > grids[j]; j--) {
-                int t = grids[j];
-                grids[j] = grids[j - 1];
-                grids[j - 1] = t;
-            }
-        for (int i = 0; i < npri; i++) {
-            uint8_t a[77];
-            for (int j = 0; j < ng; j++) { /* the sender's own CQ */
-                memcpy(a, alt[i], 77);
-                set_bits(a, 2, 28);
-                a[28] = a[58] = 0;
-                set_bits(a + 59, grids[j], 15);
-                na = add_alt(alt, na, MAXALT, a);
-            }
-            int gv0 = get_bits(alt[i] + 59, 15);
-            for (int k = gv0 < MAXGRID4 ? -1 : 0; k < 64; k++) {
-                int gv = k < 0 ? gv0 : k < 3 ? MAXGRID4 + 2 + k : MAXGRID4 + 35 + (k - 3 - 30);
-                for (int r = 0; r < 2; r++) {
+        int npri = na;
+        if (is_i4) {
+            for (int i = 0; i < npri; i++) {
+                if (alt[i][73]) continue; /* CQ c58 has only itself */
+                uint8_t a[77];
+                for (int nrpt = 0; nrpt < 4; nrpt++) {
                     memcpy(a, alt[i], 77);
-                    a[58] = (uint8_t)r;
-                    set_bits(a + 59, gv, 15);
-                    if (sendable(a)) na = add_alt(alt, na, MAXALT, a);
+                    a[71] = (uint8_t)((nrpt >> 1) & 1);
+                    a[72] = (uint8_t)(nrpt & 1);
+                    a[73] = 0;
+                    na = add_alt(alt, na, MAXALT, a);
+                }
+                if (!alt[i][70]) { /* iflip == 0 -> sender is c58, can return to CQ c58 */
+                    memcpy(a, alt[i], 77);
+                    memset(a, 0, 12);
+                    a[70] = a[71] = a[72] = 0;
+                    a[73] = 1;
+                    na = add_alt(alt, na, MAXALT, a);
+                }
+            }
+        } else {
+            int grids[MAXPRI], ng = 0;
+            for (int i = 0; i < npri; i++) {
+                int gv = get_bits(alt[i] + 59, 15), dup = 0;
+                for (int j = 0; j < ng; j++) dup |= grids[j] == gv;
+                if (gv < MAXGRID4 && !dup) grids[ng++] = gv;
+            }
+            for (int i = 1; i < ng; i++) /* sorted, as decoder.py */
+                for (int j = i; j > 0 && grids[j - 1] > grids[j]; j--) {
+                    int t = grids[j];
+                    grids[j] = grids[j - 1];
+                    grids[j - 1] = t;
+                }
+            for (int i = 0; i < npri; i++) {
+                uint8_t a[77];
+                for (int j = 0; j < ng; j++) { /* the sender's own CQ */
+                    memcpy(a, alt[i], 77);
+                    set_bits(a, 2, 28);
+                    a[28] = a[58] = 0;
+                    set_bits(a + 59, grids[j], 15);
+                    na = add_alt(alt, na, MAXALT, a);
+                }
+                int gv0 = get_bits(alt[i] + 59, 15);
+                for (int k = gv0 < MAXGRID4 ? -1 : 0; k < 64; k++) {
+                    int gv = k < 0 ? gv0 : k < 3 ? MAXGRID4 + 2 + k : MAXGRID4 + 35 + (k - 3 - 30);
+                    for (int r = 0; r < 2; r++) {
+                        memcpy(a, alt[i], 77);
+                        a[58] = (uint8_t)r;
+                        set_bits(a + 59, gv, 15);
+                        if (sendable(a)) na = add_alt(alt, na, MAXALT, a);
+                    }
                 }
             }
         }
@@ -1513,11 +1572,20 @@ static int repeat_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int nall
         double r1 = 0, r2 = 0;
         int k1 = -1;
         sync_hyp best_h;
-        for (int i = 0; i < nm; i++) { /* each distinct location, in context order */
+        /* Keep at most 2 distinct locations (newest first, separated by >= 1 Hz or >= 0.05 s) */
+        double loc_f[2], loc_d[2];
+        int nloc = 0;
+        for (int i = 0; i < nm && nloc < 2; i++) {
+            double fc = cx[mem[i]].f0, dc = cx[mem[i]].dt;
             int dup = 0;
-            for (int j = 0; j < i && !dup; j++) dup = cx[mem[j]].f0 == cx[mem[i]].f0 && cx[mem[j]].dt == cx[mem[i]].dt;
-            if (dup) continue;
-            candidate loc = {cx[mem[i]].f0, cx[mem[i]].dt, 0.0, 0};
+            for (int j = 0; j < nloc && !dup; j++) dup = fabs(fc - loc_f[j]) < 1.0 && fabs(dc - loc_d[j]) < 0.05;
+            if (!dup) {
+                loc_f[nloc] = fc;
+                loc_d[nloc++] = dc;
+            }
+        }
+        for (int i = 0; i < nloc; i++) {
+            candidate loc = {loc_f[i], loc_d[i], 0.0, 0};
             int nh = fine_sync2(&bb, &loc, N_HYP, hyps);
             if (nh <= 0) continue;
             for (int h = 0; h < nh; h++) hp[h] = &hyps[h];
@@ -1541,15 +1609,20 @@ static int repeat_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int nall
                     if (rho[a] > rho[b1]) b1 = a;
                 for (int a = 0; a < na; a++)
                     if (a != b1 && (b2 < 0 || rho[a] > rho[b2])) b2 = a;
+                double cr2 = b2 >= 0 ? rho[b2] : REPEAT_SOLO;
+                if (is_i4 && cr2 < REPEAT_SOLO) cr2 = REPEAT_SOLO;
                 if (k1 < 0 || rho[b1] > r1) {
                     r1 = rho[b1];
-                    r2 = b2 >= 0 ? rho[b2] : REPEAT_SOLO; /* no sendable competitor (a CQ-only sender): rho >= 0.50 */
+                    r2 = cr2;
                     k1 = b1;
                     best_h = hyps[h];
                 }
             }
         }
-        if (k1 >= 0 && k1 < npri && r1 >= REPEAT_RHO && r1 - r2 >= REPEAT_MARGIN && rc < DEC_CAP) {
+        int in_pri = k1 >= 0 && k1 < npri;
+        int ok_acc = in_pri ? (r1 >= REPEAT_RHO && r1 - r2 >= REPEAT_MARGIN)
+                            : (k1 >= 0 && r1 >= REPEAT_SUCC_RHO && r1 - r2 >= REPEAT_SUCC_MARGIN);
+        if (ok_acc && rc < DEC_CAP) {
             dec *d = &all[rc++];
             d->final = 0;
             d->prior = 0;
@@ -1565,6 +1638,7 @@ static int repeat_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int nall
 out:
     if (bb_ready) baseband_free(&bb);
     free(done);
+    free(mem);
     free(alt);
     free(S);
     free(rho);
@@ -1650,14 +1724,14 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
     int nall = 0, ncx = 0;
     const chase_hyp *ch_prev[2];
     int ch_nprev[2], n_ch_prev = 0;
-    if (t != INT64_MIN) { /* context & Chase history: 30 then 60 s earlier */
-        cx = malloc(sizeof(dec) * 2 * DEC_CAP);
-        for (int b = 30; b <= 60; b += 30)
+    if (t != INT64_MIN) { /* context (30..180 s earlier) & Chase history (30..60 s earlier) */
+        cx = malloc(sizeof(dec) * CTX_AGES * DEC_CAP);
+        for (int b = 30; b <= 30 * CTX_AGES; b += 30)
             for (int i = 0; i < CTX_HIST; i++)
                 if (c->hist[i].t == t - b) {
                     memcpy(cx + ncx, c->hist[i].d, sizeof(dec) * c->hist[i].n);
                     ncx += c->hist[i].n;
-                    if (c->hist[i].nfail > 0 && n_ch_prev < 2) {
+                    if (b <= 60 && c->hist[i].nfail > 0 && n_ch_prev < 2) {
                         ch_prev[n_ch_prev] = c->hist[i].fail;
                         ch_nprev[n_ch_prev++] = c->hist[i].nfail;
                     }

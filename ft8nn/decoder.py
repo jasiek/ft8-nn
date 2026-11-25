@@ -40,19 +40,26 @@ def _ap_cq():
 
 AP_CQ = _ap_cq()
 
-# Context a-priori: a station keeps its audio frequency and usually continues the same exchange, so a standard
-# message decoded 30 or 60 s earlier (same period) near f predicts the next one there. Patterns, strongest first:
-# pair = both call fields + i3 (61 bits: the QSO continues), sender = second call + i3 (32 bits: new partner, after CQ).
-# Validation run 2 prototype: +1117 new decodes; with every receiver given another receiver's context instead
-# (all decodes would be false) 0 of 211,315 hypotheses decoded.
+# Context a-priori: a station keeps its audio frequency and usually continues the same exchange, so a message decoded
+# 30..180 s earlier (same period) near f predicts the next one there. Patterns, strongest first:
+# standard (i3=1/2): pair = both call fields + i3 (61 bits), sender = second call + i3 (32 bits).
+# non-standard (i3=4): i4_pair = h12 + c58 + iflip + i3 (74 bits, QSO only), i4_call = c58 + i3 (61 bits).
 CTX_PAIR = np.r_[0:58, 74:77]
 CTX_SENDER = np.r_[29:58, 74:77]
+CTX_I4_PAIR = np.r_[0:71, 74:77]
+CTX_I4_CALL = np.r_[12:70, 74:77]
 CTX_DF = 10.0  # Hz
 # A sender's clock is stable: run 2, same sender within CTX_DF 30/60 s later, |dDT| p90 0.05 s, p99 0.49 s. Without this
 # limit a late copy (DT 2.36) of a strong neighbour decoded as `9R2NKT NI8T R IC50` and then fed itself as context.
 CTX_DDT = 0.5  # s
+CTX_MAX_HARD = 52  # hard-error cap for osd_cx (run 1 wrong-band 30..180 s null: rejects the sole false hit at nhard=57)
+CTX_AGES = (30, 60, 90, 120, 150, 180)  # same-parity context lookback, s (6 periods = 3 min)
 # Repeat stage (_repeat_stage, plan 12): (rho_min, margin, LLR clip), chosen on validation run 1.
 REPEAT = (0.40, 0.15, 2.0)
+# Clear-winning successor thresholds in _repeat_stage (k1 not in prior): tighter than exact repeats because ~130
+# successors compete per sender. Tuned on run 1: +220 new decodes (114 slot, 106 active, 0 unconf, 42/42 jt9 exact
+# match, 0 stale), 0 / 140,539 wrong-band shuffle null.
+REPEAT_SUCC = (0.55, 0.20)
 # Runner-up rho for a sender with no sendable competitor (its earlier messages are all CQs, and _successors no longer
 # offers a CQ with a report or the R flag), so such a sender needs rho >= 0.50. Run-1 shuffled-context null
 # (tools/rp_competitors.py, the same 223,643 tests as above): with runner-up 0, 6 false accepts; 0.30, 1 (the
@@ -83,13 +90,20 @@ CHASE_CAP = 256      # max failed hypotheses kept per slot (lowest exp_err first
 
 
 def context_patterns(context, f0, dt):
-    """[(kind, idx, val)] for the context messages [(f0, dt, bits77)] within CTX_DF and CTX_DDT of (f0, dt); standard
-    messages (i3 1/2) only."""
+    """[(kind, idx, val)] for context messages [(f0, dt, bits77)] within CTX_DF and CTX_DDT of (f0, dt):
+    standard (i3 1/2: pair, sender) and non-standard (i3 4: i4_pair for QSO, i4_call)."""
     out, seen = [], set()
     for fc, dc, b in context:
-        if abs(fc - f0) > CTX_DF or abs(dc - dt) > CTX_DDT or b[74:77].tolist() not in ([0, 0, 1], [0, 1, 0]):
+        if abs(fc - f0) > CTX_DF or abs(dc - dt) > CTX_DDT:
             continue
-        for kind, idx in (("pair", CTX_PAIR), ("sender", CTX_SENDER)):
+        i3 = b[74:77].tolist()
+        if i3 in ([0, 0, 1], [0, 1, 0]):
+            pats = (("pair", CTX_PAIR), ("sender", CTX_SENDER))
+        elif i3 == [1, 0, 0]:
+            pats = (("i4_call", CTX_I4_CALL),) if b[73] else (("i4_pair", CTX_I4_PAIR), ("i4_call", CTX_I4_CALL))
+        else:
+            continue
+        for kind, idx in pats:
             key = (kind, b[idx].tobytes())
             if key not in seen:
                 seen.add(key)
@@ -289,33 +303,71 @@ def _successors(b, grids=(), sendable_only=True):
     return out
 
 
+def _i4_successors(b):
+    """Sendable i3=4 competitors: for CQ c58 (icq=1) only itself; for QSO (icq=0), all 4 nrpt values (0..3) with
+    same h12/c58/iflip, plus CQ c58 when iflip==0 (c58 is the sender)."""
+    if b[73]:
+        return [b.copy()]
+    out = []
+    for nrpt in range(4):
+        c = b.copy()
+        c[71], c[72], c[73] = (nrpt >> 1) & 1, nrpt & 1, 0
+        out.append(c)
+    if not b[70]:
+        c = b.copy()
+        c[0:12] = 0
+        c[70] = c[71] = c[72] = 0
+        c[73] = 1
+        out.append(c)
+    return out
+
+
 def _repeat_stage(x, llr_fn, found, context, n_hyp, rho_min, margin, clip, log=None):
-    """Decodes for context messages whose sender has no decode in this slot (see the comment above). log: list to
+    """Decodes for context messages whose sender has no decode in this slot (standard i3=1/2 and non-standard i3=4).
+    Accepts exact repeats at (rho_min, margin) and clear-winning sendable successors at REPEAT_SUCC. log: list to
     append (best rho, runner-up rho, best is an earlier message, best payload) to for every tested sender."""
     have_s = {_sender_key(d) for d in found.values()}
+    have_s.discard(None)
     have_b = set(found)
-    groups = {}  # sender -> [(f0, dt, bits77)]
+    groups = {}  # sender_key -> [(f0, dt, bits77)]
     for fc, dc, b in context:
-        if b[74:77].tolist() not in ([0, 0, 1], [0, 1, 0]) or "".join(map(str, b)) in have_b:
+        if "".join(map(str, b)) in have_b:
             continue
-        sk = b[29:58].tobytes()
-        if sk not in have_s:
+        sk = _bits_sender_key(b)
+        if sk is not None and sk not in have_s:
             groups.setdefault(sk, []).append((fc, dc, b))
     if not groups:
         return []
     bb = fe.Baseband(x)
     out = []
-    for msgs in groups.values():
+    succ_rho, succ_margin = REPEAT_SUCC
+    for sk, msgs in groups.items():
+        is_i4 = sk[0] != "std"
         prior = {m[2].tobytes(): m[2] for m in msgs}
         alts = dict(prior)
-        grids = sorted({message._int(b[59:74]) for b in prior.values() if message._int(b[59:74]) < message.MAXGRID4})
-        for b in prior.values():
-            for c in _successors(b, grids, sendable_only=REPEAT_SENDABLE):
-                alts.setdefault(c.tobytes(), c)
+        if is_i4:
+            for b in prior.values():
+                for c in _i4_successors(b):
+                    alts.setdefault(c.tobytes(), c)
+        else:
+            grids = sorted({message._int(b[59:74]) for b in prior.values() if message._int(b[59:74]) < message.MAXGRID4})
+            for b in prior.values():
+                for c in _successors(b, grids, sendable_only=REPEAT_SENDABLE):
+                    alts.setdefault(c.tobytes(), c)
         keys = list(alts)
         S = np.stack([_codeword(alts[k]) for k in keys])  # (n_alt, 174)
+        # Keep at most 2 distinct locations (newest first, separated by >= 1 Hz or >= 0.05 s) so 6-slot history
+        # does not redundantly re-evaluate the same fine_sync2 window.
+        locs = []
+        for m in msgs:
+            fc, dc = m[0], m[1]
+            if any(abs(fc - uf) < 1.0 and abs(dc - ud) < 0.05 for uf, ud in locs):
+                continue
+            locs.append((fc, dc))
+            if len(locs) == 2:
+                break
         best = None
-        for fc, dc in dict.fromkeys((m[0], m[1]) for m in msgs):  # each distinct location, in context order
+        for fc, dc in locs:
             hs = fe.fine_sync2(bb, _Loc(fc, dc), n_hyp=n_hyp)
             if not hs:
                 continue
@@ -325,17 +377,21 @@ def _repeat_stage(x, llr_fn, found, context, n_hyp, rho_min, margin, clip, log=N
                 order = np.argsort(-rho, kind="stable")  # ties: lowest index, as the C port
                 i1 = order[0]
                 # a sender whose only earlier message is a CQ has no sendable competitor: the runner-up is then the
-                # noise ceiling REPEAT_SOLO, so the test asks rho >= REPEAT_SOLO + margin instead of rho >= rho_min
+                # noise ceiling REPEAT_SOLO; i3=4 groups have at most 5 competitors, so floor their runner-up too
                 r2 = float(rho[order[1]]) if len(order) > 1 else REPEAT_SOLO
+                if is_i4 and r2 < REPEAT_SOLO:
+                    r2 = REPEAT_SOLO
                 if best is None or rho[i1] > best[0]:
                     best = (float(rho[i1]), r2, keys[i1], h)
         if best is None:
             continue
         r1, r2, k1, h = best
+        in_pri = k1 in prior
         if log is not None:
-            log.append((r1, r2, k1 in prior, alts[k1]))
-        if k1 in prior and r1 >= rho_min and r1 - r2 >= margin:
-            d = Decode(prior[k1].copy(), h.f0, h.dt, h.metric, "rp", {"rho": r1, "rho2": r2, "metric": 0})
+            log.append((r1, r2, in_pri, alts[k1]))
+        ok_acc = (r1 >= rho_min and r1 - r2 >= margin) if in_pri else (r1 >= succ_rho and r1 - r2 >= succ_margin)
+        if ok_acc:
+            d = Decode(alts[k1].copy(), h.f0, h.dt, h.metric, "rp", {"rho": r1, "rho2": r2, "metric": 0, "succ": not in_pri})
             d.snr = estimate_snr(h, d.bits77)
             out.append(d)
     return out
@@ -690,9 +746,21 @@ GHOST_PRONE = ("osd_er", "osd_bp")
 CTX_METHODS = ("bp_cx", "osd_cx")
 
 
+def _bits_sender_key(b):
+    """Sender identity key for standard (i3 1/2) and non-standard (i3 4) messages, else None."""
+    i3 = b[74:77].tolist()
+    if i3 in ([0, 0, 1], [0, 1, 0]):
+        return ("std", b[29:58].tobytes())
+    if i3 == [1, 0, 0]:
+        if b[73] or not b[70]:  # CQ c58 or <h12> c58 -> sender is c58
+            return ("i4_c58", b[12:70].tobytes())
+        return ("i4_h12", b[0:12].tobytes(), b[12:70].tobytes())
+    return None
+
+
 def _sender_key(d):
-    """Second call field (+ ipb) of a standard message, else None."""
-    return d.bits77[29:58].tobytes() if d.bits77[74:77].tolist() in ([0, 0, 1], [0, 1, 0]) else None
+    """Sender identity key of a Decode, else None."""
+    return _bits_sender_key(d.bits77)
 
 
 def _drop_ctx_dupes(found, known=()):
@@ -785,7 +853,7 @@ def _try_osd_bp(llr, n, osd_order, osd_max_hard):
 
 def _try_ctx(llr, patterns):
     """Context a-priori: pin each pattern's bits (as _try_ap), BP then OSD-2, then fallback OSD-3; first CRC pass
-    that keeps the pinned bits wins. No hard-error limit: the wrong-context test (0 false of 211,315) was run without one."""
+    that keeps the pinned bits wins (osd_cx capped at CTX_MAX_HARD hard errors against the channel LLRs)."""
     mag = 1.01 * float(np.abs(llr).max())
     hard = (llr > 0).astype(np.uint8)
     for kind, idx, val in patterns:
@@ -795,11 +863,13 @@ def _try_ctx(llr, patterns):
         if ok[0] and ft8.crc_ok(bits[0, :91]) and (bits[0, idx] == val).all():
             return bits[0, :91], {"method": "bp_cx", "ctx": kind, "nhard": int((bits[0] != hard).sum())}
         cw, crc, dist, _ = ldpc.osd_decode(l2, 2)
-        if not (crc and (cw[idx] == val).all()):
+        nh = int((cw != hard).sum()) if crc else 174
+        if not (crc and nh <= CTX_MAX_HARD and (cw[idx] == val).all()):
             cw, crc, dist, _ = ldpc.osd_decode(l2, 3)
-            if not (crc and (cw[idx] == val).all()):
+            nh = int((cw != hard).sum()) if crc else 174
+            if not (crc and nh <= CTX_MAX_HARD and (cw[idx] == val).all()):
                 continue
-        return cw[:91], {"method": "osd_cx", "dist": dist, "ctx": kind, "nhard": int((cw != hard).sum())}
+        return cw[:91], {"method": "osd_cx", "dist": dist, "ctx": kind, "nhard": nh}
     return None, None
 
 

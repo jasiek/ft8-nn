@@ -1,5 +1,37 @@
 # Status and plan (resume here)
 
+## Context & repeat-stage extensions: 3-minute memory, clear-winning successors, and `i3=4` — done 2026-11-25 (tag `nn_v3_opt6`)
+
+Three orthogonal extensions to context a-priori (`_try_ctx` / `try_ctx`) and the repeat stage (`_repeat_stage` /
+`repeat_stage`), all tuned on validation run 1 with wrong-band shuffle nulls, PSKReporter verification, and `jt9`
+exact-text stale checks (`ft8nn/decoder.py`, `bench/run_real.py`, `c/src/decode.c`, `tests/test_repeat.py`):
+1. **3-minute station memory (`CTX_AGES = (30, 60, 90, 120, 150, 180)`, C `CTX_HIST = 12`):** extends context lookback
+   from 2 same-parity periods (`30/60 s`) to 6 (`30..180 s`, keeping Chase combining at `30/60 s`), with `CTX_MAX_HARD = 52`
+   on `osd_cx` (eliminates the sole `nhard=57` wrong-band null hit `R8PG GB1RBL R IQ98` while keeping >98% of real
+   `osd_cx` decodes). `_repeat_stage` caps per-sender locations to the 2 newest distinct `(f0, dt)` positions (`≥1 Hz`
+   or `≥0.05 s` apart) so 6-slot history stays fast.
+2. **Clear-winning successors in `_repeat_stage` (`REPEAT_SUCC = (0.55, 0.20)`):** accepts `k1 not in prior` when a
+   sendable successor beats all ~130 competitors with `rho >= 0.55` and `margin >= 0.20` (zero extra NN calls; run-1
+   probe: `+220` new decodes, `0` unconf, `42/42` `jt9` exact match, `0 / 140,539` wrong-band null).
+3. **`i3=4` non-standard calls in context AP and `_repeat_stage`:** adds `i4_pair` (74 pinned bits, QSO only) and
+   `i4_call` (61 pinned bits) to `context_patterns`, extends `_sender_key` / `same_sender` to `i3=4` (`c58` when
+   `icq=1` or `iflip=0`, `(h12, c58)` otherwise), and adds `i3=4` groups to `_repeat_stage` with runner-up floored at
+   `REPEAT_SOLO = 0.35` (`0 / 4,101` wrong-band null, `7/7` `jt9` exact match).
+Results vs `nn_v3_opt5b` (`tools/ab_run2.sh nn_v3_opt6` + `tools/validate_full.sh nn_v3_opt6`, M1 Pro, 8 workers, no
+sleep events):
+- noise (100 slots / 998): **0 false**;
+- validation run 2 (unseen): 30,454 / 22,373 / 1 → **31,133 / 22,794 / 1** (**+679 / +421 slot-confirmed**, same
+  `CQ CR4UVW PI49`; `rp_stale` vs `jt9`: **205 / 205 exact match, 0 stale**);
+- validation run 1: 35,850 / 27,450 / 1 → **36,996 / 28,236 / 1** (**+1,146 / +786 slot-confirmed**, same
+  `CQ KR9ZUC/R AO63`; `rp_stale` vs `jt9`: **335 / 335 exact match, 0 stale**);
+- training recordings: 19,286 (jt9-only 161) → **19,768 (jt9-only 127)** (**+482, −34 jt9-only**, `ours/jt9 = 1.257`);
+- AWGN: 50% −22.50 / 90% −21.28 dB (identical, `0` false);
+- golden C == Python (`MallocScribble`, `--threads 4`): 00_40m 865/865, 08_80m 639/639, run-2 02_80m 769/769 (and
+  run-2 00_40m 986/986 `--stream`), AWGN 429/429; `tools/ci_smoke.py` 51/51; `wsjtx/test_sidecar.sh` all checks;
+  `pytest` 110/110. `tools/golden_c.py` default `--tag` updated to `nn_v3_opt6`.
+Next: Option 7 (next-generation neural demodulator `models/v4`) or Option 8 (fallback LLR ensembling / test-time
+augmentation on failed `E < 48` hypotheses).
+
 ## Fallback OSD-3 in verified stages and wider BP-only burst erasure — done 2026-11-24 (tag `nn_v3_opt5b`)
 
 Offline probing of all 6,056 strict-failed run-1 residual neural hypotheses (`exp_err < 45`) found:
