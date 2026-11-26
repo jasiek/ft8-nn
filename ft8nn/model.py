@@ -82,8 +82,18 @@ class SoftDemod(nn.Module):
         c1, c2 = self.conv[0], self.conv[2]
         gelu = nn.functional.gelu  # same as self.conv (Conv, GELU, Conv, GELU), fast path
         h = h + gelu(_conv_bl(gelu(_conv_bl(h, c1)), c2))
-        h = self.tf(h)
-        h = self.out(self.norm(h[:, self.data_pos]))  # (B,58,3)
+        if len(self.tf.layers) > 0:
+            for lyr in self.tf.layers[:-1]:
+                h = lyr(h)
+            # Only data_pos (58 of 79 symbols) is read after the final layer: project Q and run FFN on those 58 only.
+            last = self.tf.layers[-1]
+            u = last.norm1(h)
+            sa = last.self_attn(u[:, self.data_pos], u, u, need_weights=False)[0]
+            h = h[:, self.data_pos] + last.dropout1(sa)
+            h = h + last._ff_block(last.norm2(h))
+        else:
+            h = h[:, self.data_pos]
+        h = self.out(self.norm(h))  # (B,58,3)
         return h.reshape(h.shape[0], 174)
 
 

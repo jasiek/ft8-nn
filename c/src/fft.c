@@ -158,9 +158,93 @@ void fft_forward_par(const fft_plan *p, const cplx *in, cplx *out, par *pool) { 
 void fft_inverse_par(const fft_plan *p, const cplx *in, cplx *out, par *pool) {
     /* ifft(x) = conj(fft(conj(x))) */
     int n = p->n;
-    cplx *c = malloc(sizeof(cplx) * n);
+    cplx stk[4096];
+    cplx *c = n <= 4096 ? stk : malloc(sizeof(cplx) * (size_t)n);
     for (int i = 0; i < n; i++) c[i] = conj(in[i]);
     work_par(p, out, c, pool);
     for (int i = 0; i < n; i++) out[i] = conj(out[i]);
-    free(c);
+    if (c != stk) free(c);
+}
+
+struct rfft_plan {
+    int n, m;
+    fft_plan *half;
+    cplx *rtw; /* exp(-pi i k / m) for k = 0..m/2 */
+};
+
+rfft_plan *rfft_plan_new(int n) {
+    if (n < 2 || (n & 1)) return NULL;
+    int m = n / 2;
+    fft_plan *half = fft_plan_new(m);
+    if (!half) return NULL;
+    rfft_plan *rp = calloc(1, sizeof *rp);
+    rp->n = n;
+    rp->m = m;
+    rp->half = half;
+    rp->rtw = malloc(sizeof(cplx) * (size_t)(m / 2 + 1));
+    for (int k = 0; k <= m / 2; k++) {
+        double a = -M_PI * (double)k / m;
+        rp->rtw[k] = cos(a) + I * sin(a);
+    }
+    return rp;
+}
+
+void rfft_plan_free(rfft_plan *p) {
+    if (!p) return;
+    fft_plan_free(p->half);
+    free(p->rtw);
+    free(p);
+}
+
+static void rfft_unpack(const rfft_plan *p, const cplx *Z, cplx *out) {
+    int m = p->m;
+    const cplx *rtw = p->rtw;
+    out[0] = creal(Z[0]) + cimag(Z[0]);
+    out[m] = creal(Z[0]) - cimag(Z[0]);
+    for (int k = 1; k <= m / 2; k++) {
+        int mk = m - k;
+        cplx zk = Z[k], zmk = conj(Z[mk]);
+        cplx ek = 0.5 * (zk + zmk);
+        cplx ok = -0.5 * I * (zk - zmk);
+        cplx wk = rtw[k] * ok;
+        out[k] = ek + wk;
+        if (k != mk) out[mk] = conj(ek - wk);
+    }
+}
+
+static void rfft_pack(const double *in, int n, int m_valid, cplx *z) {
+    int m = n / 2;
+    if (m_valid > n) m_valid = n;
+    if (m_valid < 0) m_valid = 0;
+    int pairs = m_valid / 2;
+    for (int i = 0; i < pairs; i++) z[i] = in[2 * i] + I * in[2 * i + 1];
+    if (m_valid & 1) {
+        z[pairs] = in[2 * pairs];
+        for (int i = pairs + 1; i < m; i++) z[i] = 0;
+    } else {
+        for (int i = pairs; i < m; i++) z[i] = 0;
+    }
+}
+
+void fft_rfft(const rfft_plan *p, const double *in, int m_valid, cplx *out) {
+    int m = p->m;
+    cplx z_stk[2048], Z_stk[2048];
+    cplx *z = m <= 2048 ? z_stk : malloc(sizeof(cplx) * (size_t)m);
+    cplx *Z = m <= 2048 ? Z_stk : malloc(sizeof(cplx) * (size_t)m);
+    rfft_pack(in, p->n, m_valid, z);
+    fft_forward(p->half, z, Z);
+    rfft_unpack(p, Z, out);
+    if (z != z_stk) free(z);
+    if (Z != Z_stk) free(Z);
+}
+
+void fft_rfft_par(const rfft_plan *p, const double *in, int m_valid, cplx *out, par *pool) {
+    int m = p->m;
+    cplx *z = malloc(sizeof(cplx) * (size_t)m);
+    cplx *Z = malloc(sizeof(cplx) * (size_t)m);
+    rfft_pack(in, p->n, m_valid, z);
+    fft_forward_par(p->half, z, Z, pool);
+    rfft_unpack(p, Z, out);
+    free(z);
+    free(Z);
 }

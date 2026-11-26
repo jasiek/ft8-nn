@@ -1199,17 +1199,25 @@ static void cc_worker(void *arg, int w) {
     free(hy);
 }
 
+/* Ensure shared post-stage baseband is initialised on the current residual x */
+static const baseband *ensure_bb(ft8nn_ctx *c, const double *x, int n, baseband *bb, int *ready) {
+    if (!*ready) {
+        baseband_init(bb, x, n, c->snr_nfa, c->snr_nfb, c->pool);
+        *ready = 1;
+    }
+    return bb;
+}
+
 /* Appends the stage's decodes to all[nall..); returns the new count, or -1 on an ONNX Runtime error. */
-static int cochannel_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int nall) {
+static int cochannel_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int nall, baseband *bb, int *bb_ready) {
     double t0 = tnow();
-    baseband bb;
-    baseband_init(&bb, x, n, c->snr_nfa, c->snr_nfb, c->pool);
+    ensure_bb(c, x, n, bb, bb_ready);
     cc_job *j = calloc(1, sizeof *j);
     for (int i = 0; i < CC_NF; i++) j->dfs[i] = -(CC_SPAN + 2 * CC_GF) + i * CC_GF; /* numpy arange: exact here */
     for (int t = 0; t < CC_NT; t++) j->dts[t] = -(CC_TFAR + CC_GT) + t * CC_GT;
     j->c = c;
     j->cells = all;
-    j->bb = &bb;
+    j->bb = bb;
     j->y0 = malloc(sizeof(cplx) * NBB * (size_t)nall);
     j->spec = malloc(sizeof(cc_spec) * CC_MAXH * (size_t)nall);
     j->nspec = calloc((size_t)nall, sizeof(int));
@@ -1273,7 +1281,6 @@ static int cochannel_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int n
     free(j->ee);
     free(idx);
     free(j);
-    baseband_free(&bb);
     return rc;
 }
 
@@ -1427,7 +1434,8 @@ static void rf_worker(void *arg, int w) {
     free(feat);
 }
 
-static int refine_stage(ft8nn_ctx *c, const double *x, int n, const chase_hyp *cur, int ncur, dec *all, int nall) {
+static int refine_stage(ft8nn_ctx *c, const double *x, int n, const chase_hyp *cur, int ncur, dec *all, int nall,
+                        baseband *bb, int *bb_ready) {
     double sf[RF_MAX_SEEDS], sd[RF_MAX_SEEDS], see[RF_MAX_SEEDS];
     int ns = 0;
     for (int i = 0; i < ncur && ns < RF_MAX_SEEDS; i++) {
@@ -1441,15 +1449,14 @@ static int refine_stage(ft8nn_ctx *c, const double *x, int n, const chase_hyp *c
     }
     if (!ns) return nall;
     double t0 = tnow();
-    baseband bb;
-    baseband_init(&bb, x, n, c->snr_nfa, c->snr_nfb, c->pool);
+    ensure_bb(c, x, n, bb, bb_ready);
     int nh = ns * 8;
     sync_hyp *hyps = malloc(sizeof(sync_hyp) * (size_t)nh);
     static const double oa[8] = {-RF_RDF, -RF_RDF, -RF_RDF, 0.0, 0.0, RF_RDF, RF_RDF, RF_RDF};
     static const int ob[8] = {-RF_RDT, 0, RF_RDT, -RF_RDT, RF_RDT, -RF_RDT, 0, RF_RDT};
     cplx y0[NBB];
     for (int si = 0; si < ns; si++) {
-        baseband_downsample(&bb, sf[si], y0);
+        baseband_downsample(bb, sf[si], y0);
         int s0 = (int)nearbyint((NOMINAL_START + sd[si]) * FS_BB);
         for (int o = 0; o < 8; o++) {
             sync_hyp *hy = &hyps[si * 8 + o];
@@ -1459,10 +1466,9 @@ static int refine_stage(ft8nn_ctx *c, const double *x, int n, const chase_hyp *c
             hy->f0 = sf[si] + oa[o];
             hy->dt = hy->start / FS_BB - NOMINAL_START;
             hy->metric = 0.0;
-            hy->nratio = baseband_noise_ratio(&bb, hy->f0);
+            hy->nratio = baseband_noise_ratio(bb, hy->f0);
         }
     }
-    baseband_free(&bb);
     double *llr = malloc(sizeof(double) * (size_t)nh * 174);
     rf_job rj = {.c = c, .hyps = hyps, .llr = llr, .nh = nh};
     atomic_init(&rj.next, 0);
@@ -1516,11 +1522,11 @@ static int refine_stage(ft8nn_ctx *c, const double *x, int n, const chase_hyp *c
 
 /* Cross-slot soft LLR Chase combining (decoder._chase_stage). Appends accepted decodes to all[nall..); returns new n. */
 static int chase_stage(ft8nn_ctx *c, const double *x, int n, const chase_hyp *cur, int ncur,
-                       const chase_hyp *const prev[2], const int nprev[2], int np, dec *all, int nall) {
+                       const chase_hyp *const prev[2], const int nprev[2], int np, dec *all, int nall,
+                       baseband *bb, int *bb_ready) {
     if (ncur <= 0 || np <= 0) return nall;
     double t0 = tnow();
-    baseband bb;
-    int bb_ready = 0, rc = nall;
+    int rc = nall;
     for (int hi = 0; hi < ncur; hi++) {
         double lt[174], lt_c[174];
         for (int j = 0; j < 174; j++) {
@@ -1594,25 +1600,22 @@ static int chase_stage(ft8nn_ctx *c, const double *x, int n, const chase_hyp *cu
             double rp = ci < nm ? chase_rho(lp_raw[ci], cw)
                                 : fmax(chase_rho(lp_raw[0], cw), chase_rho(lp_raw[1], cw));
             if (rp < CHASE_RHO_P) continue;
-            if (!bb_ready) {
-                baseband_init(&bb, x, n, c->snr_nfa, c->snr_nfb, c->pool);
-                bb_ready = 1;
-            }
+            ensure_bb(c, x, n, bb, bb_ready);
             sync_hyp hy = {.f0 = d.f0, .dt = d.dt, .metric = 0.0,
                            .start = (int)nearbyint((NOMINAL_START + d.dt) * FS_BB),
-                           .nratio = baseband_noise_ratio(&bb, d.f0)};
-            baseband_downsample(&bb, d.f0, hy.y);
+                           .nratio = baseband_noise_ratio(bb, d.f0)};
+            baseband_downsample(bb, d.f0, hy.y);
             d.snr = estimate_snr(&hy, d.bits77);
             if (rc < DEC_CAP) all[rc++] = d;
             break; /* hypothesis decoded */
         }
     }
-    if (bb_ready) baseband_free(&bb);
     if (prof) fprintf(stderr, "chase: cur %d -> %d, %.2fs\n", ncur, rc - nall, tnow() - t0);
     return rc;
 }
 
-static int repeat_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int nall, const dec *cx, int ncx) {
+static int repeat_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int nall, const dec *cx, int ncx,
+                        baseband *bb, int *bb_ready) {
     enum { MAXPRI = 64, MAXALT = 2048 };
     uint8_t *done = calloc((size_t)ncx, 1); /* context entry already in an earlier sender group */
     int *mem = malloc(sizeof(int) * (size_t)ncx);
@@ -1621,8 +1624,7 @@ static int repeat_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int nall
     sync_hyp *hyps = malloc(sizeof(sync_hyp) * N_HYP), *hp[N_HYP];
     float *feat = malloc(sizeof(float) * NN_BATCH * NN * NFEAT);
     double llr[N_HYP * 174];
-    baseband bb;
-    int bb_ready = 0, rc = nall;
+    int rc = nall;
     for (int g = 0; g < ncx; g++) {
         const uint8_t *b0 = cx[g].bits77;
         int is_i4 = i4_msg(b0);
@@ -1704,10 +1706,7 @@ static int repeat_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int nall
             encode77(alt[i], cw, tones);
             for (int j = 0; j < 174; j++) S[(size_t)i * 174 + j] = cw[j] ? 1.0 : -1.0;
         }
-        if (!bb_ready) {
-            baseband_init(&bb, x, n, c->snr_nfa, c->snr_nfb, c->pool);
-            bb_ready = 1;
-        }
+        ensure_bb(c, x, n, bb, bb_ready);
         double r1 = 0, r2 = 0;
         int k1 = -1;
         sync_hyp best_h;
@@ -1725,7 +1724,7 @@ static int repeat_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int nall
         }
         for (int i = 0; i < nloc; i++) {
             candidate loc = {loc_f[i], loc_d[i], 0.0, 0};
-            int nh = fine_sync2(&bb, &loc, N_HYP, hyps);
+            int nh = fine_sync2(bb, &loc, N_HYP, hyps);
             if (nh <= 0) continue;
             for (int h = 0; h < nh; h++) hp[h] = &hyps[h];
             if (run_nn(c, hp, nh, llr, feat)) {
@@ -1775,7 +1774,6 @@ static int repeat_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int nall
         }
     }
 out:
-    if (bb_ready) baseband_free(&bb);
     free(done);
     free(mem);
     free(alt);
@@ -1930,9 +1928,12 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
     }
     double post_f0[DEC_CAP];
     int n_post = 0;
+    baseband post_bb;
+    int post_bb_ready = 0;
     if (nall > 0 && !early) { /* x is now the residual */
-        int r = cochannel_stage(c, x, n, all, nall);
+        int r = cochannel_stage(c, x, n, all, nall, &post_bb, &post_bb_ready);
         if (r < 0) {
+            if (post_bb_ready) baseband_free(&post_bb);
             free(x);
             free(all);
             free(cx);
@@ -1941,6 +1942,10 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
             free(fmap);
             c->nv_bb = c->cons = 0;
             return -1;
+        }
+        if (r > nall && post_bb_ready) {
+            baseband_free(&post_bb);
+            post_bb_ready = 0;
         }
         for (int q = nall; q < r; q++) {
             uint8_t cw[174];
@@ -1954,9 +1959,10 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
     if (collect_fail && nfmap > 0) {
         chase_hyp *cur_fail = malloc(sizeof(chase_hyp) * CHASE_CAP);
         int ncur = finalize_failed(fmap, nfmap, all, nall, cur_fail);
-        int r = refine_stage(c, x, n, cur_fail, ncur, all, nall);
+        int r = refine_stage(c, x, n, cur_fail, ncur, all, nall, &post_bb, &post_bb_ready);
         free(cur_fail);
         if (r < 0) {
+            if (post_bb_ready) baseband_free(&post_bb);
             free(x);
             free(all);
             free(cx);
@@ -1965,6 +1971,10 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
             free(fmap);
             c->nv_bb = c->cons = 0;
             return -1;
+        }
+        if (r > nall && post_bb_ready) {
+            baseband_free(&post_bb);
+            post_bb_ready = 0;
         }
         for (int q = nall; q < r; q++) {
             uint8_t cw[174];
@@ -1978,8 +1988,12 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
     if (t != INT64_MIN && collect_fail && n_ch_prev > 0 && nfmap > 0) {
         chase_hyp *cur_fail = malloc(sizeof(chase_hyp) * CHASE_CAP);
         int ncur = finalize_failed(fmap, nfmap, all, nall, cur_fail);
-        int r = chase_stage(c, x, n, cur_fail, ncur, ch_prev, ch_nprev, n_ch_prev, all, nall);
+        int r = chase_stage(c, x, n, cur_fail, ncur, ch_prev, ch_nprev, n_ch_prev, all, nall, &post_bb, &post_bb_ready);
         free(cur_fail);
+        if (r > nall && post_bb_ready) {
+            baseband_free(&post_bb);
+            post_bb_ready = 0;
+        }
         for (int q = nall; q < r; q++) {
             uint8_t cw[174];
             int tones[NN];
@@ -1990,8 +2004,9 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
         nall = r;
     }
     if (ncx > 0 && !early) {
-        int r = repeat_stage(c, x, n, all, nall, cx, ncx);
+        int r = repeat_stage(c, x, n, all, nall, cx, ncx, &post_bb, &post_bb_ready);
         if (r < 0) {
+            if (post_bb_ready) baseband_free(&post_bb);
             free(x);
             free(all);
             free(cx);
@@ -2000,6 +2015,10 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
             free(fmap);
             c->nv_bb = c->cons = 0;
             return -1;
+        }
+        if (post_bb_ready) {
+            baseband_free(&post_bb);
+            post_bb_ready = 0;
         }
         for (int q = nall; q < r; q++) {
             uint8_t cw[174];
@@ -2010,6 +2029,7 @@ static int decode(ft8nn_ctx *c, const float *audio, int n, int64_t t, ft8nn_deco
         }
         nall = r;
     }
+    if (post_bb_ready) baseband_free(&post_bb);
     if (!early && n_post > 0) { /* targeted pass within REUSE_DF Hz of any subtracted cc, ch, or rp decode */
         double shift = DT_RECENTER > 0 ? dt_recenter_shift(all, nall, cx, ncx) : 0.0;
         int k = decode_pass(c, x, n, all, nall, DEC_CAP, PASSES + 1, mc, cx, ncx, NULL, post_f0, n_post, shift, NULL,

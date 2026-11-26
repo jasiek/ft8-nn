@@ -39,6 +39,41 @@ static int cmp_d(const void *a, const void *b) {
     return (x > y) - (x < y);
 }
 
+/* k-th smallest of p[0..n) and exact median (reorders p): bit-identical to qsort */
+static double select_d(double *p, int n, int k) {
+    int lo = 0, hi = n - 1;
+    while (lo < hi) {
+        double piv = p[lo + (hi - lo) / 2];
+        int i = lo, j = hi;
+        while (i <= j) {
+            while (p[i] < piv) i++;
+            while (p[j] > piv) j--;
+            if (i <= j) {
+                double t = p[i];
+                p[i++] = p[j];
+                p[j--] = t;
+            }
+        }
+        if (k <= j) hi = j;
+        else if (k >= i) lo = i;
+        else return p[k];
+    }
+    return p[k];
+}
+
+static double median_d(double *p, int n) {
+    double hi = select_d(p, n, n / 2);
+    if (n & 1) return hi;
+    double lo = p[0];
+    for (int i = 1; i < n / 2; i++)
+        if (p[i] > lo) lo = p[i];
+    return 0.5 * (lo + hi);
+}
+
+static rfft_plan *rplan_full;
+static rfft_plan *rplan_spec;
+static fft_plan *plan_bb;
+
 /* median of 7 floats (odd count: exact middle element) */
 /* median of 7 (the 4th smallest) by a fixed network of 13 compare-exchanges: no branches, so the loop over
  * frequency bins that calls it vectorises; the same value an insertion sort leaves at v[3] */
@@ -73,21 +108,17 @@ static int cmp_cand(const void *a, const void *b) { /* descending by (score, f, 
 /* spectrogram frame t -> S[t*nb ..] */
 typedef struct {
     const double *x;
-    const fft_plan *fp;
     float *S;
     int nb;
 } spec_job;
 static void spec_item(void *a, int t) {
     spec_job *j = a;
-    cplx *in = calloc(NFFT_SPEC, sizeof(cplx)), *X = malloc(sizeof(cplx) * NFFT_SPEC);
-    for (int i = 0; i < NSPS; i++) in[i] = j->x[t * HOP + i];
-    fft_forward(j->fp, in, X);
+    cplx X[NFFT_SPEC / 2 + 1];
+    fft_rfft(rplan_spec, j->x + t * HOP, NSPS, X);
     for (int b = 0; b < j->nb; b++) {
         double re = creal(X[b]), im = cimag(X[b]);
         j->S[t * j->nb + b] = (float)(re * re + im * im);
     }
-    free(in);
-    free(X);
 }
 
 /* Costas score sums of lag row li: per cell, the same additions in the same order (array o, then symbol k) */
@@ -131,10 +162,8 @@ int find_candidates(const double *x, int n, double fmin, double fmax, int max_ca
     int nb = b0 + 14 + nf; /* highest bin needed + 1 */
     if (nb > NFFT_SPEC / 2 + 1) return 0;
     float *S = malloc(sizeof(float) * T * nb);
-    fft_plan *fp = fft_plan_new(NFFT_SPEC);
-    spec_job sj = {x, fp, S, nb};
+    spec_job sj = {x, S, nb};
     par_for(pool, T, spec_item, &sj);
-    fft_plan_free(fp);
 
     int lag0 = (int)rnd(NOMINAL_START * FPS);
     /* main lags from dtmin, plus n_early "early" lags [early_dt, dtmin) that only feed a separate track
@@ -160,8 +189,7 @@ int find_candidates(const double *x, int n, double fmin, double fmax, int max_ca
         size_t nall = (size_t)nl * nf;
         double *cp = malloc(sizeof(double) * nall);
         memcpy(cp, score, sizeof(double) * nall);
-        qsort(cp, nall, sizeof(double), cmp_d);
-        double med = nall % 2 ? cp[nall / 2] : (cp[nall / 2 - 1] + cp[nall / 2]) / 2;
+        double med = median_d(cp, (int)nall);
         free(cp);
         base = 1.77 * med;
     } else {
@@ -320,33 +348,24 @@ static void polyfit4(const double *u, const double *y, int n, double a[5]) {
     }
 }
 
+static double nuttall_w[BASE_NFFT], nuttall_w2[BASE_NFFT + 1];
+
 /* sbase (BASE_NB bins, dB) over [nfa, nfb]; returns the window energy on audio (frontend.spectrum_baseline scale) */
 static double spectrum_baseline(const double *x, int n, double nfa, double nfb, double *sbase) {
-    static const double c4[4] = {0.3635819, -0.4891775, 0.1365995, -0.0106411};
-    double w[BASE_NFFT], w2[BASE_NFFT + 1];
-    w2[0] = 0;
-    for (int i = 0; i < BASE_NFFT; i++) {
-        double a = 2 * M_PI * i / BASE_NFFT;
-        w[i] = c4[0] + c4[1] * cos(a) + c4[2] * cos(2 * a) + c4[3] * cos(3 * a);
-        w2[i + 1] = w2[i] + w[i] * w[i];
-    }
     if (n > BASE_CUT) n = BASE_CUT;
     int nseg = (BASE_NMAX - BASE_NFFT) / BASE_STEP + 1;
     double savg[BASE_NB] = {0}, scale = 0;
-    fft_plan *fp = fft_plan_new(BASE_NFFT);
-    cplx *in = malloc(sizeof(cplx) * BASE_NFFT), *X = malloc(sizeof(cplx) * BASE_NFFT);
+    double in[BASE_NFFT];
+    cplx X[BASE_NB];
     for (int j = 0; j < nseg; j++) {
         int m = n - j * BASE_STEP; /* samples of this segment that carry audio; the rest of the buffer is zero */
         m = m < 0 ? 0 : (m > BASE_NFFT ? BASE_NFFT : m);
-        scale += w2[m];
+        scale += nuttall_w2[m];
         if (!m) continue;
-        for (int i = 0; i < BASE_NFFT; i++) in[i] = i < m ? x[j * BASE_STEP + i] * w[i] : 0;
-        fft_forward(fp, in, X);
+        for (int i = 0; i < m; i++) in[i] = x[j * BASE_STEP + i] * nuttall_w[i];
+        fft_rfft(rplan_spec, in, m, X);
         for (int k = 0; k < BASE_NB; k++) savg[k] += creal(X[k]) * creal(X[k]) + cimag(X[k]) * cimag(X[k]);
     }
-    free(in);
-    free(X);
-    fft_plan_free(fp);
     int ia = (int)floor(nfa / BASE_DF + 0.5), ib = (int)floor(nfb / BASE_DF + 0.5);
     if (ia < 1) ia = 1;
     if (ib > BASE_NB - 1) ib = BASE_NB - 1;
@@ -384,25 +403,18 @@ double baseband_noise_ratio(const baseband *b, double f0) {
 }
 
 void baseband_init(baseband *b, const double *x, int n, double nfa, double nfb, par *pool) {
-    b->full = fft_plan_new(NFFT_FULL);
-    b->bb = fft_plan_new(NBB);
-    cplx *in = calloc(NFFT_FULL, sizeof(cplx));
-    b->tmp = malloc(sizeof(cplx) * NFFT_FULL);
+    b->bb = plan_bb;
     int m = n < NFFT_FULL ? n : NFFT_FULL;
-    for (int i = 0; i < m; i++) in[i] = x[i];
-    fft_forward_par(b->full, in, b->tmp, pool);
-    free(in);
     int nx = NFFT_FULL / 2 + 1;
-    b->X = malloc(sizeof(cplx) * nx);
-    memcpy(b->X, b->tmp, sizeof(cplx) * nx);
+    b->X = malloc(sizeof(cplx) * (size_t)nx);
+    fft_rfft_par(rplan_full, x, m, b->X, pool);
     int lo = (int)(200 / DF_FULL), hi = (int)(3000 / DF_FULL), nb = hi - lo;
-    double *band = malloc(sizeof(double) * nb);
+    double *band = malloc(sizeof(double) * (size_t)nb);
     for (int i = 0; i < nb; i++) {
-        double a = cabs(b->X[lo + i]);
-        band[i] = a * a;
+        double re = creal(b->X[lo + i]), im = cimag(b->X[lo + i]);
+        band[i] = re * re + im * im;
     }
-    qsort(band, nb, sizeof(double), cmp_d);
-    double med = nb % 2 ? band[nb / 2] : (band[nb / 2 - 1] + band[nb / 2]) / 2;
+    double med = median_d(band, nb);
     free(band);
     b->noise_psd = med / log(2.0);
     b->sbase = malloc(sizeof(double) * BASE_NB);
@@ -411,10 +423,7 @@ void baseband_init(baseband *b, const double *x, int n, double nfa, double nfb, 
 }
 
 void baseband_free(baseband *b) {
-    fft_plan_free(b->full);
-    fft_plan_free(b->bb);
     free(b->X);
-    free(b->tmp);
     free(b->sbase);
 }
 
@@ -450,6 +459,16 @@ static double gridKr[21][SPS_BB][NDF], gridKi[21][SPS_BB][NDF]; /* split re/im s
 static double slWr[21][NDF], slWi[21][NDF], slK0r[21][NDF], slK0i[21][NDF], slK32r[21][NDF], slK32i[21][NDF];
 
 void frontend_init(void) {
+    rplan_full = rfft_plan_new(NFFT_FULL);
+    rplan_spec = rfft_plan_new(NFFT_SPEC);
+    plan_bb = fft_plan_new(NBB);
+    static const double c4[4] = {0.3635819, -0.4891775, 0.1365995, -0.0106411};
+    nuttall_w2[0] = 0.0;
+    for (int i = 0; i < BASE_NFFT; i++) {
+        double a = 2.0 * M_PI * i / BASE_NFFT;
+        nuttall_w[i] = c4[0] + c4[1] * cos(a) + c4[2] * cos(2 * a) + c4[3] * cos(3 * a);
+        nuttall_w2[i + 1] = nuttall_w2[i] + nuttall_w[i] * nuttall_w[i];
+    }
     /* numpy arange fills start + i * delta with delta = (start + step) - start */
     double start = -2.5, delta = (start + 0.1) - start;
     for (int i = 0; i < NDF; i++) dfs[i] = start + i * delta;
@@ -487,9 +506,16 @@ static double parabolic(const double *m, int len, int stride, int i) {
 }
 
 static void rotate(cplx *y, double df) {
-    for (int n = 0; n < NBB; n++) {
-        double a = -2 * M_PI * df * n / FS_BB;
-        y[n] *= cos(a) + I * sin(a);
+    double da = -2.0 * M_PI * df / FS_BB;
+    cplx step = cos(da) + I * sin(da);
+    for (int b = 0; b < NBB; b += 64) {
+        double a0 = da * b;
+        cplx w = cos(a0) + I * sin(a0);
+        int end = b + 64 < NBB ? b + 64 : NBB;
+        for (int n = b; n < end; n++) {
+            y[n] *= w;
+            w *= step;
+        }
     }
 }
 
@@ -587,13 +613,25 @@ int fine_sync2(const baseband *b, const candidate *c, int n_hyp, sync_hyp *out) 
         if (fabs(tau) >= 1e-6) {
             cplx Y[NBB];
             fft_forward(b->bb, o->y, Y);
-            for (int k = 0; k < NBB; k++) {
-                int kk = k < NBB / 2 ? k : k - NBB;
-                double a = 2 * M_PI * kk * tau / NBB;
-                Y[k] *= cos(a) + I * sin(a);
+            double da = 2.0 * M_PI * tau / NBB;
+            cplx step = cos(da) + I * sin(da);
+            for (int b0 = 0; b0 < NBB; b0 += 64) {
+                int kk0 = b0 < NBB / 2 ? b0 : b0 - NBB;
+                double a0 = da * kk0;
+                cplx w = cos(a0) + I * sin(a0);
+                int end = b0 + 64 < NBB ? b0 + 64 : NBB;
+                for (int k = b0; k < end; k++) {
+                    if (k == NBB / 2) {
+                        double am = da * (-NBB / 2);
+                        w = cos(am) + I * sin(am);
+                    }
+                    Y[k] *= w;
+                    w *= step;
+                }
             }
             fft_inverse(b->bb, Y, o->y);
-            for (int k = 0; k < NBB; k++) o->y[k] /= NBB;
+            double inv_n = 1.0 / NBB;
+            for (int k = 0; k < NBB; k++) o->y[k] *= inv_n;
         }
         o->start = start0 + (int)r;
         o->f0 = c->f0 + df;
@@ -655,42 +693,47 @@ void data_sync(const cplx *y0, int start0, const double *dfs, int nf, const int 
 
 /* ------------------------------------------------------------------ symbol spectra / metrics */
 
-static cplx dft64[NBINS][SPS_BB]; /* exp(-2 pi i b n / 64) for b = -4..19 */
-static cplx dft32[8][SPS_BB];
+/* Transposed split-re/im DFT kernels so the inner bin loop vectorises cleanly */
+static float dft64r[SPS_BB][NBINS], dft64i[SPS_BB][NBINS];
+static double dft32r[SPS_BB][8], dft32i[SPS_BB][8];
 
 static void spectra_init(void) {
-    for (int q = 0; q < NBINS; q++)
-        for (int n = 0; n < SPS_BB; n++) {
+    static const double isq = 0.17677669529663687; /* 1/sqrt(32) */
+    for (int n = 0; n < SPS_BB; n++) {
+        for (int q = 0; q < NBINS; q++) {
             int b = ((NBIN_LO + q) % 64 + 64) % 64;
-            double a = -2 * M_PI * b * n / 64.0;
-            dft64[q][n] = cos(a) + I * sin(a);
+            double a = -2.0 * M_PI * b * n / 64.0;
+            dft64r[n][q] = (float)(cos(a) * isq);
+            dft64i[n][q] = (float)(sin(a) * isq);
         }
-    for (int b = 0; b < 8; b++)
-        for (int n = 0; n < SPS_BB; n++) {
-            double a = -2 * M_PI * b * n / 32.0;
-            dft32[b][n] = cos(a) + I * sin(a);
+        for (int b = 0; b < 8; b++) {
+            double a = -2.0 * M_PI * b * n / 32.0;
+            dft32r[n][b] = cos(a) * isq;
+            dft32i[n][b] = sin(a) * isq;
         }
+    }
 }
 
 void nn_features(const cplx *y, int start, int nv, float *out) {
-    static const double isq = 0.17677669529663687; /* 1/sqrt(32) */
-    double re[NN][NBINS], im[NN][NBINS];
+    float re[NN][NBINS], im[NN][NBINS];
     float p[NN * NBINS];
     for (int s = 0; s < NN; s++) {
-        cplx seg[SPS_BB];
+        float zr[NBINS] = {0}, zi[NBINS] = {0};
         for (int n = 0; n < SPS_BB; n++) {
             int idx = start + s * SPS_BB + n;
+            if (idx < 0 || idx >= NBB) continue;
             /* torch path works on complex64 */
-            seg[n] = (idx >= 0 && idx < NBB) ? (double)(float)creal(y[idx]) + I * (double)(float)cimag(y[idx]) : 0;
+            float sr = (float)creal(y[idx]), si = (float)cimag(y[idx]);
+            const float *kr = dft64r[n], *ki = dft64i[n];
+            for (int q = 0; q < NBINS; q++) {
+                zr[q] += sr * kr[q] - si * ki[q];
+                zi[q] += sr * ki[q] + si * kr[q];
+            }
         }
         for (int q = 0; q < NBINS; q++) {
-            cplx z = 0;
-            for (int n = 0; n < SPS_BB; n++) z += seg[n] * dft64[q][n];
-            z *= isq;
-            re[s][q] = creal(z);
-            im[s][q] = cimag(z);
-            float a = (float)cabs(z);
-            p[s * NBINS + q] = a * a;
+            re[s][q] = zr[q];
+            im[s][q] = zi[q];
+            p[s * NBINS + q] = zr[q] * zr[q] + zi[q] * zi[q];
         }
     }
     int np = NN * NBINS;
@@ -701,27 +744,28 @@ void nn_features(const cplx *y, int start, int nv, float *out) {
     }
     /* torch.median: lower of the two middle values */
     double med = select_f(p, np, (np - 1) / 2);
-    double scale = sqrt(fmax_d(med, 1e-6));
+    float inv_sc = (float)(1.0 / sqrt(fmax_d(med, 1e-6)));
     for (int s = 0; s < NN; s++)
         for (int q = 0; q < NBINS; q++) {
-            out[s * NFEAT + q] = (float)(re[s][q] / scale);
-            out[s * NFEAT + NBINS + q] = (float)(im[s][q] / scale);
+            out[s * NFEAT + q] = re[s][q] * inv_sc;
+            out[s * NFEAT + NBINS + q] = im[s][q] * inv_sc;
         }
 }
 
 void symbol_spectra8(const cplx *y, int start, cplx cs[NN][8]) {
-    static const double isq = 0.17677669529663687;
     for (int s = 0; s < NN; s++) {
-        cplx seg[SPS_BB];
+        double zr[8] = {0}, zi[8] = {0};
         for (int n = 0; n < SPS_BB; n++) {
             int idx = start + s * SPS_BB + n;
-            seg[n] = (idx >= 0 && idx < NBB) ? y[idx] : 0;
+            if (idx < 0 || idx >= NBB) continue;
+            double sr = creal(y[idx]), si = cimag(y[idx]);
+            const double *kr = dft32r[n], *ki = dft32i[n];
+            for (int b = 0; b < 8; b++) {
+                zr[b] += sr * kr[b] - si * ki[b];
+                zi[b] += sr * ki[b] + si * kr[b];
+            }
         }
-        for (int b = 0; b < 8; b++) {
-            cplx z = 0;
-            for (int n = 0; n < SPS_BB; n++) z += seg[n] * dft32[b][n];
-            cs[s][b] = z * isq;
-        }
+        for (int b = 0; b < 8; b++) cs[s][b] = zr[b] + I * zi[b];
     }
 }
 

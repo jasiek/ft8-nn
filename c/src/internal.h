@@ -41,8 +41,9 @@ void par_run(par *p, void (*fn)(void *, int), void *arg);
 /* body(arg, i) for every i in [0, n), on the pool's threads in any order */
 void par_for(par *p, int n, void (*body)(void *, int), void *arg);
 
-/* ---- fft.c: complex FFT for sizes with factors 2, 3, 5 */
+/* ---- fft.c: complex and real-input FFTs for sizes with factors 2, 3, 5 */
 typedef struct fft_plan fft_plan;
+typedef struct rfft_plan rfft_plan;
 fft_plan *fft_plan_new(int n);
 void fft_plan_free(fft_plan *p);
 int fft_size(const fft_plan *p);
@@ -53,6 +54,11 @@ void fft_inverse(const fft_plan *p, const cplx *in, cplx *out);
 /* the same on a thread pool (bit-identical results; pool may be NULL) */
 void fft_forward_par(const fft_plan *p, const cplx *in, cplx *out, par *pool);
 void fft_inverse_par(const fft_plan *p, const cplx *in, cplx *out, par *pool);
+/* real-to-complex forward DFT of even size n: reads in[0..m_valid) zero-padded to n, writes out[0..n/2] */
+rfft_plan *rfft_plan_new(int n);
+void rfft_plan_free(rfft_plan *p);
+void fft_rfft(const rfft_plan *p, const double *in, int m_valid, cplx *out);
+void fft_rfft_par(const rfft_plan *p, const double *in, int m_valid, cplx *out, par *pool);
 
 /* ---- ft8.c */
 void ft8_init(void);
@@ -61,6 +67,7 @@ int crc_ok(const uint8_t *a91);
 void encode77(const uint8_t *payload77, uint8_t *cw174, int *tones79);
 /* unit-amplitude analytic FT8 waveform with ramps, NN*NSPS samples */
 void complex_wave(const int *tones, double f0, cplx *out);
+void complex_wave_split(const int *tones, double f0, double *refr, double *refi);
 
 /* ---- ldpc.c (LLR = log P(1)/P(0)) */
 void ldpc_init(void);
@@ -82,10 +89,9 @@ int find_candidates(const double *x, int n, double fmin, double fmax, int max_ca
                     double early_dt, double early_min, double dt_shift, candidate *out, par *pool);
 
 typedef struct {
-    fft_plan *full, *bb;
+    const fft_plan *bb;
     cplx *X;  /* NFFT_FULL/2+1 bins of the slot */
     double noise_psd;
-    cplx *tmp; /* scratch NFFT_FULL */
     double *sbase;  /* jt9's SNR noise floor (spectrum_baseline), dB per 3.125 Hz bin, BASE_NB bins */
     double base_ref; /* 10^(sbase/10) / base_ref: noise at that bin / the noise downsample() normalises to */
 } baseband;

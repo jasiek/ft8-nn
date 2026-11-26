@@ -50,35 +50,76 @@ void encode77(const uint8_t *payload77, uint8_t *cw, int *tones) {
     for (int i = 0; i < ND; i++) tones[DATA_POS[i]] = GRAY[cw[3 * i] * 4 + cw[3 * i + 1] * 2 + cw[3 * i + 2]];
 }
 
-static double pulse_tab[3 * NSPS];
+static double dphi_tab[3 * NSPS];
+static double ramp_tab[NSPS / 8];
 
 void ft8_init(void) { /* call once before threads start (ft8nn_open does) */
-    double c = M_PI * sqrt(2.0 / log(2.0)), bt = 2.0;
+    double c = M_PI * sqrt(2.0 / log(2.0)), bt = 2.0, pk = 2.0 * M_PI / NSPS;
     for (int i = 0; i < 3 * NSPS; i++) {
         double t = ((double)i - 1.5 * NSPS) / NSPS;
-        pulse_tab[i] = 0.5 * (erf(c * bt * (t + 0.5)) - erf(c * bt * (t - 0.5)));
+        dphi_tab[i] = pk * 0.5 * (erf(c * bt * (t + 0.5)) - erf(c * bt * (t - 0.5)));
     }
+    int nr = NSPS / 8;
+    for (int i = 0; i < nr; i++) ramp_tab[i] = 0.5 * (1.0 - cos(M_PI * i / nr));
+}
+
+void complex_wave_split(const int *tones, double f0, double *restrict refr, double *restrict refi) {
+    enum { N = NN * NSPS, ND_ = (NN + 2) * NSPS };
+    double *d = calloc(ND_, sizeof(double));
+    for (int j = 0; j < NN; j++) {
+        double tj = tones[j];
+        double *dj = d + j * NSPS;
+        for (int i = 0; i < 3 * NSPS; i++) dj[i] += dphi_tab[i] * tj;
+    }
+    double t0 = tones[0], tn = tones[NN - 1];
+    for (int i = 0; i < 2 * NSPS; i++) d[i] += t0 * dphi_tab[NSPS + i];
+    for (int i = 0; i < 2 * NSPS; i++) d[NN * NSPS + i] += tn * dphi_tab[i];
+    double w0 = 2.0 * M_PI * f0 / FS;
+    /* Prefix-sum phase first so the trig loop has no loop-carried dependency and vectorises */
+    double *ph = malloc(sizeof(double) * N);
+    double acc = 0.0;
+    for (int i = 0; i < N; i++) {
+        ph[i] = acc;
+        acc += d[NSPS + i] + w0;
+    }
+    free(d);
+    const double inv_pio2 = 0.63661977236758134308;
+    const double pio2_1 = 1.57079632679489655800;
+    const double pio2_2 = 6.12323399573676603587e-17;
+    for (int i = 0; i < N; i++) {
+        double x = ph[i];
+        double kf = nearbyint(x * inv_pio2);
+        int q = ((int)(int64_t)kf) & 3;
+        double r = (x - kf * pio2_1) - kf * pio2_2;
+        double r2 = r * r;
+        double s = r * (1.0 + r2 * (-1.0 / 6.0 + r2 * (1.0 / 120.0 + r2 * (-1.0 / 5040.0 +
+                        r2 * (1.0 / 362880.0 + r2 * (-1.0 / 39916800.0 + r2 * (1.0 / 6227020800.0)))))));
+        double c = 1.0 + r2 * (-0.5 + r2 * (1.0 / 24.0 + r2 * (-1.0 / 720.0 +
+                   r2 * (1.0 / 40320.0 + r2 * (-1.0 / 3628800.0 + r2 * (1.0 / 479001600.0))))));
+        double co = (q & 1) ? -s : c;
+        double si = (q & 1) ? c : s;
+        if (q & 2) {
+            co = -co;
+            si = -si;
+        }
+        refr[i] = co;
+        refi[i] = si;
+    }
+    int nr = NSPS / 8;
+    for (int i = 0; i < nr; i++) {
+        refr[i] *= ramp_tab[i];
+        refi[i] *= ramp_tab[i];
+        refr[N - 1 - i] *= ramp_tab[i];
+        refi[N - 1 - i] *= ramp_tab[i];
+    }
+    free(ph);
 }
 
 void complex_wave(const int *tones, double f0, cplx *out) {
-    enum { N = NN * NSPS, ND_ = (NN + 2) * NSPS };
-    double *d = calloc(ND_, sizeof(double));
-    double pk = 2 * M_PI / NSPS;
-    for (int j = 0; j < NN; j++)
-        for (int i = 0; i < 3 * NSPS; i++) d[j * NSPS + i] += pk * pulse_tab[i] * tones[j];
-    for (int i = 0; i < 2 * NSPS; i++) d[i] += pk * tones[0] * pulse_tab[NSPS + i];
-    for (int i = 0; i < 2 * NSPS; i++) d[NN * NSPS + i] += pk * tones[NN - 1] * pulse_tab[i];
-    double w0 = 2 * M_PI * f0 / FS;
-    for (int i = 0; i < ND_; i++) d[i] += w0;
-    /* phase = [0, cumsum(d[NSPS : NSPS + N - 1])] */
-    int nr = NSPS / 8;
-    double ph = 0;
-    for (int i = 0; i < N; i++) {
-        if (i > 0) ph += d[NSPS + i - 1];
-        double env = 1.0;
-        if (i < nr) env = 0.5 * (1 - cos(M_PI * i / nr));
-        else if (i >= N - nr) env = 0.5 * (1 - cos(M_PI * (N - 1 - i) / nr));
-        out[i] = env * (cos(ph) + I * sin(ph));
-    }
-    free(d);
+    enum { N = NN * NSPS };
+    double *refr = malloc(sizeof(double) * N), *refi = malloc(sizeof(double) * N);
+    complex_wave_split(tones, f0, refr, refi);
+    for (int i = 0; i < N; i++) out[i] = refr[i] + I * refi[i];
+    free(refr);
+    free(refi);
 }

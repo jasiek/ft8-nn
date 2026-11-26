@@ -1,5 +1,43 @@
 # Status and plan (resume here)
 
+## Exact ONNX & C CPU cuts (`PLAN.md` Tier 1: 1A + 1B + 1C) — done 2026-11-26
+
+Profiled `HEAD` (`models/v4` with all post-`nn_v3_f4bp` sensitivity stages) on the 8-core Apple M1 (4P + 4E, idle, no
+sleep events): busy 40 m slots (`01_40m` of validation run 1, ~54 decodes/slot) took `13.88 s/slot` at 1 thread (max
+`14.51 s`, `70.9%` in ONNX Runtime + `nn_features`, `11.9%` in classical fallback metrics + BP, `7.6%` in sync/baseband,
+`4.8%` in subtraction) and `4.35 s/slot` wall across the 4 performance cores (`4.91 s` in live `--early 141696`, with
+the 11.8 s early pass at `2.18 s` / `2.22 s` max against WSJT-X's `2.60 s` window). Wrote full CPU roadmap to `PLAN.md`
+and implemented all three exact Tier-1 optimisations (`ft8nn/model.py`, `tools/export_onnx.py`, `models/v4/ft8nn.onnx`,
+`c/src/{internal.h,fft.c,ft8.c,frontend.c,subtract.c,decode.c}`):
+- **1A — Layer-3 sync-token pruning (`79 -> 58`) & direct fused-Attention ONNX graph:** `SoftDemod`'s final Transformer
+  layer now projects `Q` and runs its residual + FFN only on the `58` `data_pos` symbols (`21` Costas sync outputs were
+  discarded immediately on the next line; `−26.6%` Layer-3 Q/FFN FLOPs with unchanged `models/v4/model.pt` weights), and
+  `tools/export_onnx.py` emits `com.microsoft::Attention` (layers 0–2), `com.microsoft::MultiHeadAttention` (layer 3),
+  tap-wise `MatMul + BiasGelu` 1-D convs, and unfused LayerNorm (`3.48 -> 3.38 MB`, `max |onnx - torch| = 3.34e-5`,
+  sign agreement `1.000000`).
+- **1B — O(N) exact `sin^2` LPF & vectorised waveform synthesis:** replaced `subtract_signal`'s two `160,000`-point
+  complex FFTs (`5.1 MB` allocs/decode) with the exact 3-term periodic sliding recurrence for
+  `sin^2(pi k / 4000) = (1 - cos(2 pi k / 4000)) / 2` (`1.35e-16` max error vs direct FIR), vectorised `complex_wave_split`
+  (`3.9e-13` max error), skipped the duplicate `d = coarse` offset in fine alignment, and used split-re/im `double`
+  `block_energy` (`subtract` stage `−49.1%` at 1T, `−45.5%` in live `--early` 4T).
+- **1C — Half-size real FFTs, cached plans, quickselect medians, phasor ramps, SIMD `nn_features`, & shared `post_bb`:**
+  cached global `rfft_plan` (`192,000`, `3,840`), `fft_plan` (`3,200`) and Nuttall tables in `frontend_init()`; added
+  `N/2` `fft_rfft`/`fft_rfft_par` and stack IFFT buffers (`n <= 4096`); replaced `qsort` medians (`124k` and `44.8k`
+  doubles) with bit-identical `median_d` quickselect; replaced `28M` per-slot scalar `sin`/`cos` calls in `rotate` and
+  `fractional_shift` with 64-sample re-anchored phasor steps; transposed `dft64`/`dft32` for SIMD `nn_features` and
+  `symbol_spectra8`; and shared `post_bb` across `cochannel -> refine -> chase -> repeat` until a subtraction modifies `x`.
+Results on 6 consecutive busy `01_40m` slots (8-core Apple M1, idle, no sleep events):
+- `--threads 1`: `83.31 -> 74.23 s` (`13.884 -> 12.373 s/slot`, max `14.508 -> 12.975 s`, **−10.9%**);
+- `--threads 0` (4 P-cores): `26.09 -> 22.33 s` (`4.349 -> 3.722 s/slot`, max `4.570 -> 3.890 s`, **−14.4%**);
+- `--threads 0 --early 141696` (live sequence): `29.48 -> 24.83 s` (`4.913 -> 4.139 s/slot`, **−15.8%**; 11.8 s early
+  pass `2.184 -> 1.882 s`, max `2.218 -> 1.907 s`, **−13.8%**, doubling margin below WSJT-X's 2.60 s deadline to `0.69 s`).
+Validation (**zero decode or field changes**): `MallocScribble=1 --threads 4 --stream` before-vs-after C output
+100% identical in every field on `00_40m` (`870/870`), `08_80m` (`636/636`), `01_40m` (`1,134/1,134`), and 6-slot
+`1T`/`0T`/`--early` (`325/325`, `319/319`); `tools/ci_smoke.py` `52/52`; `wsjtx/test_sidecar.sh` all 8 checks PASS;
+`pytest` `103 passed, 16 skipped`.
+Next: `PLAN.md` Tier 2 — gated pipeline pruning (`2A` classical fallback gating, `2B` 2nd fine-sync hypothesis gating,
+`2C` `post_pass` / `reuse_df` / passband `max_cand`, `2D` live early-pass budget).
+
 ## Calibrated multipath neural demodulator (`models/v4`) — done 2026-11-25 (tag `nn_v4_cal`)
 
 Fine-tuned the exact `SoftDemod(d=128, L=4, ff=384)` architecture (`0.84M` params, **zero CPU latency cost** and no C
