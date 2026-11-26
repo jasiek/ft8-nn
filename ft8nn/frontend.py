@@ -167,14 +167,111 @@ def find_candidates(x, fmin=FMIN_DEFAULT, fmax=FMAX_DEFAULT, dtmin=-1.5, dtmax=2
     return cands
 
 
-class Baseband:
-    """Holds the full-slot FFT so many candidates can be downsampled cheaply."""
+# jt9's noise floor for its SNR (lib/ft8/get_spectrum_baseline.f90, baseline.f90): the slot's average spectrum
+# (3840-point Nuttall windows, step 1920, 3.125 Hz bins) in dB over [nfa, nfb]; in each of 10 equal segments the
+# points at or below that segment's 10th percentile; a degree-4 least-squares polynomial through them, + 0.65 dB.
+# The 10th percentile passes between signals, so a busy band does not raise the floor, and the polynomial follows the
+# receiver's passband (KiwiSDR audio falls off towards 3 kHz and below ~1 kHz), so the floor is the one at the
+# signal's own frequency. Our network's input scale (Baseband.noise_psd, one median per slot) is left as it is.
+BASE_NFFT, BASE_STEP, BASE_SEGS, BASE_PCT, BASE_ADD = 3840, 1920, 10, 10, 0.65
+BASE_DF = ft8.FS / BASE_NFFT
+# Range of the fit without a WSJT-X request: jt9's own command-line default (-L 200 -H 4000, jt9.f90 flow/fhigh), not
+# our 150 Hz search floor. The fit depends on it: on 3 kHz KiwiSDR audio, 150-200 Hz is as empty as 3-4 kHz and pulls
+# the polynomial down at the low edge (+11 dB vs jt9 below 500 Hz on 12 run-1 slots, -0.3 dB with 200).
+BASE_NFA, BASE_NFB = 200.0, 4000.0
+# The audio the floor is measured on: the first 41 * 3456 samples (11.8 s) in jt9's 15 s buffer, the rest zero. jt9
+# decodes a file the way WSJT-X decodes live, at 11.8, 13.5 and 14.4 s with the buffer zeroed past that point
+# (jt9.f90 nzhsym 41/47/50), and most signals are decoded and measured in the first. The cut is a step in the
+# waveform; its splatter fills the empty spectrum above a receiver's passband (3-4 kHz on KiwiSDR audio) and so lifts
+# the floor's fit at the top edge by up to ~15 dB and lowers it mid-band by ~2-4 dB. On 149 clean signals added to
+# real run-1 slots the full slot left ours - jt9 at -2.4..+8.2 dB per 500 Hz, this cut a flat +1.1 (which the
+# scale's audio-only window energy removes). Our early pass ends at the same sample, so both passes see one floor.
+BASE_NMAX, BASE_CUT = 15 * 12000, 41 * 3456
+_NUTTALL = (0.3635819, -0.4891775, 0.1365995, -0.0106411)
 
-    def __init__(self, x):
+
+def nuttall(n):
+    """WSJT-X nuttal_window.f90."""
+    a = 2 * np.pi * np.arange(n) / n
+    return sum(c * np.cos(k * a) for k, c in enumerate(_NUTTALL))
+
+
+def base_bins(nfa, nfb):
+    """(ia, ib): first and last 3.125 Hz bin of the baseline fit (baseline.f90)."""
+    return max(1, int(np.floor(nfa / BASE_DF + 0.5))), int(np.floor(nfb / BASE_DF + 0.5))
+
+
+def spectrum_baseline(x, nfa=BASE_NFA, nfb=BASE_NFB):
+    """jt9's noise floor (see above). Returns (sbase, scale): sbase[i] in dB for bins ia..ib (base_bins; outside them
+    it repeats the nearest end), and scale = the window energy on audio (sum over segments of sum(w^2) over the
+    samples before the cut), so 10**(sbase/10) / scale is the noise variance per audio sample at bin i."""
+    nfa, nfb = search_range(nfa, nfb)
+    w = nuttall(BASE_NFFT)
+    n = min(len(x), BASE_CUT)
+    y = np.zeros(BASE_NMAX)
+    y[:n] = x[:n]
+    nseg = (BASE_NMAX - BASE_NFFT) // BASE_STEP + 1
+    idx = np.arange(BASE_NFFT)[None, :] + BASE_STEP * np.arange(nseg)[:, None]
+    X = np.fft.rfft(y[idx] * w, axis=1)
+    savg = (X.real**2 + X.imag**2).sum(0)
+    w2 = np.concatenate([[0.0], np.cumsum(w * w)])
+    scale = float(sum(w2[min(max(n - j * BASE_STEP, 0), BASE_NFFT)] for j in range(nseg)))
+    ia, ib = base_bins(nfa, nfb)
+    s = 10 * np.log10(np.maximum(savg[ia : ib + 1], 1e-30))
+    nlen, i0 = (ib - ia + 1) // BASE_SEGS, (ib - ia + 1) // 2
+    t, y = [], []
+    for n in range(BASE_SEGS):
+        seg = s[n * nlen : (n + 1) * nlen]
+        j = min(max(int(np.floor(nlen * 0.01 * BASE_PCT + 0.5)), 1), nlen)  # pctile.f90: sorted(seg)[nint(n*pct)]
+        sel = np.nonzero(seg <= np.sort(seg)[j - 1])[0]
+        t.append(ia + n * nlen + sel - i0)
+        y.append(seg[sel])
+    t, y = np.concatenate(t), np.concatenate(y)
+    a = _polyfit4(t / i0, y)
+    sbase = np.zeros(len(savg))
+    u = (np.arange(ia, ib + 1) - i0) / i0
+    sbase[ia : ib + 1] = a[0] + u * (a[1] + u * (a[2] + u * (a[3] + u * a[4]))) + BASE_ADD
+    sbase[:ia], sbase[ib + 1 :] = sbase[ia], sbase[ib]
+    return sbase, scale
+
+
+def _polyfit4(u, y):
+    """Least-squares a0..a4 of y = sum a_k u^k by the normal equations, solved by Gaussian elimination with partial
+    pivoting (the C port, frontend.c polyfit4, does the same). u is scaled to about [-1, 1] so they stay well
+    conditioned; jt9 (polyfit.f90) fits the same polynomial in unscaled bin offsets."""
+    p = np.array([np.sum(u**k) for k in range(9)])
+    A = np.array([[p[r + c] for c in range(5)] + [np.sum(y * u**r)] for r in range(5)])
+    for c in range(5):
+        r = c + int(np.argmax(np.abs(A[c:, c])))
+        A[[c, r]] = A[[r, c]]
+        A[c + 1 :] -= A[c + 1 :, c : c + 1] / A[c, c] * A[c]
+    a = np.zeros(5)
+    for r in range(4, -1, -1):
+        a[r] = (A[r, 5] - A[r, r + 1 : 5] @ a[r + 1 :]) / A[r, r]
+    return a
+
+
+class Baseband:
+    """Holds the full-slot FFT so many candidates can be downsampled cheaply.
+
+    rng: the range (Hz) the SNR noise floor is fitted over: WSJT-X's [nfa, nfb] when a request gave one (jt9 fits
+    over the range it searches), else jt9's default (BASE_NFA, BASE_NFB)."""
+
+    def __init__(self, x, rng=(BASE_NFA, BASE_NFB)):
+        self.x, self.rng, self._base = np.array(x, np.float64), rng, None  # a copy: decode_slot subtracts in place
         self.X = np.fft.rfft(x, n=NFFT_FULL)
         # noise PSD estimate (median over the 200-3000 Hz band), for normalisation
         band = np.abs(self.X[int(200 / DF_FULL) : int(3000 / DF_FULL)]) ** 2
         self.noise_psd = float(np.median(band)) / np.log(2)  # median of exp dist -> mean
+
+    def noise_ratio(self, f0):
+        """Noise at f0 by jt9's floor (spectrum_baseline) / the noise downsample() normalises to: per audio sample,
+        10**(sbase/10) / scale vs noise_psd / len(x). 1 under white noise (+ the floor's estimation error)."""
+        if self._base is None:
+            self._base = spectrum_baseline(self.x, *self.rng)
+        sbase, scale = self._base
+        i = min(max(int(np.floor(f0 / BASE_DF + 0.5)), 0), len(sbase) - 1)
+        return 10 ** (sbase[i] / 10) / scale / (self.noise_psd / min(len(self.x), NFFT_FULL))
 
     def downsample(self, f0):
         """Complex baseband (NBB samples @200 Hz) with tone 0 of a signal at f0 mapped to 0 Hz.

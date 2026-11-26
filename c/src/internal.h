@@ -86,13 +86,21 @@ typedef struct {
     cplx *X;  /* NFFT_FULL/2+1 bins of the slot */
     double noise_psd;
     cplx *tmp; /* scratch NFFT_FULL */
+    double *sbase;  /* jt9's SNR noise floor (spectrum_baseline), dB per 3.125 Hz bin, BASE_NB bins */
+    double base_ref; /* 10^(sbase/10) / base_ref: noise at that bin / the noise downsample() normalises to */
 } baseband;
-void baseband_init(baseband *b, const double *x, int n, par *pool);
+#define BASE_NFA 200.0  /* frontend.BASE_NFA, BASE_NFB: the noise floor's fit range without a WSJT-X request */
+#define BASE_NFB 4000.0
+#define BASE_NB 1921    /* bins of a 3840-point real FFT */
+/* nfa, nfb: the range the SNR noise floor is fitted over (frontend.Baseband rng) */
+void baseband_init(baseband *b, const double *x, int n, double nfa, double nfb, par *pool);
 void baseband_free(baseband *b);
 void baseband_downsample(const baseband *b, double f0, cplx *y);
+double baseband_noise_ratio(const baseband *b, double f0); /* frontend.Baseband.noise_ratio */
 
 typedef struct {
     double f0, dt, metric;
+    double nratio; /* baseband_noise_ratio at f0, for estimate_snr */
     int start;
     cplx y[NBB];
 } sync_hyp;

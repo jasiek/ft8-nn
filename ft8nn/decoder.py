@@ -117,16 +117,18 @@ def context_patterns(context, f0, dt):
 
 
 NOISE_BIN = fe.NBB / (int(round(8.5 * ft8.TONE_SPACING / fe.DF_FULL)) + int(round(1.5 * ft8.TONE_SPACING / fe.DF_FULL)))
-SNR_OFFSET = 0.23  # calibration vs true SNR on synthetic AWGN (tools/calib_snr.py)
+SNR_OFFSET = -0.32  # calibration vs true SNR on synthetic AWGN (tools/calib_snr.py; jt9 reads the true SNR there too)
 
 
-def estimate_snr(h, bits77):
-    """SNR (dB, 2500 Hz ref) from the decoded tone sequence: mean power on the transmitted tones vs
-    the front end's normalised per-bin noise power. 10*log10(2500/6.25) = 26.0 dB bandwidth term."""
+def estimate_snr(h, bits77, bb=None):
+    """SNR (dB, 2500 Hz ref) from the decoded tone sequence: mean power on the transmitted tones vs the noise power
+    per bin. 10*log10(2500/6.25) = 26.0 dB bandwidth term. The noise is jt9's floor at h.f0 (bb.noise_ratio, the
+    Baseband h came from); without bb, the per-slot median that h.y is normalised to."""
     tones = ft8.encode77(bits77)[1]
     Z = fe.symbol_spectra(h.y, h.start)
     ps = float(np.mean(np.abs(Z[np.arange(ft8.NN), tones]) ** 2))
-    return 10 * np.log10(max(ps - NOISE_BIN, 1e-3 * NOISE_BIN) / NOISE_BIN) - 26.0 + SNR_OFFSET
+    nb = NOISE_BIN * (bb.noise_ratio(h.f0) if bb is not None else 1.0)
+    return 10 * np.log10(max(ps - nb, 1e-3 * nb) / nb) - 26.0 + SNR_OFFSET
 
 
 def classical_metrics(hyps):
@@ -147,7 +149,7 @@ def _scaled_max_cand(max_cand, cand_kw):
     return max(max_cand, min(1200, int(round(max_cand * 1.5 * w / (fe.FMAX_DEFAULT - fe.FMIN_DEFAULT)))))
 
 
-def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=4, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, erase_gate=15.0, erase_bp_gate=30.0, erase_osd_dmax=3.0, osd_snaps=2, context=(), ctx_gate=48.0, cand_kw=None, reuse_df=62.5, dt_recenter=0.8, repeat=REPEAT, cochannel=COCHANNEL, prior=(), scale_cand=True, post_pass=True, chase=CHASE, chase_hist=(), failed_out=None, refine=REFINE):
+def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2, osd_max_hard=40, passes=4, osd_gate=40.0, osd_metrics=1, ap=(AP_CQ,), ap_gate=44.0, erase_gate=15.0, erase_bp_gate=30.0, erase_osd_dmax=3.0, osd_snaps=2, context=(), ctx_gate=48.0, cand_kw=None, reuse_df=62.5, dt_recenter=0.8, repeat=REPEAT, cochannel=COCHANNEL, prior=(), scale_cand=True, post_pass=True, chase=CHASE, chase_hist=(), failed_out=None, refine=REFINE, snr_rng=(fe.BASE_NFA, fe.BASE_NFB)):
     """Decode one 15 s slot (real audio @12 kHz, any scale), with multi-pass subtraction.
 
     llr_fn(hyps) -> per-hypothesis list of LLR vectors to try in order (first success wins).
@@ -166,6 +168,8 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
     context: [(f0, dt, bits77)] decoded 30 and 60 s earlier on this receiver; context a-priori (_try_ctx) for
     hypotheses within CTX_DF and CTX_DDT of one of them whose expected error count is below ctx_gate. Empty: off.
     cand_kw: extra keyword arguments for frontend.find_candidates (e.g. per_symbol, fmax).
+    snr_rng: (nfa, nfb) the SNR noise floor is fitted over (frontend.Baseband): WSJT-X's range when a request gave
+    one (frontend.search_range), as jt9 fits over the range it searches; else jt9's default 200-4000 Hz.
     reuse_df: in passes after the first, skip a candidate (same frequency bin, lag and track) already tried in an
     earlier pass if no decode subtracted since then lies within reuse_df Hz of it: subtraction only changes the
     audio near the subtracted signal, so its hypotheses would get (nearly) the same LLRs and fail again. 62.5 Hz
@@ -203,7 +207,7 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
             sh = _dt_shift([d.dt for d in found.values()] + [c[1] for c in context], dt_recenter)
             if sh:
                 ckw["dt_shift"] = sh
-        new = _decode_pass(x, llr_fn, mc, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_bp_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, ckw, skip, tried, p, failed_map)
+        new = _decode_pass(x, llr_fn, mc, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_bp_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, ckw, skip, tried, p, failed_map, snr_rng)
         for d in new:
             d.info["pass"] = p
             found[d.key] = d
@@ -213,27 +217,27 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
             break
     post_f0s = []
     if cochannel and found:
-        for d in _cochannel_stage(x, llr_fn, found, *cochannel, osd_order, osd_max_hard, osd_gate, osd_snaps):
+        for d in _cochannel_stage(x, llr_fn, found, *cochannel, osd_order, osd_max_hard, osd_gate, osd_snaps, rng=snr_rng):
             d.info["pass"] = passes
             found[d.key] = d
             subtract(x, ft8.encode77(d.bits77)[1], d.f0, d.dt)
             post_f0s.append(d.f0)
     if refine and failed_map:
         cur_failed = _finalize_failed(failed_map, found)
-        for d in _refine_stage(x, llr_fn, cur_failed, found, *refine, osd_order, osd_max_hard, osd_gate, osd_snaps):
+        for d in _refine_stage(x, llr_fn, cur_failed, found, *refine, osd_order, osd_max_hard, osd_gate, osd_snaps, rng=snr_rng):
             d.info["pass"] = passes
             found[d.key] = d
             subtract(x, ft8.encode77(d.bits77)[1], d.f0, d.dt)
             post_f0s.append(d.f0)
     if chase and chase_hist and failed_map:
         cur_failed = _finalize_failed(failed_map, found)
-        for d in _chase_stage(x, cur_failed, chase_hist, found, *chase, osd_order, osd_max_hard, osd_gate):
+        for d in _chase_stage(x, cur_failed, chase_hist, found, *chase, osd_order, osd_max_hard, osd_gate, rng=snr_rng):
             d.info["pass"] = passes
             found[d.key] = d
             subtract(x, ft8.encode77(d.bits77)[1], d.f0, d.dt)
             post_f0s.append(d.f0)
     if repeat and context:
-        for d in _repeat_stage(x, llr_fn, found, context, n_hyp, *repeat):
+        for d in _repeat_stage(x, llr_fn, found, context, n_hyp, *repeat, rng=snr_rng):
             d.info["pass"] = passes
             found[d.key] = d
             if post_pass:
@@ -247,7 +251,7 @@ def decode_slot(x, llr_fn=classical_metrics, max_cand=600, n_hyp=2, osd_order=2,
             sh = _dt_shift([d.dt for d in found.values()] + [c[1] for c in context], dt_recenter)
             if sh:
                 ckw["dt_shift"] = sh
-        new = _decode_pass(x, llr_fn, mc, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_bp_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, ckw, skip, None, passes + 1, failed_map)
+        new = _decode_pass(x, llr_fn, mc, n_hyp, osd_order, osd_max_hard, found, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_bp_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, ckw, skip, None, passes + 1, failed_map, snr_rng)
         for d in new:
             d.info["pass"] = passes + 1
             found[d.key] = d
@@ -334,7 +338,7 @@ def _i4_successors(b):
     return out
 
 
-def _repeat_stage(x, llr_fn, found, context, n_hyp, rho_min, margin, clip, log=None):
+def _repeat_stage(x, llr_fn, found, context, n_hyp, rho_min, margin, clip, log=None, rng=(fe.BASE_NFA, fe.BASE_NFB)):
     """Decodes for context messages whose sender has no decode in this slot (standard i3=1/2 and non-standard i3=4).
     Accepts exact repeats at (rho_min, margin) and clear-winning sendable successors at REPEAT_SUCC. log: list to
     append (best rho, runner-up rho, best is an earlier message, best payload) to for every tested sender."""
@@ -350,7 +354,7 @@ def _repeat_stage(x, llr_fn, found, context, n_hyp, rho_min, margin, clip, log=N
             groups.setdefault(sk, []).append((fc, dc, b))
     if not groups:
         return []
-    bb = fe.Baseband(x)
+    bb = fe.Baseband(x, rng)
     out = []
     succ_rho, succ_margin = REPEAT_SUCC
     for sk, msgs in groups.items():
@@ -404,7 +408,7 @@ def _repeat_stage(x, llr_fn, found, context, n_hyp, rho_min, margin, clip, log=N
         ok_acc = (r1 >= rho_min and r1 - r2 >= margin) if in_pri else (r1 >= succ_rho and r1 - r2 >= succ_margin)
         if ok_acc:
             d = Decode(alts[k1].copy(), h.f0, h.dt, h.metric, "rp", {"rho": r1, "rho2": r2, "metric": 0, "succ": not in_pri})
-            d.snr = estimate_snr(h, d.bits77)
+            d.snr = estimate_snr(h, d.bits77, bb)
             out.append(d)
     return out
 
@@ -435,10 +439,10 @@ def _nn_only(llr_fn):
     return getattr(llr_fn, "nn", llr_fn)
 
 
-def _cochannel_stage(x, llr_fn, found, near, far, span, tnear, tfar, min_score, nb_gate, osd_order, osd_max_hard, osd_gate, osd_snaps, log=None):
+def _cochannel_stage(x, llr_fn, found, near, far, span, tnear, tfar, min_score, nb_gate, osd_order, osd_max_hard, osd_gate, osd_snaps, log=None, rng=(fe.BASE_NFA, fe.BASE_NFB)):
     """Decodes hidden under the cells of the decodes in `found` (see the comment above). log: list to append
     (cell index, best data-sync score, outcome) to for every cell."""
-    bb = fe.Baseband(x)
+    bb = fe.Baseband(x, rng)
     gf, gt = COCHANNEL_GRID
     rdf, rdt = COCHANNEL_REFINE
     dfs = np.arange(-span - 2 * gf, span + 2 * gf + 1e-9, gf)  # one step beyond the window each way, so a peak on its
@@ -507,7 +511,7 @@ def _cochannel_stage(x, llr_fn, found, near, far, span, tnear, tfar, min_score, 
             if any(_is_ghost(d, e) for e in cells + list(out.values())):
                 outcome.setdefault(g[0], "ghost")
                 continue
-            d.snr = estimate_snr(h, d.bits77)
+            d.snr = estimate_snr(h, d.bits77, bb)
             out[d.key] = d
             outcome[g[0]] = "new"
             done.add(g)
@@ -516,7 +520,7 @@ def _cochannel_stage(x, llr_fn, found, near, far, span, tnear, tfar, min_score, 
     return list(out.values())
 
 
-def _refine_stage(x, llr_fn, cur_failed, found, ee_max, min_drop, rdf, rdt, max_seeds, osd_order, osd_max_hard, osd_gate, osd_snaps):
+def _refine_stage(x, llr_fn, cur_failed, found, ee_max, min_drop, rdf, rdt, max_seeds, osd_order, osd_max_hard, osd_gate, osd_snaps, rng=(fe.BASE_NFA, fe.BASE_NFB)):
     """Micro-shift TTA refinement on failed non-early NN hypotheses with exp_err < ee_max: evaluate the 8 surrounding
     3x3 offsets (+-rdf Hz x +-rdt baseband samples) in one NN batch; for each seed whose cleanest neighbour improves
     exp_err by at least min_drop, try BP -> OSD-2 -> osd_bp with plausibility and ghost checks."""
@@ -532,7 +536,7 @@ def _refine_stage(x, llr_fn, cur_failed, found, ee_max, min_drop, rdf, rdt, max_
     if not seeds:
         return []
     offs = [(a, b) for a in (-rdf, 0.0, rdf) for b in (-rdt, 0, rdt) if (a, b) != (0.0, 0)]
-    bb = fe.Baseband(x)
+    bb = fe.Baseband(x, rng)
     hyps = []
     for f0_i, dt_i, _ in seeds:
         y0 = bb.downsample(f0_i)
@@ -576,7 +580,7 @@ def _refine_stage(x, llr_fn, cur_failed, found, ee_max, min_drop, rdf, rdt, max_
             continue
         if any(_is_ghost(d, e) for e in cells + list(out.values())):
             continue
-        d.snr = estimate_snr(h, d.bits77)
+        d.snr = estimate_snr(h, d.bits77, bb)
         out[d.key] = d
     return list(out.values())
 
@@ -609,7 +613,7 @@ def _chase_margin(lt, b77, clip=REPEAT[2]):
     return r0, r0 - r2
 
 
-def _chase_stage(x, cur_failed, chase_hist, found, df_max, dt_max, clip, rho_t_min, rho_p_min, margin_t, osd_order, osd_max_hard, osd_gate):
+def _chase_stage(x, cur_failed, chase_hist, found, df_max, dt_max, clip, rho_t_min, rho_p_min, margin_t, osd_order, osd_max_hard, osd_gate, rng=(fe.BASE_NFA, fe.BASE_NFB)):
     """Cross-slot soft LLR Chase combining: combine failed NN LLRs of this slot with failed NN LLRs from 30 and/or
     60 s earlier within (df_max, dt_max), decode with BP then gated OSD, and gate on uncombined slot agreement
     (rho_t, rho_p) and successor margin (margin_t) so stale messages from t-30/t-60 cannot leak."""
@@ -688,10 +692,10 @@ def _chase_stage(x, cur_failed, chase_hist, found, df_max, dt_max, clip, rho_t_m
         if rp < rho_p_min:
             continue
         if bb is None:
-            bb = fe.Baseband(x)
+            bb = fe.Baseband(x, rng)
         y = bb.downsample(f0_i)
         start = int(round((ft8.NOMINAL_START + dt_i) * fe.FS_BB))
-        d.snr = estimate_snr(fe.SyncHyp(f0_i, dt_i, y, start, 0.0), b77)
+        d.snr = estimate_snr(fe.SyncHyp(f0_i, dt_i, y, start, 0.0), b77, bb)
         d.info.update({"rho_t": rt, "rho_p": rp, "margin_t": mt, "n_slots": 1 + len(lps)})
         out[d.key] = d
         if sk is not None:
@@ -727,9 +731,9 @@ def _dt_shift(dts, gate):
     return 0.0 if abs(med) < gate else round(med * fe.FPS) / fe.FPS
 
 
-def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_bp_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, cand_kw, skip=None, tried=None, p=0, failed_map=None):
+def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_bp_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, cand_kw, skip=None, tried=None, p=0, failed_map=None, snr_rng=(fe.BASE_NFA, fe.BASE_NFB)):
     cands = fe.find_candidates(x, max_cand=max_cand, **cand_kw)
-    bb = fe.Baseband(x)
+    bb = fe.Baseband(x, snr_rng)
     hyps, owner, h_idx = [], [], []
     for ci, c in enumerate(cands):
         if skip is not None and skip(c):
@@ -791,7 +795,7 @@ def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd
             if not a91[:77].any():  # all-zero payload: classic false decode
                 break
             d = Decode(a91[:77].copy(), h.f0, h.dt, h.metric, info["method"], {**info, "metric": k, "exp_err": float(exp_err[r])})
-            d.snr = estimate_snr(h, d.bits77)
+            d.snr = estimate_snr(h, d.bits77, bb)
             if d.key not in known:
                 found.setdefault(d.key, d)
             done_cand.add(ci)

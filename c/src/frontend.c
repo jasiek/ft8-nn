@@ -280,7 +280,110 @@ int find_candidates(const double *x, int n, double fmin, double fmax, int max_ca
 #define BB_HI 850    /*  round(8.5 * 6.25 / DF_FULL) */
 #define TAPER_N 101
 
-void baseband_init(baseband *b, const double *x, int n, par *pool) {
+/* frontend.spectrum_baseline: jt9's noise floor for its SNR (get_spectrum_baseline.f90, baseline.f90) */
+#define BASE_NFFT 3840
+#define BASE_STEP 1920
+#define BASE_SEGS 10
+#define BASE_PCT 10
+#define BASE_ADD 0.65
+#define BASE_DF (12000.0 / BASE_NFFT)
+#define BASE_NMAX (15 * 12000) /* frontend.BASE_NMAX, BASE_CUT: the floor sees the first 11.8 s in a 15 s buffer */
+#define BASE_CUT (41 * 3456)
+
+/* frontend._polyfit4: least-squares a0..a4 by the normal equations, Gaussian elimination with partial pivoting */
+static void polyfit4(const double *u, const double *y, int n, double a[5]) {
+    double p[9] = {0}, A[5][6] = {{0}};
+    for (int k = 0; k < 9; k++)
+        for (int i = 0; i < n; i++) p[k] += pow(u[i], k);
+    for (int r = 0; r < 5; r++) {
+        for (int c = 0; c < 5; c++) A[r][c] = p[r + c];
+        for (int i = 0; i < n; i++) A[r][5] += y[i] * pow(u[i], r);
+    }
+    for (int c = 0; c < 5; c++) {
+        int r = c;
+        for (int q = c + 1; q < 5; q++)
+            if (fabs(A[q][c]) > fabs(A[r][c])) r = q;
+        for (int k = 0; k < 6; k++) {
+            double t = A[c][k];
+            A[c][k] = A[r][k];
+            A[r][k] = t;
+        }
+        for (int q = c + 1; q < 5; q++) {
+            double f = A[q][c] / A[c][c];
+            for (int k = c; k < 6; k++) A[q][k] -= f * A[c][k];
+        }
+    }
+    for (int r = 4; r >= 0; r--) {
+        double v = A[r][5];
+        for (int k = r + 1; k < 5; k++) v -= A[r][k] * a[k];
+        a[r] = v / A[r][r];
+    }
+}
+
+/* sbase (BASE_NB bins, dB) over [nfa, nfb]; returns the window energy on audio (frontend.spectrum_baseline scale) */
+static double spectrum_baseline(const double *x, int n, double nfa, double nfb, double *sbase) {
+    static const double c4[4] = {0.3635819, -0.4891775, 0.1365995, -0.0106411};
+    double w[BASE_NFFT], w2[BASE_NFFT + 1];
+    w2[0] = 0;
+    for (int i = 0; i < BASE_NFFT; i++) {
+        double a = 2 * M_PI * i / BASE_NFFT;
+        w[i] = c4[0] + c4[1] * cos(a) + c4[2] * cos(2 * a) + c4[3] * cos(3 * a);
+        w2[i + 1] = w2[i] + w[i] * w[i];
+    }
+    if (n > BASE_CUT) n = BASE_CUT;
+    int nseg = (BASE_NMAX - BASE_NFFT) / BASE_STEP + 1;
+    double savg[BASE_NB] = {0}, scale = 0;
+    fft_plan *fp = fft_plan_new(BASE_NFFT);
+    cplx *in = malloc(sizeof(cplx) * BASE_NFFT), *X = malloc(sizeof(cplx) * BASE_NFFT);
+    for (int j = 0; j < nseg; j++) {
+        int m = n - j * BASE_STEP; /* samples of this segment that carry audio; the rest of the buffer is zero */
+        m = m < 0 ? 0 : (m > BASE_NFFT ? BASE_NFFT : m);
+        scale += w2[m];
+        if (!m) continue;
+        for (int i = 0; i < BASE_NFFT; i++) in[i] = i < m ? x[j * BASE_STEP + i] * w[i] : 0;
+        fft_forward(fp, in, X);
+        for (int k = 0; k < BASE_NB; k++) savg[k] += creal(X[k]) * creal(X[k]) + cimag(X[k]) * cimag(X[k]);
+    }
+    free(in);
+    free(X);
+    fft_plan_free(fp);
+    int ia = (int)floor(nfa / BASE_DF + 0.5), ib = (int)floor(nfb / BASE_DF + 0.5);
+    if (ia < 1) ia = 1;
+    if (ib > BASE_NB - 1) ib = BASE_NB - 1;
+    int nlen = (ib - ia + 1) / BASE_SEGS, i0 = (ib - ia + 1) / 2;
+    double s[BASE_NB], srt[BASE_NB], u[BASE_NB], y[BASE_NB];
+    for (int i = ia; i <= ib; i++) s[i] = 10 * log10(fmax(savg[i], 1e-30));
+    int k = 0;
+    for (int g = 0; g < BASE_SEGS; g++) {
+        int ja = ia + g * nlen;
+        memcpy(srt, &s[ja], sizeof(double) * nlen);
+        qsort(srt, nlen, sizeof(double), cmp_d);
+        int j = (int)floor(nlen * 0.01 * BASE_PCT + 0.5); /* pctile.f90 */
+        j = j < 1 ? 1 : (j > nlen ? nlen : j);
+        for (int i = ja; i < ja + nlen; i++)
+            if (s[i] <= srt[j - 1]) {
+                u[k] = (double)(i - i0) / i0;
+                y[k++] = s[i];
+            }
+    }
+    double a[5];
+    polyfit4(u, y, k, a);
+    for (int i = ia; i <= ib; i++) {
+        double t = (double)(i - i0) / i0;
+        sbase[i] = a[0] + t * (a[1] + t * (a[2] + t * (a[3] + t * a[4]))) + BASE_ADD;
+    }
+    for (int i = 0; i < ia; i++) sbase[i] = sbase[ia];
+    for (int i = ib + 1; i < BASE_NB; i++) sbase[i] = sbase[ib];
+    return scale;
+}
+
+double baseband_noise_ratio(const baseband *b, double f0) {
+    int i = (int)floor(f0 / BASE_DF + 0.5);
+    i = i < 0 ? 0 : (i > BASE_NB - 1 ? BASE_NB - 1 : i);
+    return pow(10.0, b->sbase[i] / 10) / b->base_ref;
+}
+
+void baseband_init(baseband *b, const double *x, int n, double nfa, double nfb, par *pool) {
     b->full = fft_plan_new(NFFT_FULL);
     b->bb = fft_plan_new(NBB);
     cplx *in = calloc(NFFT_FULL, sizeof(cplx));
@@ -302,6 +405,9 @@ void baseband_init(baseband *b, const double *x, int n, par *pool) {
     double med = nb % 2 ? band[nb / 2] : (band[nb / 2 - 1] + band[nb / 2]) / 2;
     free(band);
     b->noise_psd = med / log(2.0);
+    b->sbase = malloc(sizeof(double) * BASE_NB);
+    double scale = spectrum_baseline(x, m, nfa, nfb, b->sbase);
+    b->base_ref = scale * b->noise_psd / m; /* per audio sample: 10^(sbase/10) / scale vs noise_psd / m */
 }
 
 void baseband_free(baseband *b) {
@@ -309,6 +415,7 @@ void baseband_free(baseband *b) {
     fft_plan_free(b->bb);
     free(b->X);
     free(b->tmp);
+    free(b->sbase);
 }
 
 static double taper[TAPER_N];
@@ -492,6 +599,7 @@ int fine_sync2(const baseband *b, const candidate *c, int n_hyp, sync_hyp *out) 
         o->f0 = c->f0 + df;
         o->dt = (start0 + dtf) / FS_BB - NOMINAL_START;
         o->metric = Mp[i][j];
+        o->nratio = baseband_noise_ratio(b, o->f0);
     }
     return nh;
 }

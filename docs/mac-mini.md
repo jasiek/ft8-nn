@@ -16,7 +16,7 @@ Mac mini (2024), M4 (4P+6E) or M4 Pro (8–10P+4E). Folder layout is the same on
 
 1. System Settings → General → Sharing → **Remote Login** on.
 2. `scutil --get LocalHostName; whoami; sysctl -n machdep.cpu.brand_string` (note the host name and user).
-3. Homebrew (also installs the compiler, git, make), then uv. ONNX Runtime comes later: the official release,
+3. Homebrew (also installs the compiler, git, make), then uv. ONNX Runtime comes later: Microsoft's official build,
    fetched by `tools/get_onnxruntime.sh` in the repo once it is on the mini (Homebrew's build runs the model 2.3x slower).
    ```sh
    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"

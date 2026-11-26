@@ -42,8 +42,8 @@ _LLR_E = None
 _CH = None
 
 
-def _init(model, also_classical, n_hyp, early_nn="", ckw=None, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, passes=4, context=True, reuse_df=62.5, dt_recenter=0.8, repeat=None, cochannel=None, sendable=True, truncate=None, context_from=None, prior=None, ap=True, early_final=None, chase=None):
-    global _EF, _LLR_E, _AP, _LLR, _NHYP, _CKW, _EG, _EOD, _OSN, _NP, _CTX, _RDF, _DTR, _RP, _CC, _TRUNC, _CTXF, _PRIOR, _CH
+def _init(model, also_classical, n_hyp, early_nn="", ckw=None, erase_gate=15.0, erase_osd_dmax=3.0, osd_snaps=2, passes=4, context=True, reuse_df=62.5, dt_recenter=0.8, repeat=None, cochannel=None, sendable=True, truncate=None, context_from=None, prior=None, ap=True, early_final=None, chase=None, snr_rng=None):
+    global _SNRR, _EF, _LLR_E, _AP, _LLR, _NHYP, _CKW, _EG, _EOD, _OSN, _NP, _CTX, _RDF, _DTR, _RP, _CC, _TRUNC, _CTXF, _PRIOR, _CH
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     import torch
 
@@ -69,6 +69,7 @@ def _init(model, also_classical, n_hyp, early_nn="", ckw=None, erase_gate=15.0, 
     _PRIOR = prior
     _AP = ap
     _EF = early_final
+    _SNRR = snr_rng
     if early_final:
         _LLR_E = nn_metric.make_llr_fn(model, also_classical=also_classical, n_valid=early_final, mask_median=True)
     decoder.REPEAT_SENDABLE = sendable  # repeat-stage competitor set (--repeat-competitors)
@@ -145,7 +146,7 @@ def _decode(path, context=(), prior=(), chase_hist=(), failed_out=None):
     if len(x) < 180000:
         x = np.pad(x, (0, 180000 - len(x)))
     x = x[: _TRUNC or 180000]  # an early pass: only the first _TRUNC samples have arrived (the C library gets just those)
-    ds = decoder.decode_slot(x / (np.std(x) + 1e-9), llr_fn=_LLR, n_hyp=_NHYP, erase_gate=_EG, erase_osd_dmax=_EOD, osd_snaps=_OSN, passes=_NP, context=context, cand_kw=_CKW, reuse_df=_RDF, dt_recenter=_DTR, repeat=_RP, cochannel=_CC, prior=prior, ap=(decoder.AP_CQ,) if _AP else (), chase=_CH, chase_hist=chase_hist, failed_out=failed_out)
+    ds = decoder.decode_slot(x / (np.std(x) + 1e-9), llr_fn=_LLR, n_hyp=_NHYP, erase_gate=_EG, erase_osd_dmax=_EOD, osd_snaps=_OSN, passes=_NP, context=context, cand_kw=_CKW, reuse_df=_RDF, dt_recenter=_DTR, repeat=_RP, cochannel=_CC, prior=prior, ap=(decoder.AP_CQ,) if _AP else (), chase=_CH, chase_hist=chase_hist, failed_out=failed_out, snr_rng=_SNRR)
     return Path(path).stem, [(d.bits77, d.f0, d.dt, d.method, d.info.get("metric"), d.snr) for d in ds]
 
 
@@ -160,7 +161,7 @@ def _decode_early_final(path, context=(), chase_hist=(), failed_out=None):
     if x.ndim > 1:
         x = x.mean(1)
     x = np.pad(x, (0, max(0, 180000 - len(x))))[:180000]
-    kw = dict(n_hyp=_NHYP, erase_gate=_EG, context=context, cand_kw=_CKW, reuse_df=_RDF, dt_recenter=_DTR)
+    kw = dict(n_hyp=_NHYP, erase_gate=_EG, context=context, cand_kw=_CKW, reuse_df=_RDF, dt_recenter=_DTR, snr_rng=_SNRR)
     xe = x[:_EF]
     early = decoder.decode_slot(xe / (np.std(xe) + 1e-9), llr_fn=_LLR_E, erase_osd_dmax=0, osd_snaps=0, ap=(),
                                 passes=decoder.EARLY_PASSES, repeat=None, cochannel=None, chase=None, refine=None, scale_cand=False, post_pass=False, **kw)
@@ -267,8 +268,9 @@ def main():
     a = ap.parse_args()
     from ft8nn import frontend as _fe
 
+    snr_rng = (_fe.BASE_NFA, _fe.BASE_NFB)  # the SNR noise floor's fit range: jt9's default, or the request's
     if a.range:
-        a.fmin, a.fmax = _fe.search_range(*(float(v) for v in a.range.split(",")))
+        a.fmin, a.fmax = snr_rng = _fe.search_range(*(float(v) for v in a.range.split(",")))
     a.fmin = _fe.FMIN_DEFAULT if a.fmin is None else a.fmin
     a.fmax = _fe.FMAX_DEFAULT if a.fmax is None else a.fmax
 
@@ -282,7 +284,7 @@ def main():
     outroot = Path(a.out)
 
     if not a.compare_only:
-        with ProcessPoolExecutor(a.workers, initializer=_init, initargs=(a.model, a.also_classical, a.n_hyp, a.early_nn, dict(per_symbol=a.per_symbol, fmin=a.fmin, fmax=a.fmax, base=a.base), a.erase_gate, a.erase_osd_dmax, a.osd_snaps, a.passes, not a.no_context, a.reuse_df, a.dt_recenter, None if a.repeat == "off" else tuple(map(float, a.repeat.split(","))), _cc_arg(a.cochannel), a.repeat_competitors == "sendable", a.truncate, (a.out, a.context_from) if a.context_from else None, (a.out, a.prior) if a.prior else None, not a.no_ap, a.early_final, None if a.chase == "off" else tuple(map(float, a.chase.split(","))))) as ex:
+        with ProcessPoolExecutor(a.workers, initializer=_init, initargs=(a.model, a.also_classical, a.n_hyp, a.early_nn, dict(per_symbol=a.per_symbol, fmin=a.fmin, fmax=a.fmax, base=a.base), a.erase_gate, a.erase_osd_dmax, a.osd_snaps, a.passes, not a.no_context, a.reuse_df, a.dt_recenter, None if a.repeat == "off" else tuple(map(float, a.repeat.split(","))), _cc_arg(a.cochannel), a.repeat_competitors == "sendable", a.truncate, (a.out, a.context_from) if a.context_from else None, (a.out, a.prior) if a.prior else None, not a.no_ap, a.early_final, None if a.chase == "off" else tuple(map(float, a.chase.split(","))), snr_rng)) as ex:
             jobs = []  # (station index, chain): one chain per station and period, or one per file without context
             for si, st in enumerate(stations):
                 files = sorted(str(f) for f in (st / "slots").glob("*.wav"))

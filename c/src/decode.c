@@ -163,7 +163,7 @@ static int prof = -1;
 #define TRIED_NL 320
 #define TRIED_NB ((int)(F_HI / 3.125) + 1)
 #define NOISE_BIN (3200.0 / 1000.0)
-#define SNR_OFFSET 0.23
+#define SNR_OFFSET (-0.32) /* decoder.SNR_OFFSET */
 
 typedef struct {
     double f0, dt, exp_err;
@@ -197,6 +197,7 @@ struct ft8nn_ctx {
     int nv_bb;        /* NN features: baseband samples that carry audio during the current decode, 0 = all */
     int cons;         /* early pass: no CQ a-priori, no OSD on BP sums, no wide-window erasure OSD */
     double fmin, fmax; /* candidate search range, Hz (ft8nn_set_range) */
+    double snr_nfa, snr_nfb; /* range the SNR noise floor is fitted over: the request's, else BASE_NFA..BASE_NFB */
 };
 
 static once_t init_once = ONCE_INIT;
@@ -219,6 +220,8 @@ ft8nn_ctx *ft8nn_open(const char *onnx_path, int n_threads) {
     ft8nn_ctx *c = calloc(1, sizeof *c);
     c->fmin = FMIN_DEFAULT;
     c->fmax = FMAX_DEFAULT;
+    c->snr_nfa = BASE_NFA;
+    c->snr_nfb = BASE_NFB;
     c->api = OrtGetApiBase()->GetApi(ORT_API_VERSION);
     const OrtApi *api = c->api;
     OrtSessionOptions *so = NULL;
@@ -231,7 +234,16 @@ ft8nn_ctx *ft8nn_open(const char *onnx_path, int n_threads) {
 #else
     const char *model = onnx_path;
 #endif
+    /* ONNX Runtime 1.31 sends usage telemetry (device ID, hardware, OS, program name, errors) to Microsoft unless
+       ORT_DISABLE_TELEMETRY is set; it reads the variable when the environment is created. A user's own setting
+       wins. DisableTelemetryEvents covers builds that ignore the variable (on Windows, ETW tracing). */
+#ifdef _WIN32
+    if (!getenv("ORT_DISABLE_TELEMETRY")) _putenv_s("ORT_DISABLE_TELEMETRY", "1");
+#else
+    setenv("ORT_DISABLE_TELEMETRY", "1", 0);
+#endif
     if (ort_check(api, api->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "ft8nn", &c->env)) ||
+        ort_check(api, api->DisableTelemetryEvents(c->env)) ||
         ort_check(api, api->CreateSessionOptions(&so)) ||
         /* one ONNX Runtime thread per Run: our own threads call Run concurrently on chunks of hypotheses */
         ort_check(api, api->SetIntraOpNumThreads(so, 1)) || ort_check(api, api->SetInterOpNumThreads(so, 1)) ||
@@ -276,6 +288,8 @@ void ft8nn_set_range(ft8nn_ctx *c, double nfa, double nfb) {
     if (nfa < 0 || nfb <= nfa) {
         c->fmin = FMIN_DEFAULT;
         c->fmax = FMAX_DEFAULT;
+        c->snr_nfa = BASE_NFA;
+        c->snr_nfb = BASE_NFB;
         return;
     }
     double nwin = nfb - nfa;
@@ -287,8 +301,8 @@ void ft8nn_set_range(ft8nn_ctx *c, double nfa, double nfb) {
         nfb = F_HI;
         if (nwin < 100) nfa = nfb - nwin;
     }
-    c->fmin = nfa;
-    c->fmax = nfb > nfa + 3.125 ? nfb : nfa + 3.125;
+    c->fmin = c->snr_nfa = nfa;
+    c->fmax = c->snr_nfb = nfb > nfa + 3.125 ? nfb : nfa + 3.125;
 }
 
 void ft8nn_get_range(const ft8nn_ctx *c, double *fmin, double *fmax) {
@@ -365,9 +379,10 @@ static double estimate_snr(const sync_hyp *h, const uint8_t *bits77) {
         ps += a * a;
     }
     ps /= NN;
-    double v = ps - NOISE_BIN;
-    if (v < 1e-3 * NOISE_BIN) v = 1e-3 * NOISE_BIN;
-    return 10 * log10(v / NOISE_BIN) - 26.0 + SNR_OFFSET;
+    double nb = NOISE_BIN * h->nratio; /* jt9's noise floor at f0 (fine_sync2 / the co-channel stage set it) */
+    double v = ps - nb;
+    if (v < 1e-3 * nb) v = 1e-3 * nb;
+    return 10 * log10(v / nb) - 26.0 + SNR_OFFSET;
 }
 
 /* CQ a-priori: n28 = 2 ('CQ'), ipa = 0, i3 = 1 on bits 0..28 and 74..76 */
@@ -918,7 +933,7 @@ static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall,
         sel[ns++] = ci;
     }
     baseband bb;
-    baseband_init(&bb, x, n, c->pool);
+    baseband_init(&bb, x, n, c->snr_nfa, c->snr_nfb, c->pool);
     sync_hyp *hyps = malloc(sizeof(sync_hyp) * (size_t)(ns * N_HYP + 1));
     int *nk = malloc(sizeof(int) * (size_t)(ns + 1));
     {
@@ -1167,6 +1182,7 @@ static void cc_worker(void *arg, int w) {
             hy[i].f0 = j->cells[s->cell].f0 + s->df;
             hy[i].dt = s->start / FS_BB - NOMINAL_START;
             hy[i].metric = 0;
+            hy[i].nratio = baseband_noise_ratio(j->bb, hy[i].f0);
             hp[i] = &hy[i];
         }
         if (run_nn(j->c, hp, b, llr, feat)) {
@@ -1187,7 +1203,7 @@ static void cc_worker(void *arg, int w) {
 static int cochannel_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int nall) {
     double t0 = tnow();
     baseband bb;
-    baseband_init(&bb, x, n, c->pool);
+    baseband_init(&bb, x, n, c->snr_nfa, c->snr_nfb, c->pool);
     cc_job *j = calloc(1, sizeof *j);
     for (int i = 0; i < CC_NF; i++) j->dfs[i] = -(CC_SPAN + 2 * CC_GF) + i * CC_GF; /* numpy arange: exact here */
     for (int t = 0; t < CC_NT; t++) j->dts[t] = -(CC_TFAR + CC_GT) + t * CC_GT;
@@ -1426,7 +1442,7 @@ static int refine_stage(ft8nn_ctx *c, const double *x, int n, const chase_hyp *c
     if (!ns) return nall;
     double t0 = tnow();
     baseband bb;
-    baseband_init(&bb, x, n, c->pool);
+    baseband_init(&bb, x, n, c->snr_nfa, c->snr_nfb, c->pool);
     int nh = ns * 8;
     sync_hyp *hyps = malloc(sizeof(sync_hyp) * (size_t)nh);
     static const double oa[8] = {-RF_RDF, -RF_RDF, -RF_RDF, 0.0, 0.0, RF_RDF, RF_RDF, RF_RDF};
@@ -1443,6 +1459,7 @@ static int refine_stage(ft8nn_ctx *c, const double *x, int n, const chase_hyp *c
             hy->f0 = sf[si] + oa[o];
             hy->dt = hy->start / FS_BB - NOMINAL_START;
             hy->metric = 0.0;
+            hy->nratio = baseband_noise_ratio(&bb, hy->f0);
         }
     }
     baseband_free(&bb);
@@ -1578,11 +1595,12 @@ static int chase_stage(ft8nn_ctx *c, const double *x, int n, const chase_hyp *cu
                                 : fmax(chase_rho(lp_raw[0], cw), chase_rho(lp_raw[1], cw));
             if (rp < CHASE_RHO_P) continue;
             if (!bb_ready) {
-                baseband_init(&bb, x, n, c->pool);
+                baseband_init(&bb, x, n, c->snr_nfa, c->snr_nfb, c->pool);
                 bb_ready = 1;
             }
             sync_hyp hy = {.f0 = d.f0, .dt = d.dt, .metric = 0.0,
-                           .start = (int)nearbyint((NOMINAL_START + d.dt) * FS_BB)};
+                           .start = (int)nearbyint((NOMINAL_START + d.dt) * FS_BB),
+                           .nratio = baseband_noise_ratio(&bb, d.f0)};
             baseband_downsample(&bb, d.f0, hy.y);
             d.snr = estimate_snr(&hy, d.bits77);
             if (rc < DEC_CAP) all[rc++] = d;
@@ -1687,7 +1705,7 @@ static int repeat_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int nall
             for (int j = 0; j < 174; j++) S[(size_t)i * 174 + j] = cw[j] ? 1.0 : -1.0;
         }
         if (!bb_ready) {
-            baseband_init(&bb, x, n, c->pool);
+            baseband_init(&bb, x, n, c->snr_nfa, c->snr_nfb, c->pool);
             bb_ready = 1;
         }
         double r1 = 0, r2 = 0;

@@ -260,6 +260,106 @@ own `/api/description` tuning range (404 → UberSDR's 10 kHz–30 MHz); digital
 shows `Instance: <url>`. Validation: 40 focused tests passed (`tests/test_live_compare.py`, `tests/test_receiverbook_directory.py`); address parsing and band lists checked against a live
 public instance; an unresolvable host fails before the picker. Full audio/decoder UI not exercised for this change.
 
+## ONNX supply-chain audit; ONNX Runtime telemetry off — done 2026-11-22
+
+The user heard ONNX was compromised. **What is known (as of 2026-11-20):** PyPI `agent-framework` 1.26.1/1.26.2
+(Microsoft) carried a credential stealer (a `.pth` start-up hook), live ~55 min on 2026-11-17 from 20:35 UTC; Wiz says
+a Microsoft release-signing (ESRP) certificate was stolen. Microsoft made `microsoft/onnxruntime` and ~7 related repos
+private "while we investigate" (still 404 on 2026-11-22). No source names a tampered onnx/onnxruntime release.
+**Audit of the M1 (not yet the M4):** no `agent-framework` or its payload files anywhere; every start-up `.pth` is
+standard. onnx 1.23.2, onnxruntime 1.31.1, onnxscript 0.7.2, onnx-ir 1.1.0: all 1,774 installed files match their
+wheels' RECORD, and the `uv.lock` hashes equal PyPI's (uploaded 2026-09-09..10-26, before the incident).
+`third_party/onnxruntime-osx-arm64-1.31.1` (downloaded 2026-11-09): its code and data bytes equal the
+Developer-ID-signed dylib in NuGet `Microsoft.ML.OnnxRuntime` 1.31.1 (published 2026-10-28); only the signature differs.
+**Found instead: ONNX Runtime 1.31.1 sends telemetry to Microsoft** (1DS, `mobile.events.data.microsoft.com`): a device
+ID, hardware model, OS, program name and errors, queued in `~/Library/Application Support/Microsoft/DeveloperTools/
+.onnxruntime/onnxruntime.db`. `ft8nn_cli`, `ft8nn_sidecar`, `jt9nn`, `jt9nn-small` and Python had each sent at least
+once (macOS URL caches, 2026-11-09..13). **Change:** `ft8nn_open` sets `ORT_DISABLE_TELEMETRY=1` (a user's own value wins)
+before `CreateEnv` and calls `DisableTelemetryEvents`; `tools/export_onnx.py` and `tests/test_onnx.py` set it before
+importing onnxruntime. `tools/get_onnxruntime.sh` (NuGet since 2026-11-19, section below; its package pin
+`6871ccbc…` equals an independent download here) now also checks a reused osx-arm64 1.31.1 folder's library:
+the NuGet build `2685dc29…` or the GitHub release's `17500d6b…`, anything else exits 1.
+**Tests:** sandboxed (outbound network denied, `HOME` in a scratch folder): the CLI, the sidecar and `test_onnx.py`
+write no telemetry; plain onnxruntime without the opt-out writes 4 files (the control). HEAD vs new C, run 4
+`07_20m`: 120 slots 4,578 decode lines and `--stream --early 141120` 40 slots 1,395 lines, byte-identical.
+`wsjtx/test_sidecar.sh` passes. `golden_c.py` not run (its `nn_v3_snr` references are on the M4). Queued events and
+ORT's device ID deleted on the M1.
+**Next:** do not upgrade ONNX packages or ONNX Runtime (e.g. onnxruntime 1.32.0) until Microsoft explains;
+`uv sync` is safe (hashes pinned). On the M4: same audit, and clear its `.onnxruntime` telemetry folder.
+
+## ONNX Runtime from NuGet — done 2026-11-19 (CI was failing)
+
+**github.com/microsoft/onnxruntime is gone** (404 since about 2026-11-18, release downloads included; Microsoft has
+said nothing, onnxruntime.ai still links there), so `tools/get_onnxruntime.sh` failed in both CI workflows (windows
+run 44495816140: `curl: (22) ... 404`). It now downloads Microsoft's NuGet package `Microsoft.ML.OnnxRuntime`
+(one 152 MB zip with every platform's library), checks it against a pinned SHA-256 (1.31.1:
+`6871ccbc…2e7c679a`; another version needs `ORT_SHA256=`), and unpacks this platform's headers and library into the
+same `third_party/onnxruntime-<plat>-<ver>/{include,lib}` layout as before (plus the `libonnxruntime.1.dylib` /
+`libonnxruntime.so.1` names the library records for itself). **Same build:** the NuGet osx-arm64 library has all 31
+Mach-O sections byte-identical to the GitHub release's (23 MB of code); only Microsoft's code signature replaces the
+ad-hoc one; headers identical but for CRLF line ends. Checked in a fresh worktree on the mini: golden C == Python 4/4
+with every field equal against `nn_v3_snr` (00_40m 815, 08_80m 629, run-2 02_80m 754, AWGN 429), pytest 97 passed;
+a wrong hash exits 1 and unpacks nothing. The NuGet package has no macOS x86_64 library (the GitHub releases had),
+so Intel Macs are no longer supported by the script. Existing `third_party/onnxruntime-*-1.31.1` folders are reused.
+
+## SNR reports in line with jt9 — done 2026-11-16 (tag `nn_v3_snr`)
+
+The user asked why our SNR did not match jt9's. **Before:** on runs 2–4 pooled (80,743 decodes both made) ours − jt9
+had a median of −3.9 dB and a slope of 0.75 (ours vs jt9). The gap depended on audio frequency (median −27.4 dB at
+3000 Hz, −20.9 at 2750, −8 at 500, +1.4 at 1500) and on the receiver (−0.1 to −6.6 dB).
+**Why:** both compute SNR = 10·log10(power on the decoded tones / noise per bin − 1) − constant. They differ in the
+noise. jt9 (`lib/ft8/get_spectrum_baseline.f90`, `baseline.f90`) takes the noise *at the signal's frequency*: the
+slot's average spectrum (3840-point Nuttall windows, 3.125 Hz bins) in dB over [nfa, nfb]; in each of 10 segments the
+points at or below the 10th percentile; a degree-4 polynomial through them, + 0.65 dB. We took *one number per slot*,
+the median power over 200–3000 Hz (`Baseband.noise_psd`). That was wrong three ways:
+- (1) KiwiSDR audio falls off towards 3 kHz and below ~1 kHz, so at the edges the real floor is far below the median.
+- (2) On a busy band the median takes in signal energy, so everything read low there. On a quiet band the empty
+  edges pull the median below the mid-band floor, so mid-band SNRs read high.
+- (3) The median was recomputed on each pass's residual. Strong signals, decoded first, read low; weak ones, decoded
+  later, read high. That is the 0.75 slope.
+
+**Change:** `frontend.spectrum_baseline` is a port of jt9's floor, and `Baseband.noise_ratio(f0)` turns it into the
+units `downsample` normalises to; `decoder.estimate_snr(h, bits77, bb)` uses it. In C: `spectrum_baseline` /
+`baseband_noise_ratio` in `c/src/frontend.c`, and `sync_hyp.nratio`, set by `fine_sync2` and the co-channel stage.
+Only the SNR uses it. The network's input scale (`noise_psd`) is unchanged, so decodes are byte-identical. Two
+details are needed to match jt9 3.0.x, besides the port:
+- **Fit range = jt9's [nfa, nfb]:** WSJT-X's request range when there is one (`decode_slot(snr_rng=)`,
+  `run_real.py --range`, C `ft8nn_set_range`), else jt9's command-line default 200–4000 Hz (`BASE_NFA/BASE_NFB`).
+  Our 150 Hz search floor reads +11 dB vs jt9 below 500 Hz: 150–200 Hz is as empty as 3–4 kHz on these
+  recordings and pulls the fit down.
+- **The floor sees the first 11.8 s in a 15 s buffer, the rest zero** (`BASE_CUT` = 41·3456 samples). jt9 decodes
+  a file the way WSJT-X decodes live, at 11.8 / 13.5 / 14.4 s with the buffer zeroed past that point
+  (`lib/jt9.f90` nzhsym 41/47/50, read in the WSJT-X 3.0.1 source; the installed 3.0.2 jt9 reproduces the run-1
+  labels exactly). The cut is a step in the waveform. Its splatter fills the empty 3–4 kHz, which lifts jt9's fit at
+  the top edge by up to ~15 dB and lowers it mid-band by 2–4 dB. On 149 clean signals added to real run-1 slots, the
+  full slot left ours − jt9 at −2.4..+8.2 dB per 500 Hz; the cut left a flat +1.1. The scale counts only the window
+  energy on audio, which removes that +1.1. Our early pass ends at the same sample, so both passes see one floor.
+
+`SNR_OFFSET` 0.23 → −0.32: re-fitted on synthetic AWGN (`tools/calib_snr.py`, +0.55 dB at −20/−18/−16). jt9 reads the
+true SNR there too. The WSJT-X sidecar now clamps at −25 dB as jt9 3.0 does (`ft8b.f90`; master and 2.x: −24); the
+CLI and decode files keep the unclamped value.
+**Note: matching jt9 copies its distortion.** On noise through a KiwiSDR-like passband, jt9 itself reads +12..+15 dB
+at the edges and −5 mid-band vs the true SNR, and so do we now. On flat noise both read the truth (±0.4 dB).
+**Results** (`tools/cmp_snr_jt9.py`, new; medians of ours − jt9, `nn_v3_f4bp` → `nn_v3_snr`):
+
+| | decodes shared | all | slope | per jt9-SNR bin | per 250 Hz bin | per receiver |
+|---|---|---|---|---|---|---|
+| run 1 | 26,356 | −6.0 → **+0.2** | 0.89 → **0.98** | → −0.1..+0.4 | −27.1..−1.9 → **0.0..+0.3** | → 0.0..+0.3 |
+| runs 2–4 pooled | 80,743 | −3.9 → **+0.1** | 0.75 → **0.99** | −10.8..+1.9 → **0.0..+0.2** | −27.4..+1.4 → **−0.1..+0.4** | → −0.2..+0.3 (36) |
+
+Synthetic slots (`jt9` 3.0.2 on the same WAVs): flat noise and a KiwiSDR-like passband, ours − jt9 within ±0.4 dB in
+every 300 Hz bin. Decodes unchanged: runs 1–4 every station's decode lines identical to `nn_v3_f4bp` apart from the
+SNR column. Run 1 34,765 / 26,638 / 1, run 2 29,743 / 21,858 / 1, run 3 28,475 / 21,459 / 1, run 4 49,158 / 35,661 /
+2, noise 0 false / 998. Training recordings 18,724 ours (the same; all 10 stations' decode lines identical apart from SNR), AWGN 50% −22.49 dB (unchanged), `ab_run2.sh` + `validate_full.sh nn_v3_snr` PASS, golden C == Python 4/4 with every field equal (`00_40m` 815/815, `08_80m` 629/629, run-2 `02_80m` 754/754, AWGN 429/429). Golden C == Python on every field, SNR included (run-2 `02_80m`
+754/754, `ci_smoke` 51/51); `golden_c.py`'s default tag is now `nn_v3_snr`. **C cost +0.8% user CPU** (40 run-1
+`01_40m` slots, `--threads 0 --early 141696`, HEAD vs new built side by side, old/new/new/old: 327.6 → 330.2 s; the
+floor skips the 19 all-zero segments past the cut). Tests: `tests/test_snr_baseline.py` (white-noise floor, true
+SNR on flat noise, a passband slope that the old median got 5 dB wrong, a busy band, the fit range); 97 pass;
+`wsjtx/test_sidecar.sh` passes. Python 08:55–15:36 on the mini, no sleep events. The machine was shared from
+~09:07 with another session's training and run-1 decodes (load average up to ~280), so the stage times (run 2 60 min,
+run 3 61, run 4 125, run 1 102) are not timings.
+Next: nothing open here. The decoder plan below is unchanged (Next item 3).
+
 ## Live comparison update — done 2026-11-14
 
 Added a third column subscribing to the selected band's FT8 PSK Reporter MQTT feed over TLS, with reconnect.
@@ -517,8 +617,10 @@ Reproduce: `git worktree add --detach <dir> <rev>`, `make -C <dir>/c ORT_PREFIX=
 then `/usr/bin/time -l <dir>/c/build/ft8nn_cli --threads N --time models/v3/ft8nn.onnx <first 40 wavs of
 datasets/ft8-validation-set/recordings/01_40m_*/slots>` (per-slot `time` lines on stderr).
 
-Last updated 2026-11-15 (**Next item 2 closed at −40% CPU per busy slot with the same decodes; the remaining,
-non-exact leads parked**; next is item 3). Before that 2026-11-15 (**Costas fine sync slides its DFTs along DT, −6.9%
+Last updated 2026-11-22 (**ONNX audit**: no compromise found on the M1; ONNX Runtime's telemetry to Microsoft turned off in libft8nn and the Python tools; section at the top). Before that 2026-11-19 (**ONNX Runtime from NuGet**: the GitHub repo and its releases are gone; same build, pinned SHA-256, section at the top). Before that 2026-11-16 (**SNR reports in line with jt9, tag `nn_v3_snr`**: jt9's local noise floor instead of
+one median per slot, measured as jt9 does on the first 11.8 s; runs 2–4 ours − jt9 −3.9 → +0.1 dB, slope 0.75 →
+0.99, decodes unchanged; section at the top). Before that 2026-11-15 (**Next item 2 closed at −40% CPU per busy slot
+with the same decodes; the remaining, non-exact leads parked**; next is item 3). Before that 2026-11-15 (**Costas fine sync slides its DFTs along DT, −6.9%
 CPU per busy slot, decodes identical; item 2 −40%**, Next item 2 step 3 (e)). Before that 2026-11-15 (**candidate-search median by a network,
 −10.3% CPU per busy slot, decodes identical**, Next item 2 step 3 (d)). Before that 2026-11-15 (**combined check of `main` passed, tag `nn_v3_f4bp`**: the search to 4 kHz plus item 2's CPU
 changes give `nn_v3_f4k`'s decodes on runs 1–2 and training (3 labels bp -> osd); first runs 3–4 numbers for the
@@ -603,15 +705,9 @@ decodes verified identical to the main machine.
   21,421 / 1), run 4 **49,158 / 35,661 / 2** (48,999 / 35,541 / 2); the wider search reshuffles in-band candidates
   there (run 3: 374 decode lines only in the old, 431 only in the new; run 4: 1,759 / 1,918) for a net gain.
   **Runs 2–4 pooled: 107,376 / 78,978 / 4** (old range 107,108 / 78,782 / 4: +268 decodes, +196 slot-confirmed,
-  the same 4 unconfirmed). Logs `data/logs/nn_v3_f4bp/` (`diff.txt`).
-- **Rebased 2026-11-14 onto `origin/main` (search range `nn_v3_f4k`, validation run 5).** The co-channel gate
-  (`nn_v3_ccg`) and the faster NN were each accepted on top of `nn_v3_ccrpc`, the search range on its own; both
-  local changes left decodes identical, so the combined code should equal `nn_v3_f4k`, but no run has checked it.
-  The `nn_v3_f4k` decodes were made on the M1 and are not on the mini. To check: copy them over (or rerun
-  `nn_v3_f4k` from `03ecdb4`), decode runs 1–4 and training with the combined code, diff, then `golden_c.py`.
-  BP early stop (`nn_v3_bps`, 2026-11-15) was accepted on the pre-rebase code too and rebased on top; it changes
-  only method labels there (9 of 160k bp -> osd), so the combined code should equal `nn_v3_f4k` but for such
-  labels. The combined check covers it: same message, f0, DT and SNR as `nn_v3_f4k` everywhere, labels aside.
+  the same 4 unconfirmed). Logs `data/logs/nn_v3_f4bp/` (`diff.txt`). Rerun 2026-11-18 at `53840d8` (`ab_run2.sh` +
+  `validate_full.sh`, 13:51–15:39, no sleep events): all 28 run-1/run-2/training decode files byte-identical to
+  `nn_v3_snr`, golden 4/4 PASS - the results reproduce.
 - **Validation set expanded 2026-11-09.** Run 3 (`$V/run3`, data repo `794a63d`): 12 fresh Kiwis, none at a training,
   run-1 or run-2 site, Mon 05:32–06:02 UTC (run 2 was Wed 22:30): Oceania/Asia/Qatar daytime 20/15/10 m, Europe dawn
   40 m and 60 m (new band), western USA 80 m. jt9 23,524 decodes / 17,888 slot-confirmed / 17 unconf, the size of run 2

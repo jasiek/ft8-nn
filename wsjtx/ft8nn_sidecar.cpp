@@ -306,10 +306,17 @@ struct Decoder
 
 /* ---------------------------------------------------------------- sidecar replies */
 
+/* The SNR as jt9 reports it: below -25 dB it says -25 (WSJT-X 3.0 ft8b.f90; 2.x said -24), rounded half away from
+ * zero (nint); the decoder's own value goes lower. The top stays inside WSJT-X's fixed-width field. */
+static int jt9_snr (double snr)
+{
+  return std::min (99, (int) lround (std::max (-25.0, snr)));
+}
+
 static void send_decode (long long seq, ft8nn_decode_t const & d)
 {
   /* WSJT-X puts these into fixed-width Fortran fields, so keep them inside what it can show. */
-  int snr = std::min (99, std::max (-99, (int) lround (d.snr)));
+  int snr = jt9_snr (d.snr);
   double dt = std::min (9.9, std::max (-9.9, (double) d.dt));
   int freq = std::min (99999, std::max (0, (int) lround (d.f0)));
   std::string msg = d.text;
@@ -540,7 +547,7 @@ static int sidecar_mode (Options const & o, char const * argv0)
  * tests compare, so file mode prints it too. */
 static void print_jt9_line (int nutc, ft8nn_decode_t const & d)
 {
-  int snr = std::min (99, std::max (-99, (int) lround (d.snr)));
+  int snr = jt9_snr (d.snr);
   double dt = std::min (9.9, std::max (-9.9, (double) d.dt));
   int f = std::min (99999, std::max (0, (int) lround (d.f0)));
   char annot[3] = {' ', ' ', 0};

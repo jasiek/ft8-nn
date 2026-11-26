@@ -14,6 +14,7 @@ model 26% faster (22.4 -> 16.5 ms per batch of 32); ONNX Runtime does not fuse t
 the single op.
 """
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -22,6 +23,8 @@ import onnx
 import torch
 from onnx import helper, numpy_helper
 
+# ONNX Runtime sends usage telemetry to Microsoft unless this is set before it is loaded (c/src/decode.c)
+os.environ.setdefault("ORT_DISABLE_TELEMETRY", "1")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from ft8nn import model, nn_metric, synth_bb  # noqa: E402
 

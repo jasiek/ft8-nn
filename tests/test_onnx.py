@@ -1,6 +1,10 @@
+import os
 from pathlib import Path
 
 import pytest
+
+# before onnxruntime is imported: no usage telemetry to Microsoft (c/src/decode.c)
+os.environ.setdefault("ORT_DISABLE_TELEMETRY", "1")
 
 CKPT = Path(__file__).resolve().parents[1] / "models/v4/model.pt"
 
