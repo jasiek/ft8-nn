@@ -115,7 +115,7 @@ static char const * const usage_text =
   "\n"
   "Options:\n"
   "  --model PATH      ft8nn.onnx (default: $FT8NN_MODEL, then ft8nn.onnx next to this\n"
-  "                    binary, in $WSJTX_DATA_DIR / $WSJTX_SHARE_DIR, or ../models/v3)\n"
+  "                    binary, in $WSJTX_DATA_DIR / $WSJTX_SHARE_DIR, or ../models/v4)\n"
   "  --threads N       decode threads (default 0: one per performance core)\n"
   "  --no-early        answer WSJT-X's early passes at once with no decodes (default: decode\n"
   "                    the first, at 11.8 s, with a short early pass, and the final pass\n"
@@ -193,6 +193,7 @@ static std::string find_model (Options const & o, char const * argv0)
   if (std::string e = env_or_empty ("FT8NN_MODEL"); !e.empty ()) return e;
   std::string self = dir_of (argv0);
   for (std::string const & d : {self, env_or_empty ("WSJTX_DATA_DIR"), env_or_empty ("WSJTX_SHARE_DIR"),
+                                self + "/../models/v4", self + "/../../models/v4",
                                 self + "/../models/v3", self + "/../../models/v3"})
     {
       if (d.empty ()) continue;

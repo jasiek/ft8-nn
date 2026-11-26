@@ -1,5 +1,50 @@
 # Status and plan (resume here)
 
+## Calibrated multipath neural demodulator (`models/v4`) — done 2026-11-25 (tag `nn_v4_cal`)
+
+Fine-tuned the exact `SoftDemod(d=128, L=4, ff=384)` architecture (`0.84M` params, **zero CPU latency cost** and no C
+library changes) from `models/v3/model.pt` for 6,000 steps (`lr=2e-4`, cosine decay, `--cfg v4`, `--seed 1`, 38 min on
+M1 Pro MPS) using a fresh training-only real-noise bank (`data/noise/train_bank_v4.npy`: 28,728 segments from the 1,197
+training-recording slots subtracting all 19,817 `nn_v3_opt8` decodes, `real_noise_p=0.5`).
+Training recipe findings (`ft8nn/synth_bb.py`, `train.py`, `tests/test_synth_bb.py`):
+- **Rejected intermediate (`runs/v4_ft`):** adding `costas_att_p=0.15` (3–20 dB Costas attenuation) gained `+225` on
+  run 1 (`+158` slot) and `+100` on run 2 (`+46` slot), but failed the run-2 gate (`unconf` `1 → 4`): attenuating Costas
+  taught the net to trust non-Costas tones, more than doubling `<20` `exp_err` hallucinations on wrong-Costas 8-FSK
+  signals (`168 → 353 / 1024`, `min 1.18 → 0.37`).
+- **Shipped (`models/v4` = `runs/v4_cal`):** `v4_cfg()` keeps `costas_att_p=0.0`, adds 2-ray Watterson frequency-selective
+  multipath fading (`multipath_p=0.25`, delay `0.5–3.0 ms`), slightly wider off-grid tolerance (`df_wide_p=0.08`,
+  `df_wide=0.8 Hz`), and calibrated negative rows (`neg_p=0.05`, target `bits=0.5` → `LLR=0`) covering pure/real noise,
+  wide off-time FT8 ghosts up to `±3.0 s`, off-frequency ghosts, and wrong-Costas 8-FSK signals (`neg_wrong_costas_p=0.25`).
+  Calibration tail stress tests (`exp_err`, higher = safer, OSD gate ~35–42):
+  - real receiver noise (2,048 segs, `mean / p01 / min`): `v3` `72.3 / 61.8 / 50.0` → **`v4` `82.6 / 69.3 / 54.3`**;
+  - strong off-freq FT8 ghosts (1,024 segs, `mean / min / <42`): `v3` `68.2 / 32.0 / 1` → **`v4` `75.9 / 49.8 / 0`**;
+  - strong wrong-Costas 8-FSK (1,024 segs, `mean / min / <42`): `v3` `56.9 / 4.7 / 58` → **`v4` `82.4 / 64.2 / 0`**.
+Exported `models/v4/ft8nn.onnx` (`3.48 MB`, `max |onnx - torch| = 2.57e-05`, sign agreement `1.000000`) and updated
+defaults in `tools/{ab_run2.sh,validate_full.sh,golden_c.py,ci_smoke.py}`, `tests/{test_onnx.py,test_search_range.py}`,
+`wsjtx/{ft8nn_sidecar.cpp,test_sidecar.sh}` (with `models/v3` fallback), and `CLAUDE.md` (`models/v3` kept on disk).
+Results vs `nn_v3_opt8` (M1 Pro, 8 workers):
+- noise (100 slots / 998): **0 false**;
+- validation run 1 (1,076 slots): 37,114 / 28,322 / 1 → **37,370 / 28,476 / 1** (**+256 / +154 slot-confirmed**, all
+  9/9 stations up, `CQ 7K7EGU/R GJ33` `osd_ap00`);
+- validation run 2 (unseen, 1,077 slots): 31,216 / 22,851 / 1 → **31,297 / 22,876 / 2** (**+81 / +25 slot-confirmed**,
+  `0` CQ hallucinations; 1 of the 2 unconf is real DX `K1BMW UA0LAQ -17` `osd_ch0` whose sender `UA0LAQ` was spotted on
+  15 m 13 min later outside the ±5 min window, leaving 1 actual false `SP6FME DO4HCR MF82` `osd0`);
+- validation run 3 (unseen, 1,447 slots): 29,760 / 22,368 / 1 → **29,872 / 22,437 / 0** (**+112 / +69 slot-confirmed**,
+  **0 unconfirmed** vs `<...> C29IUP +35`);
+- **pooled unseen runs 2 + 3 (2,524 slots):** 60,976 / 45,219 / 2 → **61,169 / 45,313 / 2** (**+193 / +94 slot-confirmed**,
+  actual false `2 → 1`); **pooled runs 1–3 (3,600 slots):** 98,090 / 73,541 / 3 → **98,539 / 73,789 / 3** (**+449 / +248**);
+- training recordings (note: noise in `train_bank_v4.npy`): 19,817 (jt9-only 119) → **19,884 (jt9-only 116)**
+  (`ours/jt9 = 1.264`);
+- AWGN: 50% −22.55 → **−22.55 dB** / 90% −21.30 → **−21.29 dB** (`0` false);
+- golden C == Python (`MallocScribble`, `--threads 4`): 00_40m 870/870, 08_80m 636/636, run-2 02_80m 776/776 (and
+  run-2 00_40m 988/988 `--stream`), AWGN 428/428; `tools/ci_smoke.py` 52/52; `wsjtx/test_sidecar.sh` all checks (159
+  decodes, live sequence 161); `pytest` 112/112. `tools/golden_c.py` default `--tag` updated to `nn_v4_cal`.
+- **Cumulative gain across all 8 roadmap options (`nn_v3_f4bp` → `nn_v4_cal`):**
+  - Unseen run 2: `29,743 / 21,858 / 1` → **`31,297 / 22,876 / 2`** (**`+1,554 (+5.2%)` / `+1,018` slot-confirmed**, actual false `1 → 1`);
+  - Validation run 1: `34,765 / 26,638 / 1` → **`37,370 / 28,476 / 1`** (**`+2,605 (+7.5%)` / `+1,838` slot-confirmed**);
+  - Training recordings: `18,724 (jt9-only 195)` → **`19,884 (jt9-only 116)`** (**`+1,160`, `−79` jt9-only**, `ours/jt9 = 1.264`);
+  - AWGN: `−22.49 / −21.24 dB` → **`−22.55 / −21.29 dB`** (`0` false); noise `0/998` false.
+
 ## Micro-shift 3×3 TTA refinement on failed low-error hypotheses — done 2026-11-25 (tag `nn_v3_opt8`)
 
 Weak or fading signals whose Costas `fine_sync2` lands ~`0.4 Hz` or `5 ms` off-centre fail single-slot decoding

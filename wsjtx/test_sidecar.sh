@@ -25,7 +25,7 @@
 set -eu
 cd "$(dirname "$0")"
 slots=${1:-4}
-model=${FT8NN_MODEL:-../models/v3/ft8nn.onnx}
+model=${FT8NN_MODEL:-../models/v4/ft8nn.onnx}
 station=${TEST_SHIM_SLOTS:-$(ls -d ../datasets/ft8-training-data/recordings/*/slots 2>/dev/null | head -1 || true)}
 [ -n "$station" ] || { echo "no slots: unpack ../datasets (docs/data-collection.md) or set TEST_SHIM_SLOTS"; exit 2; }
 [ -f "$model" ] || { echo "no model at $model (set FT8NN_MODEL)"; exit 2; }

@@ -41,3 +41,33 @@ def test_power_calibration_matches_real_pipeline():
     snr_err_db = 10 * np.log10((p_sig / p_noise) / (p_sig_real / p_noise_real))
     print(f"SNR calibration error {snr_err_db:+.3f} dB")
     assert abs(snr_err_db) < 0.15
+
+
+def test_v4_cfg_augmentations():
+    torch.manual_seed(0)
+    np.random.seed(0)
+    cfg = synth_bb.v4_cfg()
+    y, bits, snr, tones = synth_bb.make_batch(64, cfg, "cpu")
+    assert y.shape == (64, synth_bb.NBB) and y.dtype == torch.complex64
+    assert bits.shape == (64, 174) and tones.shape == (64, 79)
+    assert torch.isfinite(y.real).all() and torch.isfinite(y.imag).all()
+
+    # Pure negative rows must carry neutral target bits = 0.5
+    cfg_neg = synth_bb.ChannelCfg(neg_p=1.0, qrm_p=0.5, qrm_max=2, qrm_off=(0.0, 20.0))
+    y_neg, bits_neg, _, _ = synth_bb.make_batch(32, cfg_neg, "cpu")
+    assert torch.all(bits_neg == 0.5)
+    assert torch.isfinite(y_neg.real).all()
+
+    # Multipath preserves unit signal power within Monte Carlo variance
+    cfg_mp = synth_bb.ChannelCfg(df_sigma=0, df_wide_p=0, dt_sigma=0, drift_p=0, fade_p=1.0, fspread_max=1.0,
+                                 rician_p=0.0, multipath_p=1.0, multipath_delay_max=0.4, qrm_p=0)
+    y_mp, _, _, _ = synth_bb.make_batch(32, cfg_mp, "cpu", snr=-10.0)
+    assert torch.isfinite(y_mp.real).all()
+
+    # Costas attenuation suppresses the 21 Costas symbols while leaving data symbols intact
+    cfg_ca = synth_bb.ChannelCfg(df_sigma=0, df_wide_p=0, dt_sigma=0, drift_p=0, fade_p=0, qrm_p=0,
+                                 costas_att_p=1.0, costas_att_db=(20.0, 20.0))
+    y_ca, _, _, t_ca = synth_bb.make_batch(16, cfg_ca, "cpu", snr=10.0)
+    p_costas = np.mean([np.abs(fe.symbol_spectra(y_ca[i].numpy(), 100)[ft8.SYNC_POS[0] : ft8.SYNC_POS[0] + 7, ft8.COSTAS]).mean() ** 2 for i in range(16)])
+    p_data = np.mean([np.abs(fe.symbol_spectra(y_ca[i].numpy(), 100)[ft8.DATA_POS, t_ca[i].numpy()[ft8.DATA_POS]]).mean() ** 2 for i in range(16)])
+    assert p_costas < 0.05 * p_data

@@ -39,7 +39,7 @@ def main():
     ap.add_argument("--dir", default="data/ci")
     ap.add_argument("--slots", type=int, default=8)
     ap.add_argument("--per-slot", type=int, default=8)
-    ap.add_argument("--model", default="models/v3/model.pt", help="checkpoint, or 'random'")
+    ap.add_argument("--model", default="models/v4/model.pt", help="checkpoint, or 'random'")
     a = ap.parse_args()
     d = (ROOT / a.dir).resolve()
     slots = d / "rec" / "synthetic" / "slots"

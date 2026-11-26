@@ -102,6 +102,12 @@ class ChannelCfg:
     real_noise_p: float = 0.0  # prob. of real receiver noise (make_batch noise_bank) instead of Gaussian noise
     trunc_p: float = 0.0  # prob. that the audio stops mid-frame (an early pass: WSJT-X asks at ~11.8 s)
     trunc_sym: tuple = (55.0, 79.0)  # where it stops, in symbols after symbol 0 (11.8 s cut, DT -0.5..2.5 s)
+    multipath_p: float = 0.0  # prob. of 2-ray Watterson frequency-selective multipath fading
+    multipath_delay_max: float = 0.6  # max 2nd-ray delay, baseband samples at 200 Hz (0.6 = 3.0 ms)
+    costas_att_p: float = 0.0  # prob. of Costas-block attenuation (co-channel subtraction residual)
+    costas_att_db: tuple = (3.0, 20.0)  # Costas attenuation range, dB
+    neg_p: float = 0.0  # prob. of signal-absent / off-aligned ghost / wrong-Costas row (target bits = 0.5 -> LLR 0)
+    neg_wrong_costas_p: float = 0.25  # fraction of neg rows carrying a random wrong-Costas 8-FSK signal
 
 
 def v2_cfg():
@@ -115,7 +121,23 @@ def v2_cfg():
     )
 
 
-def _interferers(q, amp, cfg, U, device):
+def v4_cfg():
+    """Training distribution v4: v2 plus 2-ray HF multipath fading, slightly wider off-grid
+    tolerance, and calibrated signal-absent / off-aligned ghost / wrong-Costas negative rows.
+    (costas_att_p stays 0.0: attenuating Costas teaches the net to trust non-Costas tones and
+    admits osd0/osd_ap0 false decodes.)"""
+    return ChannelCfg(
+        snr_lo=-27.0, snr_hi=-14.0, strong_p=0.3, strong_hi=25.0,
+        df_sigma=0.08, df_wide_p=0.08, df_wide=0.8, dt_sigma=0.4,
+        qrm_p=0.5, qrm_max=3, qrm_off=(0.0, 60.0), qrm_rel_db=(-10.0, 20.0),
+        gainstep_p=0.15, burst_p=0.15,
+        multipath_p=0.25, multipath_delay_max=0.6,
+        costas_att_p=0.0,
+        neg_p=0.05, neg_wrong_costas_p=0.25,
+    )
+
+
+def _interferers(q, amp, cfg, U, device, neg=None):
     """Signal buffer (B, NBB) holding one random FT8 interferer for rows where q is True."""
     B = q.shape[0]
     out = torch.zeros(B, NBB, dtype=torch.complex64, device=device)
@@ -125,10 +147,25 @@ def _interferers(q, amp, cfg, U, device):
         qt[:, p : p + 7] = ft8.COSTAS
     side = torch.where(torch.rand(nq, device=device) < 0.5, -1.0, 1.0)
     qf = side * U(cfg.qrm_off[0], cfg.qrm_off[1], nq)
+    qshift = torch.randint(-cfg.qrm_dt, cfg.qrm_dt + 1, (nq,), device=device)
+    if neg is not None:
+        # On signal-absent negative rows, cover wide off-time ghosts (up to +-3 s = +-600 samples)
+        # and guarantee interferers stay off-aligned (|df| >= 4 Hz or |dt| >= 12 samples = 0.06 s).
+        neg_q = neg[q]
+        if neg_q.any():
+            wide_t = neg_q & (torch.rand(nq, device=device) < 0.5)
+            qshift = torch.where(wide_t, torch.randint(-600, 601, (nq,), device=device), qshift)
+            bad = neg_q & (qf.abs() < 4.0) & (qshift.abs() < 12)
+            if bad.any():
+                push_f = bad & (torch.rand(nq, device=device) < 0.5)
+                push_t = bad & ~push_f
+                hi_f = max(4.5, cfg.qrm_off[1])
+                qf = torch.where(push_f, side * U(4.0, hi_f, nq), qf)
+                tsign = torch.where(torch.rand(nq, device=device) < 0.5, -1, 1)
+                qshift = torch.where(push_t, tsign * torch.randint(12, 601, (nq,), device=device), qshift)
     qw = gfsk_baseband(torch.tensor(qt, device=device), qf, torch.zeros(nq, device=device), device)
     qamp = amp[q] * 10 ** (U(*cfg.qrm_rel_db, nq) / 20)
     qph = torch.polar(torch.ones(nq, device=device), U(0, 2 * math.pi, nq))
-    qshift = torch.randint(-cfg.qrm_dt, cfg.qrm_dt + 1, (nq,), device=device)
     buf = torch.zeros(nq, NBB, dtype=torch.complex64, device=device)
     buf[:, START0 : START0 + qw.shape[1]] = (qamp * qph)[:, None] * qw
     idx = (torch.arange(NBB, device=device)[None, :] - qshift[:, None]) % NBB
@@ -177,12 +214,29 @@ def make_batch(B, cfg: ChannelCfg, device, snr=None, payload_bits=None, noise_ba
     drift = torch.where(torch.rand(B, device=device) < cfg.drift_p, U(-cfg.drift_max, cfg.drift_max), torch.zeros(B, device=device))
     w = gfsk_baseband(tones_t, df, drift, device)
 
-    # fading: Rayleigh or Rician with Gaussian Doppler spectrum
+    # fading: Rayleigh or Rician with Gaussian Doppler spectrum (+ optional 2-ray Watterson multipath)
     fspread = torch.where(torch.rand(B, device=device) < cfg.fade_p, U(0.05, cfg.fspread_max), torch.zeros(B, device=device))
+    mp = None
+    if cfg.multipath_p > 0:
+        mp = torch.rand(B, device=device) < cfg.multipath_p
+        if mp.any():
+            fspread = torch.where(mp & (fspread == 0), U(0.1, cfg.fspread_max), fspread)
     g = doppler_fading(B, w.shape[1], fspread, device)
     K = torch.where(torch.rand(B, device=device) < cfg.rician_p, U(0.5, 5.0), torch.zeros(B, device=device))
     los = torch.sqrt(K / (K + 1))[:, None]
     g = torch.where((fspread > 0)[:, None], los + torch.sqrt(1 / (K + 1))[:, None] * g, g)
+    gw = g * w
+    if mp is not None and mp.any():
+        n_mp = int(mp.sum())
+        g2 = doppler_fading(n_mp, w.shape[1], fspread[mp], device)
+        delay = U(0.1, cfg.multipath_delay_max, n_mp)
+        n_w = w.shape[1]
+        nfft_w = 1 << int(math.ceil(math.log2(n_w + 8)))
+        kw = torch.fft.fftfreq(nfft_w, device=device) * nfft_w
+        W2 = torch.fft.fft(w[mp], n=nfft_w)
+        w2 = torch.fft.ifft(W2 * torch.polar(torch.ones_like(kw), -2 * math.pi * kw / nfft_w * delay[:, None]))[:, :n_w]
+        gw = gw.clone()
+        gw[mp] = (g[mp] * w[mp] + g2 * w2) / math.sqrt(2.0)
     if cfg.gainstep_p > 0:
         # abrupt level change at a random point: level before/after differ by up to gainstep_db,
         # normalised so the frame-average power still matches the nominal SNR
@@ -192,10 +246,39 @@ def make_batch(B, cfg: ChannelCfg, device, snr=None, payload_bits=None, noise_ba
         n = torch.arange(w.shape[1], device=device)[None, :]
         env = torch.where(n < k[:, None], torch.ones_like(step)[:, None], step[:, None])
         env = env / env.pow(2).mean(1, keepdim=True).sqrt()
-        g = torch.where(st[:, None], g * env, g)
+        gw = torch.where(st[:, None], gw * env, gw)
     phase = torch.polar(torch.ones(B, device=device), U(0, 2 * math.pi))
     amp = torch.sqrt(SIG_POW_PER_SNR * 10 ** (snr / 10))
-    sig = (amp * phase)[:, None] * g * w
+    sig = (amp * phase)[:, None] * gw
+    if cfg.costas_att_p > 0:
+        # partial/heavy Costas cancellation from co-channel subtraction while data symbols survive
+        ca = torch.rand(B, device=device) < cfg.costas_att_p
+        if ca.any():
+            att = 10 ** (-U(*cfg.costas_att_db, int(ca.sum())) / 20)
+            cmask = torch.zeros(w.shape[1], dtype=torch.bool, device=device)
+            for p in ft8.SYNC_POS:
+                cmask[p * SPS : (p + 7) * SPS] = True
+            sig = sig.clone()
+            sig[ca] = torch.where(cmask[None, :], sig[ca] * att[:, None], sig[ca])
+    neg = None
+    if cfg.neg_p > 0 and payload_bits is None:
+        neg = torch.rand(B, device=device) < cfg.neg_p
+        if neg.any():
+            sig = torch.where(neg[:, None], torch.zeros_like(sig), sig)
+            bits_t = torch.where(neg[:, None], torch.full_like(bits_t, 0.5), bits_t)
+            if cfg.neg_wrong_costas_p > 0:
+                # Wrong-Costas non-FT8 8-FSK signals (e.g. unaligned modes, random tones in sync slots)
+                wc = neg & (torch.rand(B, device=device) < cfg.neg_wrong_costas_p)
+                if wc.any():
+                    n_wc = int(wc.sum())
+                    wt = torch.tensor(np.random.randint(0, 8, size=(n_wc, 79)), device=device)
+                    wdf = U(-2.0, 2.0, n_wc)
+                    ww = gfsk_baseband(wt, wdf, torch.zeros(n_wc, device=device), device)
+                    wsnr = U(-18.0, 15.0, n_wc)
+                    wamp = torch.sqrt(SIG_POW_PER_SNR * 10 ** (wsnr / 10))
+                    wph = torch.polar(torch.ones(n_wc, device=device), U(0, 2 * math.pi, n_wc))
+                    sig = sig.clone()
+                    sig[wc] = (wamp * wph)[:, None] * ww
 
     y = torch.zeros(B, NBB, dtype=torch.complex64, device=device)
     y[:, START0 : START0 + w.shape[1]] = sig
@@ -206,7 +289,7 @@ def make_batch(B, cfg: ChannelCfg, device, snr=None, payload_bits=None, noise_ba
         active = active & (torch.rand(B, device=device) < cfg.qrm_p)
         if not active.any():
             break
-        y = y + _interferers(active, amp, cfg, U, device)
+        y = y + _interferers(active, amp, cfg, U, device, neg=neg)
 
     real = None
     if noise_bank is not None and cfg.real_noise_p > 0:

@@ -20,7 +20,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / "c/build/ft8nn_cli"
-ONNX = ROOT / "models/v3/ft8nn.onnx"
+ONNX = ROOT / "models/v4/ft8nn.onnx"
 CLI_OPTS = ["--threads", "4"]
 
 
@@ -92,8 +92,8 @@ def main():
     ap.add_argument("path")
     ap.add_argument("--n", type=int, default=20)
     ap.add_argument("--workers", type=int, default=6)
-    ap.add_argument("--tag", default="nn_v3_opt8", help="Python result tag to compare against")
-    ap.add_argument("--onnx", default=None, help="model for the C side (default models/v3/ft8nn.onnx)")
+    ap.add_argument("--tag", default="nn_v4_cal", help="Python result tag to compare against")
+    ap.add_argument("--onnx", default=None, help="model for the C side (default models/v4/ft8nn.onnx)")
     ap.add_argument("--out", default="data/real", help="root of the Python decodes (real mode), e.g. data/val/run2")
     ap.add_argument("--threads", type=int, default=4, help="C decode threads (0 = one per performance core)")
     ap.add_argument("--stream", action="store_true", help="decode with ft8nn_decode_stream")

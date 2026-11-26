@@ -11,7 +11,7 @@ from ft8nn import ft8
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 LIB = next((p for p in (ROOT / "c/build/libft8nn.dylib", ROOT / "c/build/libft8nn.so") if p.exists()), None)
-MODEL = ROOT / "models/v3/ft8nn.onnx"
+MODEL = ROOT / "models/v4/ft8nn.onnx"
 
 CASES = [
     ((None, None), (150.0, 4000.0)),     # no request: the default
@@ -33,7 +33,7 @@ def test_search_range(req, want):
     assert fe.search_range(*req) == pytest.approx(want)
 
 
-@pytest.mark.skipif(LIB is None or not MODEL.exists(), reason="needs c/build/libft8nn and models/v3/ft8nn.onnx")
+@pytest.mark.skipif(LIB is None or not MODEL.exists(), reason="needs c/build/libft8nn and models/v4/ft8nn.onnx")
 def test_c_set_range_equals_python():
     lib = ctypes.CDLL(str(LIB))
     lib.ft8nn_open.restype = ctypes.c_void_p
