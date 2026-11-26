@@ -249,8 +249,15 @@ little-endian header and big-endian int16 samples; ka9q_ubersdr `pcm_binary.go`)
 through ctypes (nothing built); no libzstd or a refused upgrade falls back to Opus, and the status line names the
 audio. Live, two sessions on one add-on instance, 5 slots of 40 m: our decoder 219 decodes on lossless vs 203 on
 Opus (20 only lossless, 4 only Opus); remote decodes we lacked 22 vs 38. 47 focused tests passed; curses UI not run.
-Next: OpenWebRX sends ADPCM when the operator enables it (flag those receivers), then limit the picker to the fair
-sources (OpenWebRX, add-on instances).
+Picker limited to fair sources — done 2026-11-16: it lists UberSDR instances with the skimmer add-on (from the
+directory's `addons`) and OpenWebRX receivers probed live at startup (Receiverbook map, then each `metrics.json` for
+an FT8 decoder on a band; ~16 s for 433), add-on instances first, OpenWebRX by FT8 decode count; `--include-spots`
+adds the spots-only UberSDR instances, `--no-openwebrx` skips Receiverbook. Live: 701 entries (666 OpenWebRX, 35
+add-on), on 40 m 106 OpenWebRX and 3 add-on. OpenWebRX's status line names its audio (ADPCM is the operator's
+choice, decided after connecting). `parse_receiverbook`/`ft8_decode_counts` moved into `tools/live_compare.py`
+(the directory builder imports them). 50 focused tests passed; curses UI not run.
+Next: the OpenWebRX client picked a "1090MHz ADSB" profile on one 40 m receiver (0 decodes); ADPCM vs PCM effect on
+our decodes is unmeasured.
 
 ## Live comparison against one chosen UberSDR instance — done 2026-11-16
 

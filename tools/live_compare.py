@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Compare ft8-nn with an UberSDR FT8 decoder on the same live audio.
 
+The picker lists only receivers whose remote decoder reports every decode, so a slot compares fairly: UberSDR
+instances with the skimmer add-on, and OpenWebRX receivers from Receiverbook whose metrics show an FT8 decoder
+(probed at startup, ~15 s). UberSDR instances without the add-on publish only spots (each station once every few
+minutes); --include-spots lists them too. --instance ADDRESS skips the picker for one UberSDR instance.
+
 The receiver picker supports arrow keys and live substring filtering.  After a
 receiver/band pair is selected, this client tunes its UberSDR stream to the
 standard FT8 dial frequency, receives the server's 12 kHz audio and FT8
@@ -21,6 +26,7 @@ import argparse
 import array
 import base64
 import collections
+import concurrent.futures
 import ctypes
 import ctypes.util
 import hashlib
@@ -338,6 +344,117 @@ def align_psk_decodes(
     return rows
 
 
+RECEIVERBOOK_MAP = "https://www.receiverbook.de/map"
+BAND_RE = re.compile(r"^(?:\d+(?:\.\d+)?)(?:m|cm|mm)$", re.IGNORECASE)
+
+
+def parse_receiverbook(html: str) -> list[dict[str, Any]]:
+    """Extract and flatten the JSON assigned to ``var receivers`` on /map."""
+    match = re.search(r"\bvar\s+receivers\s*=\s*", html)
+    if not match:
+        raise ValueError("receiver list not found in Receiverbook map page")
+    sites, _ = json.JSONDecoder().raw_decode(html, match.end())
+
+    result = []
+    for site in sites:
+        coordinates = site.get("location", {}).get("coordinates", [])
+        if len(coordinates) != 2:
+            continue
+        lon, lat = coordinates
+        for receiver in site.get("receivers", []):
+            if receiver.get("type") != "OpenWebRX" or not receiver.get("url"):
+                continue
+            result.append(
+                {
+                    "url": receiver["url"],
+                    "label": receiver.get("label", site.get("label", "")),
+                    "site": site.get("label", ""),
+                    "lat": lat,
+                    "lon": lon,
+                    "type": receiver["type"],
+                    **({"version": receiver["version"]} if receiver.get("version") else {}),
+                }
+            )
+    return result
+
+
+def ft8_decode_counts(metrics: dict[str, Any]) -> dict[str, int]:
+    """Return the current cumulative FT8 decode count for each valid band."""
+    decodes = metrics.get("wsjt", {}).get("decodes", {})
+    if not isinstance(decodes, dict):
+        return {}
+    counts = {}
+    for band, modes in decodes.items():
+        if not isinstance(band, str) or not BAND_RE.fullmatch(band) or not isinstance(modes, dict):
+            continue
+        missing = object()
+        ft8 = next((value for mode, value in modes.items() if str(mode).upper() == "FT8"), missing)
+        if ft8 is missing:
+            continue
+        count = ft8.get("count") if isinstance(ft8, dict) else None
+        if isinstance(count, (int, float)) and not isinstance(count, bool) and count >= 0:
+            counts[band.lower()] = int(count)
+        else:
+            counts[band.lower()] = 0
+    return counts
+
+
+def openwebrx_entries(timeout: float, workers: int = 32,
+                      on_progress: Callable[[int, int], None] | None = None) -> list[dict[str, Any]]:
+    """Every OpenWebRX receiver on Receiverbook whose metrics show an FT8 decoder on a band we know, one entry a
+    band, busiest first. OpenWebRX sends each client every decode of its own FT8 demodulator (no spot filtering),
+    so these, like UberSDR instances with the skimmer add-on, compare fairly slot by slot."""
+    request = urllib.request.Request(RECEIVERBOOK_MAP, headers={"User-Agent": "ft8-nn-live-compare/1"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        receivers = parse_receiverbook(response.read().decode("utf-8", "replace"))
+
+    def metrics(receiver: dict[str, Any]) -> dict[str, Any] | None:
+        try:
+            request = urllib.request.Request(metrics_url(receiver["url"]), headers={"User-Agent": "ft8-nn-live-compare/1"})
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                value = json.loads(response.read(1 << 20))
+            return value if isinstance(value, dict) else None
+        except (OSError, ValueError):
+            return None
+
+    entries = []
+    done = 0
+    with concurrent.futures.ThreadPoolExecutor(workers) as pool:
+        futures = {pool.submit(metrics, receiver): receiver for receiver in receivers}
+        for future in concurrent.futures.as_completed(futures):
+            done += 1
+            if on_progress:
+                on_progress(done, len(receivers))
+            receiver = futures[future]
+            for band, count in ft8_decode_counts(future.result() or {}).items():
+                if band in FT8_FREQUENCIES:
+                    entries.append({"receiver": receiver, "band": band, "ft8_decodes_total": count,
+                                    "remote": "openwebrx"})
+    return sorted(entries, key=lambda entry: (-entry["ft8_decodes_total"], entry["receiver"]["url"], entry["band"]))
+
+
+def remote_kind(entry: dict[str, Any]) -> str:
+    """What the entry's remote column will hold: "skimmer" or "openwebrx" (every decode), or "spots"."""
+    receiver = entry["receiver"]
+    if receiver.get("type") != "UberSDR":
+        return "openwebrx"
+    return "skimmer" if "skimmer" in (receiver.get("addons") or []) else "spots"
+
+
+def fair_entries(entries: list[dict[str, Any]], include_spots: bool = False) -> list[dict[str, Any]]:
+    """Entries whose remote decoder reports every decode (unless include_spots), one per (receiver, band),
+    UberSDR add-on instances first."""
+    seen: set[tuple[str, str]] = set()
+    result = []
+    for entry in sorted(entries, key=lambda entry: remote_kind(entry) != "skimmer"):
+        key = (entry["receiver"]["url"].rstrip("/"), entry["band"])
+        if key in seen or (remote_kind(entry) == "spots" and not include_spots):
+            continue
+        seen.add(key)
+        result.append(entry)
+    return result
+
+
 def filter_entries(entries: list[dict[str, Any]], query: str) -> list[dict[str, Any]]:
     words = query.casefold().split()
 
@@ -363,8 +480,11 @@ def entry_label(entry: dict[str, Any]) -> str:
     traffic = f"  {rate:,.2f}/min" if isinstance(rate, (int, float)) else ""
     if not traffic and isinstance(snr, (int, float)):
         traffic = f"  SNR {snr:+.1f} dB"
+    if not traffic and isinstance(entry.get("ft8_decodes_total"), int):
+        traffic = f"  {entry['ft8_decodes_total']:,} decodes"
+    tag = {"skimmer": "UberSDR+skimmer", "openwebrx": "OpenWebRX", "spots": "UberSDR spots"}[remote_kind(entry)]
     return (
-        f"{entry['band']:>5}{traffic}  "
+        f"{entry['band']:>5}  {tag:<15}{traffic}  "
         f"{receiver.get('label') or receiver.get('site') or receiver['url']}  [{receiver['url']}]"
     )
 
@@ -767,6 +887,7 @@ def directory_entries(document: dict[str, Any]) -> list[dict[str, Any]]:
                         "lon": instance.get("longitude"),
                         "type": "UberSDR",
                         "version": instance.get("version"),
+                        "addons": list(instance.get("addons") or []),
                     },
                     "band": band,
                     "ft8_decodes_total": report.get("day"),
@@ -1312,7 +1433,8 @@ class OpenWebRXClient:
         }
         self.ws.send_json({"type": "dspcontrol", "params": params})
         self.ws.send_json({"type": "dspcontrol", "action": "start"})
-        self.on_status(f"streaming {selected['name']} at {self.dial / 1e6:.6f} MHz")
+        audio = "ADPCM (lossy)" if self.audio_compression == "adpcm" else "PCM"
+        self.on_status(f"streaming {selected['name']} at {self.dial / 1e6:.6f} MHz; audio: {audio}")
 
     def _read_loop(self) -> None:
         try:
@@ -1751,6 +1873,12 @@ def main(argv: list[str] | None = None) -> int:
         help="benchmark against this one UberSDR instance instead of the directory: an IP, host:port or URL "
              "(a bare address means http://), e.g. 192.168.1.20:8080",
     )
+    parser.add_argument(
+        "--include-spots", action="store_true",
+        help="also list UberSDR instances without the skimmer add-on: their remote column is the spot feed, which "
+             "drops repeats (each station once every few minutes), so it is no fair slot-by-slot comparison",
+    )
+    parser.add_argument("--no-openwebrx", action="store_true", help="do not list OpenWebRX receivers from Receiverbook")
     parser.add_argument("--model", type=Path, default=DEFAULT_MODEL)
     parser.add_argument("--library", type=Path, default=default_library())
     parser.add_argument("--threads", type=int, default=0, help="local decoder threads; 0 uses performance cores")
@@ -1768,8 +1896,17 @@ def main(argv: list[str] | None = None) -> int:
     else:
         document = load_directory(args.directory, args.timeout)
         entries = [entry for entry in directory_entries(document) if entry.get("band") in FT8_FREQUENCIES]
+        if not args.no_openwebrx:
+            def progress(done: int, total: int) -> None:
+                print(f"\rOpenWebRX receivers from Receiverbook: {done}/{total} probed", end="", file=sys.stderr, flush=True)
+            try:
+                entries += openwebrx_entries(args.timeout, on_progress=progress)
+                print(file=sys.stderr)
+            except (OSError, ValueError) as error:
+                print(f"\nReceiverbook unavailable ({error}); UberSDR instances only", file=sys.stderr)
+        entries = fair_entries(entries, args.include_spots)
         if not entries:
-            parser.error("receiver directory contains no supported entries")
+            parser.error("no receiver reports every decode (UberSDR spots-only instances need --include-spots)")
     if curses is None:
         print("The live comparison terminal UI requires Python curses, which is not available.", file=sys.stderr)
         return 2

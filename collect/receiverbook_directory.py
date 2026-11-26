@@ -34,49 +34,20 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tools.live_compare import FT8_FREQUENCIES, OpenWebRXClient, directory_entries
+from tools.live_compare import (  # noqa: F401  (parse_receiverbook, ft8_decode_counts, BAND_RE: shared)
+    BAND_RE, FT8_FREQUENCIES, OpenWebRXClient, directory_entries, ft8_decode_counts, parse_receiverbook,
+)
 
 
 SOURCE_URL = "https://instances.ubersdr.org/api/instances?conditions=true"
 DEFAULT_OUTPUT = ROOT / "datasets" / "receiverbook-directory.json"
 USER_AGENT = "ft8-nn receiver directory builder/2"
-BAND_RE = re.compile(r"^(?:\d+(?:\.\d+)?)(?:m|cm|mm)$", re.IGNORECASE)
 
 
 def fetch(url: str, timeout: float) -> bytes:
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return response.read()
-
-
-def parse_receiverbook(html: str) -> list[dict[str, Any]]:
-    """Extract and flatten the JSON assigned to ``var receivers`` on /map."""
-    match = re.search(r"\bvar\s+receivers\s*=\s*", html)
-    if not match:
-        raise ValueError("receiver list not found in Receiverbook map page")
-    sites, _ = json.JSONDecoder().raw_decode(html, match.end())
-
-    result = []
-    for site in sites:
-        coordinates = site.get("location", {}).get("coordinates", [])
-        if len(coordinates) != 2:
-            continue
-        lon, lat = coordinates
-        for receiver in site.get("receivers", []):
-            if receiver.get("type") != "OpenWebRX" or not receiver.get("url"):
-                continue
-            result.append(
-                {
-                    "url": receiver["url"],
-                    "label": receiver.get("label", site.get("label", "")),
-                    "site": site.get("label", ""),
-                    "lat": lat,
-                    "lon": lon,
-                    "type": receiver["type"],
-                    **({"version": receiver["version"]} if receiver.get("version") else {}),
-                }
-            )
-    return result
 
 
 def metrics_url(receiver_url: str) -> str:
@@ -98,27 +69,6 @@ def ft8_bands(metrics: dict[str, Any]) -> list[str]:
         ):
             bands.append(band.lower())
     return sorted(bands, key=band_sort_key, reverse=True)
-
-
-def ft8_decode_counts(metrics: dict[str, Any]) -> dict[str, int]:
-    """Return the current cumulative FT8 decode count for each valid band."""
-    decodes = metrics.get("wsjt", {}).get("decodes", {})
-    if not isinstance(decodes, dict):
-        return {}
-    counts = {}
-    for band, modes in decodes.items():
-        if not isinstance(band, str) or not BAND_RE.fullmatch(band) or not isinstance(modes, dict):
-            continue
-        missing = object()
-        ft8 = next((value for mode, value in modes.items() if str(mode).upper() == "FT8"), missing)
-        if ft8 is missing:
-            continue
-        count = ft8.get("count") if isinstance(ft8, dict) else None
-        if isinstance(count, (int, float)) and not isinstance(count, bool) and count >= 0:
-            counts[band.lower()] = int(count)
-        else:
-            counts[band.lower()] = 0
-    return counts
 
 
 def band_sort_key(band: str) -> float:

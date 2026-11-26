@@ -689,3 +689,56 @@ def test_ubersdr_asks_for_lossless_audio_and_falls_back_to_opus(monkeypatch):
         assert f"format={expected}" in opened[0]
         wanted = "lossless PCM" if expected == "pcm-zstd" else "Opus (lossy; no lossless stream)"
         assert any(wanted in status for status in statuses)  # the fake stream's EOF may report first
+
+
+def test_picker_keeps_fair_sources_add_on_instances_first():
+    def entry(url, band="40m", kind="UberSDR", addons=()):
+        return {"band": band, "receiver": {"url": url, "type": kind, "addons": list(addons)}}
+
+    spots = entry("https://a.test/")
+    skimmer = entry("https://b.test/", addons=["ntp", "skimmer"])
+    owrx = entry("https://c.test/", kind="OpenWebRX")
+    assert [MODULE.remote_kind(e) for e in (spots, skimmer, owrx)] == ["spots", "skimmer", "openwebrx"]
+    assert MODULE.fair_entries([spots, owrx, skimmer]) == [skimmer, owrx]
+    assert MODULE.fair_entries([spots, owrx, skimmer], include_spots=True) == [skimmer, spots, owrx]
+    # the same receiver and band twice (directory file plus live listing) is listed once
+    assert MODULE.fair_entries([owrx, entry("https://c.test", kind="OpenWebRX")]) == [owrx]
+    assert "UberSDR+skimmer" in MODULE.entry_label(skimmer)
+    assert "OpenWebRX" in MODULE.entry_label(dict(owrx, ft8_decodes_total=1234)) and "1,234 decodes" in MODULE.entry_label(dict(owrx, ft8_decodes_total=1234))
+
+
+def test_ubersdr_directory_entries_carry_addons():
+    document = {"instances": [{"is_online": True, "digital_decodes": True, "public_url": "https://k1.test/",
+                               "callsign": "K1ABC", "band_conditions": {"40m": 3.0}, "addons": ["skimmer"]}]}
+    (entry,) = MODULE.directory_entries(document)
+    assert entry["receiver"]["addons"] == ["skimmer"] and MODULE.remote_kind(entry) == "skimmer"
+
+
+def test_openwebrx_entries_from_receiverbook_and_metrics(monkeypatch):
+    import io
+    import json
+    page = '''<script>var receivers = [{"label":"site","location":{"coordinates":[1,2]},"receivers":[
+      {"label":"busy","url":"http://busy.test/","type":"OpenWebRX"},
+      {"label":"quiet","url":"http://quiet.test/","type":"OpenWebRX"},
+      {"label":"down","url":"http://down.test/","type":"OpenWebRX"},
+      {"label":"kiwi","url":"http://kiwi.test/","type":"KiwiSDR"}]}];</script>'''
+    metrics = {
+        "http://busy.test/metrics.json": {"wsjt": {"decodes": {"40m": {"FT8": {"count": 900}}, "20m": {"FT4": {"count": 5}},
+                                                               "2200m": {"FT8": {"count": 3}}}}},
+        "http://quiet.test/metrics.json": {"wsjt": {"decodes": {"40m": {"FT8": {"count": 10}}, "20m": {"FT8": {"count": 50}}}}},
+    }
+
+    def urlopen(request, timeout):
+        url = request.full_url
+        if url == MODULE.RECEIVERBOOK_MAP:
+            return io.BytesIO(page.encode())
+        if url in metrics:
+            return io.BytesIO(json.dumps(metrics[url]).encode())
+        raise MODULE.urllib.error.URLError("unreachable")
+
+    monkeypatch.setattr(MODULE.urllib.request, "urlopen", urlopen)
+    progress = []
+    entries = MODULE.openwebrx_entries(5, workers=2, on_progress=lambda done, total: progress.append((done, total)))
+    assert [(e["receiver"]["label"], e["band"], e["ft8_decodes_total"]) for e in entries] == [
+        ("busy", "40m", 900), ("quiet", "20m", 50), ("quiet", "40m", 10)]
+    assert progress[-1] == (3, 3) and all(MODULE.remote_kind(e) == "openwebrx" for e in entries)
