@@ -1,5 +1,44 @@
 # Status and plan (resume here)
 
+## Pipeline & LDPC CPU pruning (`PLAN.md` Tier 2: 2A–2E) — done 2026-11-27 (tag `nn_v4_cpu`)
+
+Ran a 225-slot empirical probe across all 9 stations of validation run 1 (`7,650` decodes, `664,099` hypotheses on the
+8-core Apple M1) to measure classical fallback, secondary fine-sync (`q = 1`), `post_pass`, and candidate-rank
+distributions, then implemented Tier 2 in Python (`ft8nn/{nn_metric.py,decoder.py}`) and C (`c/src/{decode.c,ldpc.c}`):
+- **2A — Gated `--also-classical` (`nsym = 1, 2, 3`) fallback:** across 225 Run-1 slots, only `14 / 7,650` decodes
+  (`0.18%`) came from `nsym = 1` (`bp1`, all with NN `ee0 <= 67.45` and `cs_rat >= 5.35`) and `0` from `nsym = 2, 3`.
+  Moved `symbol_spectra8` and `coherent_llr` after `k = 0` (NN) failure, gated `symbol_spectra8` on `ee0 < 69.0` (with
+  `cscore >= 16.0` bypass so `tools/ci_smoke.py --model random` still passes), `nsym = 1` on `cs_rat >= 4.5`, and
+  `nsym = 2, 3` on `(ee0 < 50.0 || cscore >= 16.0) && cs_rat >= 5.2` (classical CPU **`3.15 -> 0.19 s`, −94.0%**, BP
+  calls **−68.7%**).
+- **2B — Two-round `(q = 0, then gated q = 1)` fine-sync evaluation:** `decode_pass` now evaluates all `q = 0`
+  hypotheses first, then evaluates `q >= 1` only when `q = 0` did not decode and `ee0(h0) < 72.0 || (score >= 1.70 &&
+  m1 >= 0.70 * m0)`, merging in exact serial `(candidate, q)` order (eliminating all speculative `q = 1` NN + BP work on
+  decoded `q = 0` candidates and pure-noise misses; Note: an aggressive `fine_sync2` `m_norm` pre-screen reached `−44.4%`
+  at 1T, but cost `−0.12%` on full Run 1 via `-1.57 s` 2-Costas edge-DT and `q = 1` `osd_ch0` Chase seeds, so kept
+  `fine_sync2` un-prescreened).
+- **2C & 2D — `reuse_df` / `post_pass` & live `--early` audit:** verified on Run 1 that `find_candidates` already emits
+  `0` stopband candidates above `3050 Hz` on 3 kHz KiwiSDR audio while ranks `500..745` yield `4.8%` of decodes; kept
+  `reuse_df = 62.5 Hz` (narrowing to `50 / 42 Hz` saved only `0.10 s/slot` at 4T while losing `3` `post_pass` cascades)
+  and un-capped `max_cand = 600` in early Pass 1 (capping at `300` cost `3` late-QRM decodes, while Tiers 1+2 already
+  pull the 11.8 s early pass to `1.64 s` on M1 vs WSJT-X's `2.60 s` window).
+- **2E — Compact check-edge tables & branchless SIMD `double` `tanh`/`atanh` (`c/src/ldpc.c`):** flattened valid
+  `LDPC_NM` edges into contiguous `edge_bit[]` / `row_off[]` tables and replaced `expm1`/`log` with IEEE-754 `double`
+  Cody-Waite degree-9 `expm1` (`4.58e-12` max error) and mantissa-centered `atanh` (`4.50e-13` max error), cutting
+  remaining `bp/osd` CPU in half (**−79.6% vs baseline: `9.07 -> 1.85 s`**) without altering `C == Python`.
+Cumulative Tier 1 + Tier 2 timing on 6 busy `01_40m` slots (8-core Apple M1, idle, no sleep events):
+- `--threads 1`: `83.31 -> 60.89 s` (`13.884 -> 10.148 s/slot`, max `14.508 -> 10.779 s`, **−26.9%**, `325/325` byte-identical);
+- `--threads 0` (4 P-cores): `26.09 -> 19.60 s` (`4.349 -> 3.267 s/slot`, max `4.570 -> 3.471 s`, **−24.9%**, `325/325` byte-identical);
+- `--threads 0 --early 141696`: `29.48 -> 22.18 s` (`4.913 -> 3.697 s/slot`, **−24.8%**; 11.8 s early pass `2.184 -> 1.635 s`, max `1.660 s`, **−25.1%**, `0.94 s` inside WSJT-X's `2.60 s` budget, `329/329` byte-identical).
+Validation (`tools/ab_run2.sh nn_v4_cpu` + `tools/validate_full.sh nn_v4_cpu`, idle 8-core M1, `WORKERS=6`, `caffeinate -dims`, no sleep events):
+- noise (100 slots / 998): **0 false**;
+- validation run 2 (unseen, 1,077 slots): `31,290 / 22,873 / 2` vs `nn_v4_cal` `31,297 / 22,876 / 2` (**99.98%**, same 2 unconf lines `K1BMW UA0LAQ -17` + `SP6FME DO4HCR MF82`, `100.0%` confirmed);
+- validation run 1 (1,076 slots): `37,363 / 28,471 / 1` vs `37,370 / 28,476 / 1` (**99.98%**, same `CQ 7K7EGU/R GJ33`);
+- training recordings: `19,882` (jt9-only `117`, `ours / jt9 = 1.264`, `96%` corroborated) vs `19,884`;
+- AWGN: 50% **−22.55 dB** / 90% **−21.29 dB** (`0` false, identical to `nn_v4_cal`);
+- golden C == Python (`MallocScribble=1`, `--threads 4`): `00_40m` 870/870, `08_80m` 636/636, `run2/02_80m` 776/776 (and `run2/00_40m` 988/988 `--stream`), AWGN 428/428; `tools/ci_smoke.py` 52/52 (`models/v4`) and 51/51 (`--model random`); `wsjtx/test_sidecar.sh` all 8 checks PASS (159 plain, 161 live sequence); `pytest` 103 passed, 16 skipped. `tools/golden_c.py` default `--tag` updated to `nn_v4_cpu`.
+Next: `PLAN.md` Tier 3 decision — remaining busy-slot CPU is ~83% ONNX Runtime (`SoftDemod`): choose between Option 3A (pure-C macOS `Accelerate` AMX backend + ORT fallback, est. `−50–55%` further CPU & `540 -> 80 MB` RSS, zero retraining) or Option 3B (cross-platform tiny ONNX screener cascade).
+
 ## Exact ONNX & C CPU cuts (`PLAN.md` Tier 1: 1A + 1B + 1C) — done 2026-11-26
 
 Profiled `HEAD` (`models/v4` with all post-`nn_v3_f4bp` sensitivity stages) on the 8-core Apple M1 (4P + 4E, idle, no

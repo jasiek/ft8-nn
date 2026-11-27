@@ -80,11 +80,11 @@ We organize the options into **three tiers**:
 | [x] | **1A** | Layer-3 Costas token pruning (`79->58`) + `com.microsoft::Attention` + tap-wise `MatMul+BiasGelu` convs | **Measured: −5.1% (1T), −6.9% wall / −9.8% NN CPU (4T)** (`13.88->13.17s` 1T, `4.35->4.05s` 4T) | **0** (`325/325` byte-identical, ONNX diff `3.34e-5`) | `ft8nn/model.py`, `tools/export_onnx.py`, `models/v4/ft8nn.onnx` | Small |
 | [x] | **1B** | O(N) 3-term `sin^2` LPF in `subtract_signal` (drop two `160k` FFTs) + `double` split-re/im align & `complex_wave` | **Measured: −2.4% incremental (`−7.5%` cum. 1T, `−9.5%` cum. 4T)** (`subtract` `−49%`: `4.04->2.05s` 1T, `1.60->0.94s` 4T) | **0** (`870/870`, `636/636`, `1134/1134` exact field match) | `c/src/subtract.c`, `c/src/ft8.c`, `c/src/internal.h` | Small |
 | [x] | **1C** | Cache `fft_plan`s, shared `post_bb`, `median_d` quickselect, `N/2` real-FFT, stack IFFT, phasor `rotate`, SIMD `nn_features` | **Measured: −3.7% inc. 1T / −5.4% inc. 4T (`−10.9%` cum. 1T, `−14.4%` cum. 4T, `−15.8%` live `--early`)** | **0** (`2,640/2,640` lines byte-identical across 3 stations) | `c/src/frontend.c`, `c/src/fft.c`, `c/src/decode.c`, `c/src/internal.h` | Small–Med |
-| [ ] | **2A** | Gate `--also-classical` (`nsym=1,2,3`) + its `12,600` noise BP runs per slot (or tone-SNR screen) | **Est. −10% to −11.5%** (`~1.4–1.6 s`) | **~0** (verify `bp1..3` share on run 1) | `ft8nn/decoder.py`, `c/src/decode.c` | Small |
-| [ ] | **2B** | Gate 2nd fine-sync hypothesis (`h=1`) & skip speculative `h=1` NN when `h=0` is clear/strong | **Est. −14% to −22%** (`~2.0–3.0 s`) | Tuned on run 1 for **0 net loss** | `ft8nn/frontend.py`, `ft8nn/decoder.py`, `c/src/decode.c` | Medium |
-| [ ] | **2C** | Narrow `post_pass` (`pass 5`) + passband/SNR-aware `reuse_df` & `scaled_max_cand` | **Est. −5% to −10%** (`~0.7–1.4 s`, more on 3 kHz audio) | Tuned on run 1 for **0 net loss** | `ft8nn/decoder.py`, `c/src/decode.c` | Medium |
-| [ ] | **2D** | Live `--early` / `--final` budget & pass-1 cap (`wsjtx` live mode) | **Est. −15% to −25% live** (`early` `2.2s -> ~1.2s`) | Preserves full `final` recovery; prevents skipped `14.4s` pass on M1 | `ft8nn/decoder.py`, `c/src/decode.c`, `wsjtx/` | Small–Med |
-| [ ] | **2E** | `float32` SIMD + minimax `tanh`/`atanh` in `bp_decode` | **Est. −2% to −3%** after 2A (**−6%** standalone) | Near-exact (`ab_run2.sh` check) | `ft8nn/ldpc.py`, `c/src/ldpc.c` | Small |
+| [x] | **2A** | Gate `--also-classical` (`nsym=1,2,3`) + its `12,600` noise BP runs per slot (or tone-SNR screen) | **Measured: −11.1% inc. 1T / −9.9% inc. 4T (`−20.8%` cum. 1T, `−22.9%` cum. 4T, `−24.4%` live `--early`)** | **0** (`325/325` & `319/319` byte-identical; `0/14` Run-1 `bp1` lost) | `ft8nn/nn_metric.py`, `ft8nn/decoder.py`, `c/src/decode.c` | Small |
+| [x] | **2B** | Two-round `(q=0, then gated q=1)` fine-sync evaluation (`ee0 < 72` or `score >= 1.70 & m1/m0 >= 0.70`) | **Measured: −5.0% inc. 1T (`−24.8%` cum. 1T; `−40.0%` w/ aggressive `m_norm` pre-screen, relaxed for `99.98%` Run-1/2 parity)** | **99.98%** (`31,290` vs `31,297` Run 2, `37,363` vs `37,370` Run 1) | `ft8nn/decoder.py`, `c/src/decode.c` | Medium |
+| [x] | **2C** | Evaluated narrowing `post_pass` (`42 Hz`) & `reuse_df` (`50 Hz`) + passband `max_cand`; kept `62.5 Hz` for 0 cascade loss | **Measured: −4.1% inc. at `50/42 Hz`, reverted to `62.5 Hz` (`0%` loss; stopband already `0` cands)** | **0** (`62.5 Hz` avoids `cx`/`rp` cascade losses at `50–62 Hz`) | Audited on Run 1 (`check_sb.c`, `task-559`) | Small–Med |
+| [x] | **2D** | Live `--early` / `--final` budget verification (`wsjtx` live mode) | **Measured: −25.1% on 11.8s `early` pass (`2.18->1.64s`), −24.8% total live (`4.91->3.70s`)** | **0** (`329/329` kept; `0.94s` headroom below WSJT-X `2.60s` deadline on M1) | `c/src/decode.c`, `wsjtx/` | Small |
+| [x] | **2E** | Compact check-edge tables + branchless SIMD `double` `tanh`/`atanh` in `bp_decode` | **Measured: −2.8% inc. 1T (`bp/osd` `−79.6%` vs base: `9.07->1.85s`; **`−26.9%` cum. 1T, `−24.9%` cum. 4T**) | **0** (`<5e-12` error vs `libm`; `4/4` `golden_c.py` `100%` equal) | `c/src/ldpc.c` | Small |
 | [ ] | **3A** | Pure-C `SoftDemod` forward pass in `c/` using macOS `Accelerate` `cblas_sgemm` (AMX) + ORT fallback | **Est. −50% to −55%** (`13.9s -> ~6.3s` on M1; RSS `540 -> ~80 MB`) | **0** (same FP32 `models/v4` weights) | `c/src/` (~250 LOC; needs user OK on ORT policy) | Medium |
 | [ ] | **3B** | Two-stage ONNX cascade: tiny `d=64, L=1` screener (`0.11 ms/hyp`) gates full `models/v4` (`exp_err < 66`) | **Est. −40% to −48%** on **all OSes/CPUs** | Tuned on run 1 (`<0.1%` miss) | `ft8nn/model.py`, `train.py`, `c/src/decode.c` | Med–Large |
 | [ ] | **3C** | Retrain slimmer single `SoftDemod` (`d=96, L=3, ff=288`) with `v4` calibrated recipe | **Est. −32% to −38%** on **all OSes/CPUs** | `~0.05–0.10 dB` synthetic QRM risk; re-check gates | `ft8nn/model.py`, `train.py`, `models/` | Med–Large |
@@ -159,6 +159,10 @@ We organize the options into **three tiers**:
   1. Audit saved validation run 1 decode logs (or run a 5-minute run-1 tally) to count exact `bp1`/`bp2`/`bp3` exclusives under `models/v4` and record their minimum `nsym=1` `exp_err` / Costas sync / tone SNR.
   2. Move `symbol_spectra8` + `coherent_llr` inside `decode_hyp` *after* `k = 0` fails, and gate `k = 1..3` on a cheap tone-coherence / `nsym=1` reliability threshold (chosen safely below every real `bp1..3` decode on run 1, while still letting strong synthetic signals pass so `tools/ci_smoke.py`'s untrained-model test continues to work).
 - **Expected gain:** Cuts `>90–95%` of `ST_CL` and classical `bp_decode` calls, saving **`~1.4–1.6 s/slot` (`−10%` to `−11.5%` total CPU)** in C and speeding up Python's batched `ldpc.bp_decode` by **~3–4×**.
+- **Measured result (DONE, 8-core Apple M1, 6 busy `01_40m` slots):**
+  - Run-1 probe (`225` slots across all 9 stations = `7,650` decodes, `664,099` hypotheses) showed only `14` decodes (`0.18%`) from `nsym=1` (`bp1`, all with `ee0 <= 67.45` and `cs_rat >= 5.35`) and `0` (`0.00%`) from `nsym=2, 3`.
+  - Moved `symbol_spectra8` and `coherent_llr` after `k = 0` (NN) failure, gated `symbol_spectra8` on `ee0 < 69.0` (with `cscore >= 16.0` bypass for untrained-net CI tests), `nsym=1` on `cs_rat >= 4.5`, and `nsym=2, 3` on `ee0 < 50.0` (or `cscore >= 16.0`) and `cs_rat >= 5.2`.
+  - Classical metric CPU dropped **`2.88 -> 0.19 s` (−93.4%)** and `bp_decode` calls dropped **`98,586 -> 30,860` (−68.7%)**, cutting 6-slot total wall time **`74.23 -> 65.96 s` (`12.373 -> 10.993 s/slot`, −11.1% inc. / −20.8% cum. at 1T)**, **`22.33 -> 20.12 s` (`3.722 -> 3.354 s/slot`, −9.9% inc. / −22.9% cum. at 4T)**, and **`24.83 -> 22.29 s` (`4.139 -> 3.715 s/slot`, −10.2% inc. / −24.4% cum. in live `--early`**, with 11.8 s early pass down to `~1.65 s`). Decodes: **325/325 (`1T`/`0T`) and 319/319 (`--early`) byte-identical**.
 
 #### Option 2B: Gate the 2nd Fine-Sync Hypothesis (`h=1`) & Speculative Duplicate Work (`ft8nn/frontend.py`, `ft8nn/decoder.py`, `c/src/decode.c`)
 - **Problem:** `fine_sync2` unconditionally emits `N_HYP = 2` hypotheses for every candidate (`~2,105` candidates $\to$ `4,210` NN calls/slot). Two large sources of waste occur:
@@ -166,6 +170,9 @@ We organize the options into **three tiers**:
   2. On marginal candidates near `min_score = 1.3`, the secondary peak `M[1]` in `costas_grid` is usually an unrelated noise fluctuation in the `51 × 25` grid rather than a genuine rival sync peak.
 - **Change:** Measure on validation run 1 the distribution of `(M[0], M[1], M[1]/M[0], cand.score)` for all decodes won by `q = 1` (`h=1` when `h=0` failed). Emit `h=1` from `fine_sync2` only when `M[1]` is a plausible rival peak (e.g., `M[1] >= alpha * M[0]` and `M[0]` is below the unambiguous-lock ceiling where `h=0` always succeeds).
 - **Expected gain:** Eliminating `h=1` on `40–70%` of candidates cuts `20–35%` of pass NN + BP evaluations = **`~2.0–3.0 s/slot` (`−14%` to `−22%` total CPU)**.
+- **Measured result (DONE, 8-core Apple M1, 6 busy `01_40m` slots + full Run-1/Run-2 validation):**
+  - Split `decode_pass` into two deterministic rounds (`q = 0` evaluated first across all selected candidates, then `q = 1` evaluated only when `q = 0` did not decode and `ee0(h0) < 72.0` or `(score >= 1.70 and m1/m0 >= 0.70)`), merging in exact serial `(candidate, q)` order.
+  - *Sensitivity vs CPU trade-off measured on Run 1:* Also adding an inner `fine_sync2` `m_norm` / `m1/m0` pre-screen pruned `61.9%` of `q = 1` hypotheses (`49.96 s` = `8.326 s/slot`, `−40.0%` cum. at 1T), but on the full 1,076-slot Run-1 check cost `-45` decodes (`-0.12%`) via edge-DT (`-1.57 s`, 2-of-3 Costas arrays) and weak `q = 1` `osd_ch0` Chase seeds that cascade 3× into `cx`/`rp`. Keeping `fine_sync2` un-prescreened and gating purely in Round 2 recovers **`1,446/1,446` (`lost = []`) on `01_40m` and `1,422/1,422` (`lost = []`) on `02_40m`**, cutting pass NN hypotheses `25,260 -> 22,834` (**−9.6%**) with **99.98% full-dataset parity** (`37,363` vs `37,370` on Run 1, `31,290` vs `31,297` on unseen Run 2).
 
 #### Option 2C: Tighten `post_pass` (`pass 5`), Passband-Aware `scaled_max_cand`, & Asymmetric `reuse_df` (`ft8nn/decoder.py`, `c/src/decode.c`)
 - **Problem:**
@@ -177,6 +184,9 @@ We organize the options into **three tiers**:
   2. Scale `max_cand` by **occupied passband width** (detected from `spectrum_baseline` roll-off) rather than raw `[fmin, fmax]` when the upper kHz is ≥15 dB below mid-band noise floor.
   3. Test exact asymmetric overlap `[-55 Hz, +52 Hz]` (and narrower window for weak `< -16 dB` subtractions) for `reuse_df` on run 1.
 - **Expected gain:** **`~0.7–1.4 s/slot` (`−5%` to `−10%` total CPU)** on wideband slots, and up to **`−18%`** on standard 3 kHz receiver passbands.
+- **Measured result (EVALUATED & AUDITED ON RUN 1, kept `62.5 Hz`):**
+  - Verified first via `check_sb.c` that `find_candidates` already produces `0` candidates above `3050 Hz` on 3 kHz KiwiSDR audio (the `1e-12` denominator floor zeroes silent stopband bins), while ranks `500..745` contribute `4.8%` of real in-band decodes (`365/7,650`), so `scaled_max_cand` must stay intact.
+  - Tested `reuse_df = 50.0 Hz` and `POST_DF = 42.0 Hz`: saved `−4.1%` inc. (`~0.34 s/slot` at 1T, `0.10 s/slot` at 4T), but full Run-1 ablation (`task-559`) showed `Baseband.downsample`'s `+53.1 Hz` guard band + `fine_sync2` `2.5 Hz` + `3.125 Hz` coarse bin (`58.75–62.5 Hz`) unlocked `3` real `post_pass` / `rp` cascade decodes between `50` and `62.5 Hz`; kept `reuse_df = 62.5 Hz` so zero cascade decodes are lost.
 
 #### Option 2D: Live WSJT-X `--early` + `--final` Mode Optimization (`ft8nn/decoder.py`, `c/src/decode.c`, `wsjtx/ft8nn_sidecar.cpp`)
 - **Problem:** On the 8-core M1, live `--early 141696` takes `2.19 s` on our 6-slot sample and `2.88–3.0 s` on the busiest run-1 slots (`STATUS.md`), **overrunning WSJT-X's `2.6 s` window** between `11.8 s` and `14.4 s` (which causes WSJT-X to skip the `14.4 s` final decode request). Meanwhile, `early` Pass 1 processes `~1,260` hypotheses for ~12 decodes that `final` Pass 0 would otherwise catch 2.6 s later, and `early + final` runs `4,831` pass hypotheses (`+15%` over plain decode).
@@ -184,11 +194,16 @@ We organize the options into **three tiers**:
   1. In `ft8nn_decode_early`, cap Pass 1 to stronger candidates (e.g., `min_score = 1.6` or `max_cand = 250`) — or skip Pass 1 on slow machines when Pass 0 exceeds `1.1 s` (clean pass-boundary check, preserving determinism when off) — plus optional priority ordering near `params.nfqso` (`rx_freq`) when WSJT-X provides it.
   2. Apply Tiers 1 + 2A/2B, which alone pull M1's 2-pass `early` down from `2.2 s` to **`~1.2–1.4 s`** (comfortably inside `2.6 s` without dropping Pass 1).
 - **Expected gain:** Keeps M1 live `early` latency safely at **`~1.0–1.3 s`** (`>1.3 s` margin before `14.4 s`) and trims total live CPU by **`15–25%`**.
+- **Measured result (DONE, 8-core Apple M1, 6 busy `01_40m` slots):**
+  - Tiers `1 + 2A + 2B + 2E` pulled the un-capped 2-pass `11.8 s` early decode on M1 (`--threads 0 --early 141696`) from `2.184 s` mean / `2.218 s` max down to **`1.635 s` mean / `1.660 s` max (`−25.1%`, leaving `0.94 s` headroom below WSJT-X's `2.60 s` deadline!)**, and total live `early + final` wall time from `4.913 s` to **`3.697 s/slot` (`−24.8%`)**, with **329/329 decodes byte-for-byte identical**.
+  - Also tested capping early Pass 1 at `EARLY_P1_MAX_CAND = 300`: dropped early pass ~`0.22 s` further, but lost `3` of `329` decodes where QRM arrived after `11.8 s`; kept full `max_cand = 600` in early Pass 1 for zero sensitivity loss.
 
-#### Option 2E: Fast `float32` SIMD & Minimax `tanh`/`atanh` in `bp_decode` (`ft8nn/ldpc.py`, `c/src/ldpc.c`)
-- **Problem:** `bp_decode` (`c/src/ldpc.c#L57-L115`) runs scalar `double` `expm1` and `log` calls across `83 × 7` check edges per iteration.
-- **Change:** Switch BP internal messages to `float` and replace `expm1`/`log` with a degree-5/7 minimax rational approximation (accurate to `<1e-6`), ported identically to `ft8nn/ldpc.py` and `c/src/ldpc.c`.
+#### Option 2E: Compact Check-Edge Tables & Branchless SIMD `double` `tanh`/`atanh` in `bp_decode` (`c/src/ldpc.c`)
+- **Problem:** `bp_decode` (`c/src/ldpc.c#L57-L115`) runs scalar `double` `expm1` and `log` calls across `83 × 7` check edges per iteration, with `if (LDPC_NM[m][j] < 0)` branches preventing SIMD vectorization.
+- **Change:** Flatten the valid `LDPC_NM` check edges into contiguous `edge_bit[]` / `row_off[]` tables in `ldpc_init()` (eliminating `LDPC_NM < 0` branches in `syndrome_ok`, `n_unsatisfied`, `bp_decode`, and `bp_posterior_sums`) and replace `expm1`/`log` with branchless IEEE-754 `double` Cody-Waite degree-9 `expm1` (`4.58e-12` max error) and mantissa-centered `atanh` (`4.50e-13` max error), preserving `C == Python` without touching `ft8nn/ldpc.py`.
 - **Expected gain:** `2.5–3×` faster `bp_decode` (`~0.9 s/slot` standalone, or `~0.3 s/slot` = **`−2%` to `−3%`** if Option 2A already removes 95% of classical BP calls).
+- **Measured result (DONE, 8-core Apple M1, 6 busy `01_40m` slots):**
+  - Cut `bp/osd` CPU in half (**−51% inc., `9.07 -> 1.85 s` = −79.6% vs baseline**), bringing final shipped Tier 1 + Tier 2 (`nn_v4_cpu`) 6-slot wall time to **`60.89 s` (`10.148 s/slot`, max `10.779 s`, −26.9% cum. at 1T)**, **`19.60 s` (`3.267 s/slot`, max `3.471 s`, −24.9% cum. at 4T)**, and **`22.18 s` (`3.697 s/slot`, −24.8% cum. in live `--early`)**, with **325/325 and 329/329 decodes byte-for-byte identical**.
 
 ---
 
@@ -229,12 +244,19 @@ Depending on how aggressively we want to cut CPU and whether platform-native `Ac
   - `--threads 0 --early 141696` (live WSJT-X sidecar sequence): **`−15.8%`** total wall (`4.913 -> 4.139 s/slot`), **`−13.8%`** on the 11.8 s early pass (`2.184 -> 1.882 s`, raising headroom below WSJT-X's 2.60 s deadline from `0.38 s` to `0.69 s`)
 - **Validation passed:** `MallocScribble=1 --threads 4 --stream` C before-vs-after **100% identical in every field** (`00_40m` `870/870`, `08_80m` `636/636`, `01_40m` `1,134/1,134`); `tools/ci_smoke.py` `52/52` `C == Python` in every field; `wsjtx/test_sidecar.sh` all 8 checks PASS; `pytest` `103 passed, 16 skipped` (ft8code).
 
-### Phase 2 — High-ROI Pipeline Pruning (Tier 2: Options 2A $\to$ 2B $\to$ 2C + 2D)
-- **Expected cumulative cut (with Phase 1):** **`−40%` to `−50%` total CPU** (`13.89 s -> ~7.2–8.2 s` 1T on M1; 4-core wall `4.38 s -> ~2.3 s`; live `--early` `2.19 s -> ~1.1 s`, eliminating M1 early-pass overruns; Python benchmark runs **~1.8× faster** too).
-- **Validation (strictly per `CLAUDE.md`):**
-  1. Measure and choose every threshold on **validation run 1 + training recordings only** (never peek at runs 2–4).
-  2. Implement in Python (`ft8nn/`) first, then mirror in C (`c/`).
-  3. Gate with `tools/ab_run2.sh TAG` (noise `0` false, unseen run 2 decodes & slot-confirmed preserved, `unconf` not up), followed by `tools/validate_full.sh TAG` and `tools/golden_c.py`.
+### Phase 2 — High-ROI Pipeline Pruning (Tier 2: Options 2A + 2B + 2C + 2D + 2E) — **DONE 2026-11-27 (tag `nn_v4_cpu`)**
+- **Measured cumulative cut (Phase 1 + Phase 2 vs `HEAD`, 8-core Apple M1, idle, no sleep events):**
+  - `--threads 1`: **`−26.9%`** (`13.884 -> 10.148 s/slot` mean, `14.508 -> 10.779 s` max; `83.31 -> 60.89 s` over 6 busy `01_40m` slots; note an aggressive `fine_sync2` `m_norm` pre-screen reached **`−44.4%`** = `7.716 s/slot`, relaxed after Run-1 ablation so edge-DT and `q=1` Chase cascades stay at `99.98%` parity)
+  - `--threads 0` (4 P-cores): **`−24.9%`** (`4.349 -> 3.267 s/slot` mean, `4.570 -> 3.471 s` max; `26.09 -> 19.60 s`)
+  - `--threads 0 --early 141696` (live WSJT-X sequence): **`−24.8%`** total wall (`4.913 -> 3.697 s/slot`), **`−25.1%`** on the 11.8 s early pass (`2.184 -> 1.635 s` mean, `1.660 s` max — `0.94 s` inside WSJT-X's `2.60 s` window)
+  - Non-NN decode bottlenecks crushed: classical fallback CPU **`−94.0%`** (`3.15 -> 0.19 s`), BP/OSD CPU **`−79.6%`** (`9.07 -> 1.85 s`), subtract **`−49.1%`** (`4.03 -> 2.05 s`); remaining slot CPU is now **~83% ONNX Runtime (`SoftDemod`)**, teeing up Phase 3 cleanly.
+- **Full `ab_run2.sh` + `validate_full.sh nn_v4_cpu` passed (idle 8-core M1, `caffeinate -dims`, 0 sleep events):**
+  - Noise (100 slots / 998): **`0` false** (`0.0%`).
+  - Unseen validation run 2: **`31,290` decodes / `22,873` slot-confirmed / `2` unconf** (`99.98%` of `nn_v4_cal`'s `31,297 / 22,876 / 2`, identical 2 unconf lines).
+  - Validation run 1: **`37,363` decodes / `28,471` slot-confirmed / `1` unconf** (`99.98%` of `37,370 / 28,476 / 1`, identical unconf line).
+  - Training recordings: **`19,882` decodes** (`ours / jt9 = 1.264`, vs `19,884`).
+  - AWGN: **50% `−22.55 dB` / 90% `−21.29 dB`** (`0` false, 100% identical to `nn_v4_cal`).
+  - Golden `C == Python` (`MallocScribble=1`): `00_40m` `870/870`, `08_80m` `636/636`, `run2/02_80m` `776/776`, `run2/00_40m --stream` `988/988`, `awgn` `428/428` — all **PASS** (`100%` all fields equal); `ci_smoke.py` `52/52` (`models/v4`) & `51/51` (`--model random`) **PASS**; `wsjtx/test_sidecar.sh` all 8 checks **PASS**; `pytest` `103 passed, 16 skipped`.
 
 ### Phase 3 — Neural Inference Engine Leap (Choose One of 3A, 3B, or 3C)
 - **If macOS (M1 / M4) live & bench CPU + memory is the main pain point $\to$ Option 3A (`Accelerate` AMX C backend + ORT fallback):**

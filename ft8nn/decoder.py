@@ -731,9 +731,168 @@ def _dt_shift(dts, gate):
     return 0.0 if abs(med) < gate else round(med * fe.FPS) / fe.FPS
 
 
+# Classical fallback (nsym=1,2,3) gating when paired with SoftDemod (nn_metric.make_llr_fn(also_classical=True)),
+# tuned on validation run 1 (225 slots, 7,650 decodes: 14 from nsym=1 with ee0 <= 67.45 and cs_rat >= 5.35, 0 from
+# nsym=2,3; cscore bypass keeps strong signals working even with an untrained random NN in ci_smoke.py).
+CL_EE_GATE = 69.0
+CL_SCORE_GATE = 16.0
+CL_CS_GATE = 4.5
+CL_COH_EE_GATE = 50.0
+CL_COH_CS_GATE = 5.2
+# Second fine-sync hypothesis (q >= 1) gating after q = 0 fails, tuned on validation run 1 (225 slots: 7,515 q=0
+# decodes vs 86 q=1 decodes; 0/86 lost, while skipping q=1 whenever q=0 decoded or failed as pure noise).
+Q1_EE0_GATE = 72.0
+Q1_ALT_SCORE = 1.70
+Q1_ALT_RAT = 0.70
+
+
+def _eval_nn_batch(hyps, cscores, early_flags, nn_fn, also_cl, osd_order, osd_max_hard, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_bp_gate, erase_osd_dmax, osd_snaps, context, ctx_gate):
+    """Evaluate a batch of SyncHyp with SoftDemod + gated classical fallback, matching C's hyp_worker + decode_hyp.
+    Returns list of (status, a91, info, k, exp_err_used, ee0, l0) per hypothesis (status: 0 fail, 1 ok, 2 all-zero)."""
+    L = np.stack([l[0] for l in nn_fn(hyps)])
+    bp_bits, bp_ok, bp_nhard = ldpc.bp_decode(L)
+    exp_err = (1.0 / (1.0 + np.exp(np.abs(L)))).sum(1)
+    out = []
+    for i, h in enumerate(hyps):
+        l0 = L[i]
+        ee0 = float(exp_err[i])
+        early = early_flags[i]
+        a91, info = None, None
+        if bp_ok[i] and ft8.crc_ok(bp_bits[i, :91]):
+            a91, info = _plausible(bp_bits[i, :91], {"method": "bp", "nhard": int(bp_nhard[i])})
+        if a91 is None and osd_order >= 0 and osd_metrics > 0 and ee0 < osd_gate:
+            cw, crc, dist, nh = ldpc.osd_decode(l0, osd_order)
+            if crc and nh <= osd_max_hard:
+                a91, info = _plausible(cw[:91], {"method": "osd", "nhard": nh, "dist": dist})
+            if a91 is None and osd_snaps and not early:
+                a91, info = _plausible(*_try_osd_bp(l0, osd_snaps, osd_order, osd_max_hard))
+        if a91 is None and context and not early and ee0 < ctx_gate:
+            pats = context_patterns(context, h.f0, h.dt)
+            if pats:
+                a91, info = _plausible(*_try_ctx(l0, pats))
+        if a91 is None and ap and ee0 < ap_gate:
+            a91, info = _plausible(*_try_ap(l0, ap, -1 if early else osd_order, osd_max_hard))
+        if a91 is None and erase_gate > 0 and ee0 < max(erase_gate, erase_bp_gate) and not early:
+            a91, info = _plausible(*_try_erase(l0, erase_osd_dmax if ee0 < erase_gate else 0.0))
+        if a91 is not None:
+            if not a91[:77].any():
+                out.append((2, None, None, 0, ee0, ee0, l0))
+            else:
+                out.append((1, a91, info, 0, ee0, ee0, l0))
+            continue
+        if also_cl:
+            cscore = cscores[i]
+            if ee0 < CL_EE_GATE or cscore >= CL_SCORE_GATE:
+                cs = fe.symbol_spectra(h.y, h.start)[:, :8]
+                csd = cs[ft8.DATA_POS]
+                pw = csd.real ** 2 + csd.imag ** 2
+                cs_rat = float(pw.max(1).sum() / max(0.125 * float(pw.sum()), 1e-30))
+                if cs_rat >= CL_CS_GATE:
+                    nsyms = (1, 2, 3) if ((ee0 < CL_COH_EE_GATE or cscore >= CL_SCORE_GATE) and cs_rat >= CL_COH_CS_GATE) else (1,)
+                    done_cl = False
+                    for k in nsyms:
+                        lk = fe.coherent_llr(cs, k)
+                        eek = float((1.0 / (1.0 + np.exp(np.abs(lk)))).sum())
+                        bk, okk, nhk = ldpc.bp_decode(lk[None])
+                        if okk[0] and ft8.crc_ok(bk[0, :91]):
+                            a91, info = _plausible(bk[0, :91], {"method": "bp", "nhard": int(nhk[0])})
+                        if a91 is None and osd_order >= 0 and k < osd_metrics and eek < osd_gate:
+                            cw, crc, dist, nh = ldpc.osd_decode(lk, osd_order)
+                            if crc and nh <= osd_max_hard:
+                                a91, info = _plausible(cw[:91], {"method": "osd", "nhard": nh, "dist": dist})
+                        if a91 is None:
+                            continue
+                        if not a91[:77].any():
+                            out.append((2, None, None, k, eek, ee0, l0))
+                        else:
+                            out.append((1, a91, info, k, eek, ee0, l0))
+                        done_cl = True
+                        break
+                    if done_cl:
+                        continue
+        out.append((0, None, None, 0, ee0, ee0, l0))
+    return out
+
+
 def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd_gate, osd_metrics, ap, ap_gate, erase_gate, erase_bp_gate, erase_osd_dmax, osd_snaps, context, ctx_gate, cand_kw, skip=None, tried=None, p=0, failed_map=None, snr_rng=(fe.BASE_NFA, fe.BASE_NFB)):
     cands = fe.find_candidates(x, max_cand=max_cand, **cand_kw)
     bb = fe.Baseband(x, snr_rng)
+    has_nn = hasattr(llr_fn, "nn")
+    if has_nn:
+        cand_hyps = []
+        for ci, c in enumerate(cands):
+            if skip is not None and skip(c):
+                continue
+            ck = _cand_key(c)
+            if tried is not None:
+                tried[ck] = p
+            if failed_map is not None and not c.early:
+                for q in range(n_hyp):
+                    failed_map.pop((ck, q), None)
+            cand_hyps.append((ci, ck, fe.fine_sync2(bb, c, n_hyp=n_hyp)))
+        r0_slots = [s for s, (_, _, hs) in enumerate(cand_hyps) if hs]
+        if not r0_slots:
+            return []
+        also_cl = getattr(llr_fn, "also_classical", False)
+        hyps0 = [cand_hyps[s][2][0] for s in r0_slots]
+        cs0 = [cands[cand_hyps[s][0]].score for s in r0_slots]
+        ef0 = [cands[cand_hyps[s][0]].early for s in r0_slots]
+        res0 = _eval_nn_batch(hyps0, cs0, ef0, llr_fn.nn, also_cl, osd_order, osd_max_hard, osd_gate, osd_metrics,
+                              ap, ap_gate, erase_gate, erase_bp_gate, erase_osd_dmax, osd_snaps, context, ctx_gate)
+        r0_map = {s: res0[idx] for idx, s in enumerate(r0_slots)}
+        r1_keys, hyps1, cs1, ef1 = [], [], [], []
+        for s in r0_slots:
+            ci, _, hs = cand_hyps[s]
+            if len(hs) < 2:
+                continue
+            r0 = r0_map[s]
+            if r0[0] == 1:
+                continue
+            h0 = hs[0]
+            cs = cands[ci].score
+            ee0_h0 = r0[5]
+            for q in range(1, len(hs)):
+                hq = hs[q]
+                if ee0_h0 < Q1_EE0_GATE or (cs >= Q1_ALT_SCORE and hq.metric >= Q1_ALT_RAT * h0.metric):
+                    r1_keys.append((s, q))
+                    hyps1.append(hq)
+                    cs1.append(cs)
+                    ef1.append(cands[ci].early)
+        r1_map = {}
+        if hyps1:
+            res1 = _eval_nn_batch(hyps1, cs1, ef1, llr_fn.nn, also_cl, osd_order, osd_max_hard, osd_gate, osd_metrics,
+                                  ap, ap_gate, erase_gate, erase_bp_gate, erase_osd_dmax, osd_snaps, context, ctx_gate)
+            r1_map = {k: res1[idx] for idx, k in enumerate(r1_keys)}
+        found = {}
+        done_cand = set()
+        for s, (ci, ck, hs) in enumerate(cand_hyps):
+            if not hs:
+                continue
+            early = cands[ci].early
+            for q, h in enumerate(hs):
+                r = r0_map[s] if q == 0 else r1_map.get((s, q))
+                if r is None or ci in done_cand:
+                    continue
+                if any(abs(h.f0 - d.f0) < 3 and abs(h.dt - d.dt) < 0.05 for d in found.values()):
+                    done_cand.add(ci)
+                    continue
+                status, a91, info, k, eek, ee0, l0 = r
+                if status != 1:
+                    if failed_map is not None and not early and ee0 < CHASE_EE_MAX:
+                        failed_map[(ck, q)] = (float(h.f0), float(h.dt), ee0, l0.astype(np.float32))
+                    continue
+                d = Decode(a91[:77].copy(), h.f0, h.dt, h.metric, info["method"], {**info, "metric": k, "exp_err": eek})
+                d.snr = estimate_snr(h, d.bits77, bb)
+                if d.key not in known:
+                    found.setdefault(d.key, d)
+                done_cand.add(ci)
+        others = [d for d in found.values() if d.method not in GHOST_PRONE] + list(known.values())
+        for key in [k for k, d in found.items() if d.method in GHOST_PRONE]:
+            if any(_is_ghost(found[key], e) for e in others):
+                del found[key]
+        _drop_ctx_dupes(found, known.values())
+        return list(found.values())
+
     hyps, owner, h_idx = [], [], []
     for ci, c in enumerate(cands):
         if skip is not None and skip(c):
@@ -751,11 +910,9 @@ def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd
     if not hyps:
         return []
     metrics = llr_fn(hyps)
-    # batched BP over every (hypothesis, metric) pair
     flat = [(hi, k) for hi, llrs in enumerate(metrics) for k in range(len(llrs))]
     L = np.stack([metrics[hi][k] for hi, k in flat])
     bp_bits, bp_ok, bp_nhard = ldpc.bp_decode(L)
-    # expected bit errors under the LLRs: ~70 for noise, <40 for anything OSD can rescue
     exp_err = (1.0 / (1.0 + np.exp(np.abs(L)))).sum(1)
     row = {key: r for r, key in enumerate(flat)}
     found = {}
@@ -766,13 +923,10 @@ def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd
         if any(abs(h.f0 - d.f0) < 3 and abs(h.dt - d.dt) < 0.05 for d in found.values()):
             done_cand.add(ci)
             continue
-        # early-DT candidates have weaker sync evidence: no OSD on BP sums or under a-priori bits, no erasure stages
         early = cands[ci].early
         decoded = False
         for k in range(len(metrics[hi])):
             r = row[(hi, k)]
-            # every stage's result must be a message that could really be sent (_plausible); if not, the next stage
-            # gets its turn
             a91 = None
             if bp_ok[r] and ft8.crc_ok(bp_bits[r, :91]):
                 a91, info = _plausible(bp_bits[r, :91], {"method": "bp", "nhard": int(bp_nhard[r])})
@@ -792,7 +946,7 @@ def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd
                 a91, info = _plausible(*_try_erase(L[r], erase_osd_dmax if exp_err[r] < erase_gate else 0.0))
             if a91 is None:
                 continue
-            if not a91[:77].any():  # all-zero payload: classic false decode
+            if not a91[:77].any():
                 break
             d = Decode(a91[:77].copy(), h.f0, h.dt, h.metric, info["method"], {**info, "metric": k, "exp_err": float(exp_err[r])})
             d.snr = estimate_snr(h, d.bits77, bb)

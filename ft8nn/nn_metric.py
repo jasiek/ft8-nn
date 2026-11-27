@@ -42,4 +42,5 @@ def make_llr_fn(path, also_classical=False, device="cpu", batch=128, n_valid=Non
         return res
 
     llr_fn.nn = nn_fn  # NN metric only, for stages that use nothing else (decoder._nn_only)
+    llr_fn.also_classical = bool(also_classical)
     return llr_fn

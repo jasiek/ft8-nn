@@ -142,6 +142,16 @@ static int prof = -1;
 #define GHOST_MATCH 0.4
 #define ERASE_OSD_DMAX 3.0 /* wide-window OSD-0 erasure stage: max distance on the kept bits (decoder.erase_osd_dmax) */
 #define NMET 4 /* NN + classical nsym 1, 2, 3 */
+/* classical fallback gates (decoder.CL_EE_GATE .. CL_COH_CS_GATE), tuned on validation run 1 */
+#define CL_EE_GATE 69.0
+#define CL_SCORE_GATE 16.0
+#define CL_CS_GATE 4.5
+#define CL_COH_EE_GATE 50.0
+#define CL_COH_CS_GATE 5.2
+/* second fine-sync hypothesis (q >= 1) gates after q = 0 fails (decoder.Q1_*) */
+#define Q1_EE0_GATE 72.0
+#define Q1_ALT_SCORE 1.70
+#define Q1_ALT_RAT 0.70
 #define NN_BATCH 128
 #define BASE_MEDIAN 1 /* candidate score baseline: 1 = 1.77 * median of all cells (A/B 2026-11-04: real +281), 0 = old pct40 of per-freq max */
 /* candidate search range (f0, Hz; frontend.FMIN_DEFAULT / FMAX_DEFAULT, F_LO / F_HI): 150..4000 unless
@@ -636,45 +646,96 @@ typedef struct {
     int n_bp, n_osd;
 } hyp_res;
 
-static void decode_hyp(const sync_hyp *hy, const double *L, int early, int cons, const dec *cx, int ncx, hyp_res *r) {
+/* per-thread CPU seconds of the stages, summed over threads for FT8NN_PROFILE */
+enum { ST_SYNC, ST_NN, ST_CL, ST_DEC, N_ST };
+
+static void decode_hyp(const sync_hyp *hy, const double *nn_l, double cscore, int early, int cons, const dec *cx,
+                       int ncx, hyp_res *r, double *st_cl, double *st_dec) {
+    double td0 = tthr();
     r->status = 0;
     r->n_bp = r->n_osd = 0;
-    r->ee0 = 174.0;
-    for (int k = 0; k < NMET; k++) {
-        const double *l = L + (size_t)k * 174;
-        double exp_err = 0;
-        for (int i = 0; i < 174; i++) exp_err += 1.0 / (1.0 + exp(fabs(l[i])));
-        if (k == 0) {
-            r->ee0 = exp_err;
-            if (!early && exp_err < CHASE_EE_MAX)
-                for (int i = 0; i < 174; i++) r->nn_llr[i] = (float)l[i];
+    double exp_err = 0;
+    for (int i = 0; i < 174; i++) exp_err += 1.0 / (1.0 + exp(fabs(nn_l[i])));
+    r->ee0 = exp_err;
+    if (!early && exp_err < CHASE_EE_MAX)
+        for (int i = 0; i < 174; i++) r->nn_llr[i] = (float)nn_l[i];
+    uint8_t bits[174], a91[91];
+    int nhard, method = -1;
+    double dist;
+    r->n_bp++;
+    /* early-DT candidates have weaker sync evidence: no OSD on BP sums or under a-priori bits, no erasure stages */
+    /* every stage's result must be a plausible message (decoder._plausible); if not, the next stage tries */
+    if (bp_decode(nn_l, 30, bits, &nhard) && crc_ok(bits)) {
+        memcpy(a91, bits, 91);
+        method = plausible(FT8NN_BP, a91);
+    }
+    if (method < 0 && exp_err < OSD_GATE && ++r->n_osd) {
+        if (osd_decode(nn_l, OSD_ORDER, bits, &dist, &nhard) && nhard <= OSD_MAX_HARD) {
+            memcpy(a91, bits, 91);
+            method = plausible(FT8NN_OSD, a91);
         }
-        uint8_t bits[174], a91[91];
-        int nhard, method = -1;
-        double dist;
+        if (method < 0 && OSD_SNAPS > 0 && !early && !cons) method = plausible(try_osd_bp(nn_l, a91), a91);
+    }
+    if (method < 0 && ncx > 0 && !early && exp_err < CTX_GATE)
+        method = plausible(try_ctx(nn_l, cx, ncx, hy->f0, hy->dt, a91), a91);
+    if (method < 0 && !cons && exp_err < AP_GATE)
+        method = plausible(try_ap(nn_l, a91, early ? -1 : OSD_ORDER), a91);
+    if (method < 0 && exp_err < ERASE_BP_GATE && !early)
+        method = plausible(try_erase(nn_l, a91, !cons && exp_err < ERASE_GATE), a91);
+    if (method >= 0) {
+        if (!any_bits(a91, 77)) {
+            r->status = 2;
+            *st_dec += tthr() - td0;
+            return;
+        }
+        r->status = 1;
+        r->k = 0;
+        r->method = (int8_t)method;
+        memcpy(r->a91, a91, 91);
+        r->snr = estimate_snr(hy, a91);
+        *st_dec += tthr() - td0;
+        return;
+    }
+    *st_dec += tthr() - td0;
+    if (!(exp_err < CL_EE_GATE || cscore >= CL_SCORE_GATE)) return;
+    double tc0 = tthr();
+    cplx cs[NN][8];
+    symbol_spectra8(hy->y, hy->start, cs);
+    double p_max = 0.0, p_sum = 0.0;
+    for (int d = 0; d < ND; d++) {
+        int s = DATA_POS[d];
+        double pm = 0.0;
+        for (int t = 0; t < 8; t++) {
+            double re = creal(cs[s][t]), im = cimag(cs[s][t]);
+            double pw = re * re + im * im;
+            p_sum += pw;
+            if (pw > pm) pm = pw;
+        }
+        p_max += pm;
+    }
+    double cs_rat = p_max / fmax(0.125 * p_sum, 1e-30);
+    *st_cl += tthr() - tc0;
+    if (cs_rat < CL_CS_GATE) return;
+    int kmax = ((exp_err < CL_COH_EE_GATE || cscore >= CL_SCORE_GATE) && cs_rat >= CL_COH_CS_GATE) ? 3 : 1;
+    double lk[174];
+    for (int k = 1; k <= kmax; k++) {
+        tc0 = tthr();
+        coherent_llr(cs, k, lk);
+        *st_cl += tthr() - tc0;
+        td0 = tthr();
         r->n_bp++;
-        /* early-DT candidates have weaker sync evidence: no OSD on BP sums or under a-priori bits, no erasure stages */
-        /* every stage's result must be a plausible message (decoder._plausible); if not, the next stage tries */
-        if (bp_decode(l, 30, bits, &nhard) && crc_ok(bits)) {
+        method = -1;
+        if (bp_decode(lk, 30, bits, &nhard) && crc_ok(bits)) {
             memcpy(a91, bits, 91);
             method = plausible(FT8NN_BP, a91);
         }
-        if (method < 0 && k < 1 && exp_err < OSD_GATE && ++r->n_osd) {
-            if (osd_decode(l, OSD_ORDER, bits, &dist, &nhard) && nhard <= OSD_MAX_HARD) {
-                memcpy(a91, bits, 91);
-                method = plausible(FT8NN_OSD, a91);
-            }
-            if (method < 0 && OSD_SNAPS > 0 && !early && !cons) method = plausible(try_osd_bp(l, a91), a91);
+        if (method < 0) {
+            *st_dec += tthr() - td0;
+            continue;
         }
-        if (method < 0 && k == 0 && ncx > 0 && !early && exp_err < CTX_GATE)
-            method = plausible(try_ctx(l, cx, ncx, hy->f0, hy->dt, a91), a91);
-        if (method < 0 && k == 0 && !cons && exp_err < AP_GATE)
-            method = plausible(try_ap(l, a91, early ? -1 : OSD_ORDER), a91);
-        if (method < 0 && k == 0 && exp_err < ERASE_BP_GATE && !early)
-            method = plausible(try_erase(l, a91, !cons && exp_err < ERASE_GATE), a91);
-        if (method < 0) continue;
         if (!any_bits(a91, 77)) {
             r->status = 2;
+            *st_dec += tthr() - td0;
             return;
         }
         r->status = 1;
@@ -682,12 +743,10 @@ static void decode_hyp(const sync_hyp *hy, const double *L, int early, int cons,
         r->method = (int8_t)method;
         memcpy(r->a91, a91, 91);
         r->snr = estimate_snr(hy, a91);
+        *st_dec += tthr() - td0;
         return;
     }
 }
-
-/* per-thread CPU seconds of the stages, summed over threads for FT8NN_PROFILE */
-enum { ST_SYNC, ST_NN, ST_CL, ST_DEC, N_ST };
 
 typedef struct {
     const baseband *bb;
@@ -718,22 +777,20 @@ static void sync_worker(void *arg, int w) {
 typedef struct {
     ft8nn_ctx *c;
     sync_hyp **hp;
+    const double *cscore;
     const uint8_t *early;
     int nh;
     const dec *cx;
     int ncx;
     hyp_res *res;
     atomic_int next, err;
-    atomic_uchar *cdone;           /* per chunk: results written */
-    void (*between)(void *, int);  /* run by the calling thread after each of its chunks, with the next chunk index */
-    void *between_arg;
     double st[PAR_MAX_THREADS][N_ST];
 } hyp_job;
 
 static void hyp_worker(void *arg, int w) {
     hyp_job *j = arg;
     float *feat = malloc(sizeof(float) * NN_BATCH * NN * NFEAT);
-    double *nnl = malloc(sizeof(double) * NN_CHUNK * 174), L[NMET * 174];
+    double *nnl = malloc(sizeof(double) * NN_CHUNK * 174);
     for (;;) {
         int i0 = atomic_fetch_add(&j->next, NN_CHUNK);
         if (i0 >= j->nh || atomic_load(&j->err)) break;
@@ -743,22 +800,12 @@ static void hyp_worker(void *arg, int w) {
             atomic_store(&j->err, 1);
             break;
         }
-        double t1 = tthr();
-        j->st[w][ST_NN] += t1 - t0;
+        j->st[w][ST_NN] += tthr() - t0;
         for (int i = 0; i < b; i++) {
             const sync_hyp *hy = j->hp[i0 + i];
-            t0 = tthr();
-            memcpy(L, nnl + (size_t)i * 174, sizeof(double) * 174);
-            cplx cs[NN][8];
-            symbol_spectra8(hy->y, hy->start, cs);
-            for (int k = 1; k < NMET; k++) coherent_llr(cs, k, L + k * 174);
-            t1 = tthr();
-            j->st[w][ST_CL] += t1 - t0;
-            decode_hyp(hy, L, j->early[i0 + i], j->c->cons, j->cx, j->ncx, &j->res[i0 + i]);
-            j->st[w][ST_DEC] += tthr() - t1;
+            decode_hyp(hy, nnl + (size_t)i * 174, j->cscore[i0 + i], j->early[i0 + i], j->c->cons, j->cx, j->ncx,
+                       &j->res[i0 + i], &j->st[w][ST_CL], &j->st[w][ST_DEC]);
         }
-        atomic_store_explicit(&j->cdone[i0 / NN_CHUNK], 1, memory_order_release);
-        if (w == 0 && j->between) j->between(j->between_arg, (int)((j->nh + NN_CHUNK - 1) / NN_CHUNK));
     }
     free(feat);
     free(nnl);
@@ -868,26 +915,6 @@ static void merge_to(merger *m, int upto) {
     }
 }
 
-/* Between chunks: merge what has completed in order, and hand the merged decodes to cb up to the first that the end
- * of the pass may still drop (an osd_er / osd_bp ghost). That keeps texts unpacked in the serial order, so the hash
- * table learns callsigns in the same order. Context decodes are passed over, as report() does. */
-static void merge_between(void *arg, int nchunks) {
-    merger *m = arg;
-    int ch = m->h / NN_CHUNK;
-    while (ch < nchunks && atomic_load_explicit(&m->j->cdone[ch], memory_order_acquire)) ch++;
-    int upto = ch * NN_CHUNK < m->j->nh ? ch * NN_CHUNK : m->j->nh;
-    if (upto <= m->h) return;
-    merge_to(m, upto);
-    if (!m->cb) return;
-    int q = m->sent;
-    while (q < m->added && !ghost_prone(m->all[m->nall + q].method)) q++;
-    if (q == m->sent) return;
-    int any = 0;
-    for (int i = m->sent; i < q; i++) any |= !is_ctx(m->all[m->nall + i].method);
-    if (any) report(m->c, m->all, m->nall + m->sent, m->nall + q, 0, m->pass, m->cb, m->user, m->batch);
-    m->sent = q;
-}
-
 /* decoder._scaled_max_cand: 900 at default 150..4000 Hz, scaling linearly with searched width, [MAX_CAND, 1200] */
 static int scaled_max_cand(const ft8nn_ctx *c, int early) {
     if (early) return MAX_CAND;
@@ -945,54 +972,137 @@ static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall,
         free(sj);
     }
     baseband_free(&bb);
-    /* hypotheses in candidate order, as the serial loop produced them */
-    sync_hyp **hp = malloc(sizeof(sync_hyp *) * (size_t)(ns * N_HYP + 1));
-    int *owner = malloc(sizeof(int) * (size_t)(ns * N_HYP + 1)), nh = 0;
-    int *h_ti = malloc(sizeof(int) * (size_t)(ns * N_HYP + 1));
-    uint8_t *h_q = malloc((size_t)(ns * N_HYP + 1));
-    uint8_t *early = malloc((size_t)(ns * N_HYP + 1));
-    for (int i = 0; i < ns; i++) {
-        int ti = tried_idx(&cands[sel[i]]);
-        for (int q = 0; q < nk[i]; q++) {
-            hp[nh] = hyps + (size_t)i * N_HYP + q;
-            owner[nh] = i;
-            h_ti[nh] = ti;
-            h_q[nh] = (uint8_t)q;
-            early[nh++] = (uint8_t)(cands[sel[i]].early != 0);
-        }
-    }
     t2 = tnow();
     t3 = t2;
-    int added = 0;
-    if (nh == 0) goto done;
-    hyp_res *res = malloc(sizeof(hyp_res) * (size_t)nh);
-    int nchunk = (nh + NN_CHUNK - 1) / NN_CHUNK;
-    atomic_uchar *cdone = malloc(sizeof(atomic_uchar) * (size_t)nchunk);
-    for (int i = 0; i < nchunk; i++) atomic_init(&cdone[i], 0);
-    uint8_t *done_cand = calloc((size_t)ns + 1, 1);
+    int added = 0, nh = 0;
+    /* Round 1: evaluate q = 0 hypotheses across all selected candidates */
+    sync_hyp **hp0 = malloc(sizeof(sync_hyp *) * (size_t)(ns + 1));
+    double *cs0 = malloc(sizeof(double) * (size_t)(ns + 1));
+    uint8_t *ef0 = malloc((size_t)(ns + 1));
+    int *r0_of = malloc(sizeof(int) * (size_t)(ns + 1)), nh0 = 0;
+    for (int i = 0; i < ns; i++) {
+        if (nk[i] >= 1) {
+            r0_of[i] = nh0;
+            hp0[nh0] = hyps + (size_t)i * N_HYP;
+            cs0[nh0] = cands[sel[i]].score;
+            ef0[nh0++] = (uint8_t)(cands[sel[i]].early != 0);
+        } else {
+            r0_of[i] = -1;
+        }
+    }
+    if (nh0 == 0) {
+        free(hp0);
+        free(cs0);
+        free(ef0);
+        free(r0_of);
+        goto done;
+    }
+    hyp_res *res0 = malloc(sizeof(hyp_res) * (size_t)nh0);
     hyp_job *hj = calloc(1, sizeof *hj);
-    merger m = {.c = c, .j = hj, .hp = hp, .owner = owner, .h_ti = h_ti, .h_q = h_q, .early = early,
-                .done_cand = done_cand, .all = all, .nall = nall, .cap = cap, .pass = pass, .cb = cb, .user = user,
-                .batch = batch, .fmap_p = fmap_p, .nfmap_p = nfmap_p, .cfmap_p = cfmap_p};
-    *hj = (hyp_job){.c = c, .hp = hp, .early = early, .nh = nh, .cx = cx, .ncx = ncx, .res = res, .cdone = cdone,
-                    .between = merge_between, .between_arg = &m};
+    *hj = (hyp_job){.c = c, .hp = hp0, .cscore = cs0, .early = ef0, .nh = nh0, .cx = cx, .ncx = ncx, .res = res0};
     atomic_init(&hj->next, 0);
     atomic_init(&hj->err, 0);
     par_run(c->pool, hyp_worker, hj);
     int err = atomic_load(&hj->err);
     for (int w = 0; w < PAR_MAX_THREADS; w++)
         for (int s = ST_NN; s < N_ST; s++) st[s] += hj->st[w][s];
+
+    /* Round 2: gate and evaluate q >= 1 hypotheses only when q = 0 did not decode and q >= 1 is competitive */
+    sync_hyp **hp1 = malloc(sizeof(sync_hyp *) * (size_t)(ns * N_HYP + 1));
+    double *cs1 = malloc(sizeof(double) * (size_t)(ns * N_HYP + 1));
+    uint8_t *ef1 = malloc((size_t)(ns * N_HYP + 1));
+    int *r1_of = malloc(sizeof(int) * (size_t)(ns * N_HYP + 1)), nh1 = 0;
+    for (int i = 0; i < ns * N_HYP; i++) r1_of[i] = -1;
+    if (!err) {
+        for (int i = 0; i < ns; i++) {
+            int idx0 = r0_of[i];
+            if (idx0 < 0 || nk[i] < 2 || res0[idx0].status == 1) continue;
+            const sync_hyp *h0 = hyps + (size_t)i * N_HYP;
+            double cs = cands[sel[i]].score, ee0_h0 = res0[idx0].ee0;
+            for (int q = 1; q < nk[i]; q++) {
+                sync_hyp *hq = hyps + (size_t)i * N_HYP + q;
+                if (ee0_h0 < Q1_EE0_GATE || (cs >= Q1_ALT_SCORE && hq->metric >= Q1_ALT_RAT * h0->metric)) {
+                    r1_of[i * N_HYP + q] = nh1;
+                    hp1[nh1] = hq;
+                    cs1[nh1] = cs;
+                    ef1[nh1++] = (uint8_t)(cands[sel[i]].early != 0);
+                }
+            }
+        }
+    }
+    hyp_res *res1 = nh1 > 0 ? malloc(sizeof(hyp_res) * (size_t)nh1) : NULL;
+    if (!err && nh1 > 0) {
+        memset(hj, 0, sizeof *hj);
+        *hj = (hyp_job){.c = c, .hp = hp1, .cscore = cs1, .early = ef1, .nh = nh1, .cx = cx, .ncx = ncx, .res = res1};
+        atomic_init(&hj->next, 0);
+        atomic_init(&hj->err, 0);
+        par_run(c->pool, hyp_worker, hj);
+        err = atomic_load(&hj->err);
+        for (int w = 0; w < PAR_MAX_THREADS; w++)
+            for (int s = ST_NN; s < N_ST; s++) st[s] += hj->st[w][s];
+    }
     t3 = tnow();
+
+    /* Assemble evaluated hypotheses in exact serial (candidate, q) order and merge */
+    sync_hyp **hp = malloc(sizeof(sync_hyp *) * (size_t)(nh0 + nh1 + 1));
+    hyp_res *res = malloc(sizeof(hyp_res) * (size_t)(nh0 + nh1 + 1));
+    int *owner = malloc(sizeof(int) * (size_t)(nh0 + nh1 + 1));
+    int *h_ti = malloc(sizeof(int) * (size_t)(nh0 + nh1 + 1));
+    uint8_t *h_q = malloc((size_t)(nh0 + nh1 + 1));
+    uint8_t *early = malloc((size_t)(nh0 + nh1 + 1));
+    if (!err) {
+        for (int i = 0; i < ns; i++) {
+            int idx0 = r0_of[i];
+            if (idx0 < 0) continue;
+            int ti = tried_idx(&cands[sel[i]]);
+            uint8_t ef = (uint8_t)(cands[sel[i]].early != 0);
+            hp[nh] = hyps + (size_t)i * N_HYP;
+            res[nh] = res0[idx0];
+            owner[nh] = i;
+            h_ti[nh] = ti;
+            h_q[nh] = 0;
+            early[nh++] = ef;
+            for (int q = 1; q < nk[i]; q++) {
+                int idx1 = r1_of[i * N_HYP + q];
+                if (idx1 < 0) continue;
+                hp[nh] = hyps + (size_t)i * N_HYP + q;
+                res[nh] = res1[idx1];
+                owner[nh] = i;
+                h_ti[nh] = ti;
+                h_q[nh] = (uint8_t)q;
+                early[nh++] = ef;
+            }
+        }
+    }
+    uint8_t *done_cand = calloc((size_t)ns + 1, 1);
+    hj->res = res;
+    merger m = {.c = c, .j = hj, .hp = hp, .owner = owner, .h_ti = h_ti, .h_q = h_q, .early = early,
+                .done_cand = done_cand, .all = all, .nall = nall, .cap = cap, .pass = pass, .cb = cb, .user = user,
+                .batch = batch, .fmap_p = fmap_p, .nfmap_p = nfmap_p, .cfmap_p = cfmap_p};
     if (!err) merge_to(&m, nh);
     added = m.added;
     n_bp = m.n_bp;
     n_osd = m.n_osd;
     s_bp = m.s_bp;
     s_osd = m.s_osd;
+    free(hp0);
+    free(cs0);
+    free(ef0);
+    free(r0_of);
+    free(res0);
+    free(hp1);
+    free(cs1);
+    free(ef1);
+    free(r1_of);
+    free(res1);
     free(hj);
-    free(cdone);
     free(done_cand);
     free(res);
+    free(hp);
+    free(owner);
+    free(h_ti);
+    free(h_q);
+    free(early);
     if (err) {
         added = -1;
         goto done;
@@ -1022,15 +1132,10 @@ done:
                 " (sync %.2f nn %.2f classical %.2f bp/osd %.2f) | bp %ld osd %ld (+%ld/%ld speculative) -> %d\n",
                 pass, nc, nskip, nh, t1 - t0, t2 - t1, t3 - t2, tnow() - t3, tnow() - t0, tcpu() - c0, st[ST_SYNC],
                 st[ST_NN], st[ST_CL], st[ST_DEC], n_bp, n_osd, s_bp - n_bp, s_osd - n_osd, added);
-    free(cands); /* candidate flags (early) are read in the decode loop */
+    free(cands);
     free(sel);
     free(hyps);
     free(nk);
-    free(hp);
-    free(owner);
-    free(h_ti);
-    free(h_q);
-    free(early);
     return added;
 }
 
