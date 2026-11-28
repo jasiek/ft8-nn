@@ -387,7 +387,7 @@ def _repeat_stage(x, llr_fn, found, context, n_hyp, rho_min, margin, clip, log=N
             hs = fe.fine_sync2(bb, _Loc(fc, dc), n_hyp=n_hyp)
             if not hs:
                 continue
-            for h, llrs in zip(hs, llr_fn(hs)):
+            for h, llrs in zip(hs, _nn_only(llr_fn)(hs)):
                 l = np.clip(llrs[0], -clip, clip)
                 rho = S @ l / (np.abs(l).sum() + 1e-9)
                 order = np.argsort(-rho, kind="stable")  # ties: lowest index, as the C port
@@ -486,7 +486,9 @@ def _cochannel_stage(x, llr_fn, found, near, far, span, tnear, tfar, min_score, 
             L[nb] = np.stack([l[0] for l in nn([hyps[i] for i in nb])])
             exp_err[nb] = (1.0 / (1.0 + np.exp(np.abs(L[nb])))).sum(1)
         bits, ok, nh = (np.zeros((len(hyps), 174), np.uint8), np.zeros(len(hyps), bool), np.zeros(len(hyps), int))
-        bits[run], ok[run], nh[run] = ldpc.bp_decode(L[run])
+        act_cc = run & (exp_err < 86.9)
+        if act_cc.any():
+            bits[act_cc], ok[act_cc], nh[act_cc] = ldpc.bp_decode(L[act_cc])
         done = set()
         for i, (h, g) in enumerate(zip(hyps, group)):
             if g in done or not run[i]:
@@ -750,8 +752,13 @@ def _eval_nn_batch(hyps, cscores, early_flags, nn_fn, also_cl, osd_order, osd_ma
     """Evaluate a batch of SyncHyp with SoftDemod + gated classical fallback, matching C's hyp_worker + decode_hyp.
     Returns list of (status, a91, info, k, exp_err_used, ee0, l0) per hypothesis (status: 0 fail, 1 ok, 2 all-zero)."""
     L = np.stack([l[0] for l in nn_fn(hyps)])
-    bp_bits, bp_ok, bp_nhard = ldpc.bp_decode(L)
     exp_err = (1.0 / (1.0 + np.exp(np.abs(L)))).sum(1)
+    act = exp_err < 86.9
+    bp_bits = np.zeros((len(L), 174), dtype=np.uint8)
+    bp_ok = np.zeros(len(L), dtype=bool)
+    bp_nhard = np.zeros(len(L), dtype=int)
+    if act.any():
+        bp_bits[act], bp_ok[act], bp_nhard[act] = ldpc.bp_decode(L[act])
     out = []
     for i, h in enumerate(hyps):
         l0 = L[i]
@@ -834,10 +841,11 @@ def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd
         if not r0_slots:
             return []
         also_cl = getattr(llr_fn, "also_classical", False)
+        nn_pass = getattr(llr_fn, "nn_pass", llr_fn.nn)
         hyps0 = [cand_hyps[s][2][0] for s in r0_slots]
         cs0 = [cands[cand_hyps[s][0]].score for s in r0_slots]
         ef0 = [cands[cand_hyps[s][0]].early for s in r0_slots]
-        res0 = _eval_nn_batch(hyps0, cs0, ef0, llr_fn.nn, also_cl, osd_order, osd_max_hard, osd_gate, osd_metrics,
+        res0 = _eval_nn_batch(hyps0, cs0, ef0, nn_pass, also_cl, osd_order, osd_max_hard, osd_gate, osd_metrics,
                               ap, ap_gate, erase_gate, erase_bp_gate, erase_osd_dmax, osd_snaps, context, ctx_gate)
         r0_map = {s: res0[idx] for idx, s in enumerate(r0_slots)}
         r1_keys, hyps1, cs1, ef1 = [], [], [], []
@@ -860,7 +868,7 @@ def _decode_pass(x, llr_fn, max_cand, n_hyp, osd_order, osd_max_hard, known, osd
                     ef1.append(cands[ci].early)
         r1_map = {}
         if hyps1:
-            res1 = _eval_nn_batch(hyps1, cs1, ef1, llr_fn.nn, also_cl, osd_order, osd_max_hard, osd_gate, osd_metrics,
+            res1 = _eval_nn_batch(hyps1, cs1, ef1, nn_pass, also_cl, osd_order, osd_max_hard, osd_gate, osd_metrics,
                                   ap, ap_gate, erase_gate, erase_bp_gate, erase_osd_dmax, osd_snaps, context, ctx_gate)
             r1_map = {k: res1[idx] for idx, k in enumerate(r1_keys)}
         found = {}

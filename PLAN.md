@@ -85,9 +85,9 @@ We organize the options into **three tiers**:
 | [x] | **2C** | Evaluated narrowing `post_pass` (`42 Hz`) & `reuse_df` (`50 Hz`) + passband `max_cand`; kept `62.5 Hz` for 0 cascade loss | **Measured: −4.1% inc. at `50/42 Hz`, reverted to `62.5 Hz` (`0%` loss; stopband already `0` cands)** | **0** (`62.5 Hz` avoids `cx`/`rp` cascade losses at `50–62 Hz`) | Audited on Run 1 (`check_sb.c`, `task-559`) | Small–Med |
 | [x] | **2D** | Live `--early` / `--final` budget verification (`wsjtx` live mode) | **Measured: −25.1% on 11.8s `early` pass (`2.18->1.64s`), −24.8% total live (`4.91->3.70s`)** | **0** (`329/329` kept; `0.94s` headroom below WSJT-X `2.60s` deadline on M1) | `c/src/decode.c`, `wsjtx/` | Small |
 | [x] | **2E** | Compact check-edge tables + branchless SIMD `double` `tanh`/`atanh` in `bp_decode` | **Measured: −2.8% inc. 1T (`bp/osd` `−79.6%` vs base: `9.07->1.85s`; **`−26.9%` cum. 1T, `−24.9%` cum. 4T**) | **0** (`<5e-12` error vs `libm`; `4/4` `golden_c.py` `100%` equal) | `c/src/ldpc.c` | Small |
-| [ ] | **3A** | Pure-C `SoftDemod` forward pass in `c/` using macOS `Accelerate` `cblas_sgemm` (AMX) + ORT fallback | **Est. −50% to −55%** (`13.9s -> ~6.3s` on M1; RSS `540 -> ~80 MB`) | **0** (same FP32 `models/v4` weights) | `c/src/` (~250 LOC; needs user OK on ORT policy) | Medium |
-| [ ] | **3B** | Two-stage ONNX cascade: tiny `d=64, L=1` screener (`0.11 ms/hyp`) gates full `models/v4` (`exp_err < 66`) | **Est. −40% to −48%** on **all OSes/CPUs** | Tuned on run 1 (`<0.1%` miss) | `ft8nn/model.py`, `train.py`, `c/src/decode.c` | Med–Large |
-| [ ] | **3C** | Retrain slimmer single `SoftDemod` (`d=96, L=3, ff=288`) with `v4` calibrated recipe | **Est. −32% to −38%** on **all OSes/CPUs** | `~0.05–0.10 dB` synthetic QRM risk; re-check gates | `ft8nn/model.py`, `train.py`, `models/` | Med–Large |
+| [x] | **3A** | Pure-C `SoftDemod` forward pass in `c/` using macOS `Accelerate` `cblas_sgemm` (AMX) + NEON + ORT fallback | **Measured: −61.2% inc. 1T / −50.6% inc. 4T (`−71.6%` cum. 1T, `−62.9%` cum. 4T, `−63.3%` live `early`; 4T RSS `572 -> 155 MiB`)** | **0** (`100%` equal to `nn_v4_cpu` on all 5 `golden_c.py` suites; `<6.7e-6` diff vs ORT) | `c/src/nn_accel.c`, `c/src/decode.c`, `c/Makefile`, `wsjtx/Makefile` | Medium |
+| [x] | **3B** | Two-stage ONNX cascade elsewhere (Linux/Win): `230 KB` `Screener(d=48, L=1)` (`0.18 ms/hyp`) gates pass `v4` (`ee < 69.0`) | **Measured: −43.9% inc. 1T / −44.0% inc. 4T (`−59.0%` cum. 1T, `−58.0%` cum. 4T, `−71.5%` live `early`; 4T RSS `572 -> 287 MiB`)** | **99.99%** Run 2 (`31,287` vs `31,290`, `2` unconf), **99.97%** Run 1 (`37,352` vs `37,363`) | `ft8nn/{model,nn_metric,decoder}.py`, `tools/{export_onnx,train_screener}.py`, `models/v4/screener.*`, `c/src/decode.c` | Med–Large |
+| [-] | **3C** | Retrain slimmer single `SoftDemod` (`d=96, L=3, ff=288`) with `v4` recipe *(superseded by `3A` on Mac + `3B` elsewhere)* | Est. −32% to −38% (slower & higher risk than `3A` + `3B`) | Skipped in favor of `3A + 3B` | — | Med–Large |
 
 ---
 
@@ -217,7 +217,15 @@ Even after Tiers 1 + 2 reduce hypothesis count and non-NN overhead, `SoftDemod` 
   - **Zero third-party C dependencies** (`Accelerate` is part of macOS `libSystem`/SDK, just like `-lm` and `-lpthread`).
   - **Exact same `models/v4` weights and FP32 math** (`0` retraining, `0` accuracy loss, verified against ORT/PyTorch to `<1e-5`).
   - Cuts M1 NN time per hypothesis from `2.00 ms` to **`~0.35–0.45 ms`** (**~5× faster NN**), dropping M1 1-thread busy-slot time from **`13.9 s -> ~6.2 s` (`−55%` alone, or `~3.8 s` combined with Tiers 1–2!)** and cutting peak RSS from **`~540 MB -> ~80 MB`**.
-- **Constraint check:** `CLAUDE.md` currently notes *"Keep ONNX Runtime for the NN"*. This option requires explicit user approval to either use `Accelerate` as a fast macOS path alongside ORT (keeping ORT for Linux/Windows CI and verification) or stay strictly inside ORT (Options 3B / 3C).
+- **Constraint check:** Approved: **Option 3A on macOS, Option 3B elsewhere (Linux/Windows)** (`FT8NN_BACKEND=ort` overrides macOS to run the 3B ORT path).
+- **Measured result (DONE, 8-core Apple M1, 6 busy `01_40m` slots, idle, 0 sleep events):**
+  - Implemented `c/src/nn_accel.c` (`cblas_sgemm` AMX + 4-wide ARM NEON `gelu`/`layernorm`/`softmax`, zero heap allocations per inference, parsing weights directly from `ft8nn.onnx` with automatic ORT fallback for non-`SoftDemod` graphs) plus reusable `c->hyps_buf` and `NN_BATCH = 32`.
+  - Standalone `4,800`-hypothesis (`150 × B=32`) benchmark on 1 M1 P-core: `8.795 s -> 2.148 s` (`1.832 -> 0.448 ms/hyp`, **4.09× faster** than ORT 1.31.1; `max |accel - ort| = 6.68e-6`, 100% sign agreement).
+  - End-to-end 6-slot busy `01_40m` wall time & RSS:
+    - `--threads 1`: `60.89 -> 23.63 s` (`10.148 -> 3.939 s/slot` mean, `4.182 s` max = **−61.2% inc. / −71.6% cum. vs `HEAD`**).
+    - `--threads 0` (4 P-cores): `19.60 -> 9.69 s` (`3.267 -> 1.614 s/slot` mean, `1.721 s` max = **−50.6% inc. / −62.9% cum. vs `HEAD`**), **4T peak RSS `572 -> 155 MiB` (−72.8%)**.
+    - `--threads 0 --early 141696`: `22.18 -> 11.07 s` (`3.697 -> 1.846 s/slot` = **−62.4% cum.**), 11.8 s early pass **`1.635 -> 0.802 s` mean, `0.835 s` max (−63.3% cum., `1.77 s` inside WSJT-X's `2.60 s` budget)**.
+  - Validation: **100% field-identical** to `nn_v4_cpu` across all 5 `golden_c.py` suites (`00_40m` `870/870`, `08_80m` `636/636`, `run2/02_80m` `776/776`, `run2/00_40m --stream` `988/988`, `awgn` `428/428` with `MallocScribble=1`), `ci_smoke.py` `52/52` & `51/51` (`--model random`), and `wsjtx/test_sidecar.sh` all 8 checks PASS.
 
 #### Option 3B: Two-Stage ONNX Cascade — Tiny Screener Net Before Full `models/v4` (100% ONNX Runtime, All Platforms)
 - **Why it works everywhere:** Across a busy slot's `~4,780` NN hypotheses, **~82–88% are pure noise or sidelobes (`exp_err >= 66`)** that never decode in BP, OSD (`<40`), CQ AP (`<44`), refine (`<45`), context AP (`<48`), co-channel (`<66`), or Chase (`<68`). Running a `143M`-FLOP 4-layer Transformer just to learn `exp_err = 78` wastes >80% of NN compute.
@@ -226,6 +234,19 @@ Even after Tiers 1 + 2 reduce hypothesis count and non-NN overhead, `SoftDemod` 
   2. Run the screener on every hypothesis batch; run full `models/v4` `SoftDemod` **only** on the `~15–18%` of hypotheses with `screener_exp_err < 66` (or if the screener's own LLRs already pass `bp_decode` + `crc_ok`!).
   3. Effective NN cost drops to `0.11 + 0.17 × 2.00 = 0.45 ms/hyp` (**~4.4× faster NN** on macOS, Linux x64/arm64, and Windows x64, using unmodified ONNX Runtime).
 - **Trade-off:** Needs training the small screener (~15 min on MPS), shipping/loading a second small `.onnx` (~250 KB) or combined model, and tuning the screener gate on validation run 1 so `<0.1%` of decodable signals are missed.
+- **Measured result (DONE, tag `nn_v4_scr`, active by default on Linux/Windows ORT and via `FT8NN_BACKEND=ort` / `FT8NN_SCREENER=1`):**
+  - Run-1 ablation showed a 1-layer bit-LLR BCE student conflates bit ambiguity under QRM (`logit -> 0`, `exp_err ~ 75`) with pure noise, so we built `model.Screener(d=48, layers=1, ff=144)` (`53k` params, `230 KB` `models/v4/screener.onnx`, `0.183 ms/hyp` in ORT = **10× faster** than `v4`) trained via `tools/train_screener.py` on training-recording multi-pass + `v4_cfg` hypotheses with an asymmetric Huber + gate BCE loss to predict `v4`'s `exp_err` directly, gating main-pass hypotheses at `SCREEN_EE_GATE = 69.0` while leaving targeted post-stages (`cochannel`, `refine`, `repeat`) unscreened.
+  - End-to-end 6-slot busy `01_40m` wall time & RSS in pure ORT (`FT8NN_BACKEND=ort` on 8-core M1):
+    - `--threads 1`: `60.89 -> 34.15 s` (`10.148 -> 5.691 s/slot` = **−43.9% inc. / −59.0% cum. vs `HEAD`**), **1T RSS `246 -> 187 MiB`**.
+    - `--threads 0` (4 P-cores): `19.60 -> 10.97 s` (`3.267 -> 1.828 s/slot` = **−44.0% inc. / −58.0% cum. vs `HEAD`**), **4T RSS `572 -> 287 MiB` (−49.8%)**.
+    - `--threads 0 --early 141696`: `22.18 -> 10.95 s` (`3.697 -> 1.825 s/slot` = **−62.9% cum.**), 11.8 s early pass **`1.635 -> 0.622 s` mean, `0.689 s` max (−71.5% cum.)**.
+  - Full `ab_run2.sh` + `validate_full.sh nn_v4_scr` passed (`0` sleep events):
+    - Noise (100 slots / 998): **`0` false** (`0.0%`).
+    - Unseen validation run 2: **`31,287 / 22,870 / 2`** (**99.99%** of `nn_v4_cpu`'s `31,290 / 22,873 / 2`, identical 2 unconf lines).
+    - Validation run 1: **`37,352 / 28,465 / 1`** (**99.97%** of `nn_v4_cpu`'s `37,363 / 28,471 / 1`, identical unconf line).
+    - Training recordings: **`19,881`** (`jt9`-only `116`, `ours / jt9 = 1.264`, `96%` corroborated; vs `19,882`).
+    - AWGN: **50% `−22.55 dB` / 90% `−21.29 dB`** (`0` false, identical at every SNR point from `−25` to `−16 dB`).
+    - Golden `C == Python` (`MallocScribble=1`, ORT 3B): `00_40m` `870/870`, `08_80m` `636/636`, `run2/02_80m` `776/776`, `run2/00_40m --stream` `987/987`, `awgn` `428/428` — all **PASS**.
 
 #### Option 3C: Slimmer Single `SoftDemod` Student (`d=96, L=3, ff=288`) Trained With the `v4` Recipe (100% ONNX Runtime, Single File)
 - **What it looks like:** Keep a single `.onnx` file and zero decoder changes, replacing `SoftDemod(d=128, L=4, ff=384)` (`143M` FLOPs) with `SoftDemod(d=96, L=3, ff=288)` + Option 1A's Layer-3 token pruning (`~50M` FLOPs = **2.85× fewer FLOPs**, `~0.72 ms/hyp` on M1, `~0.32 ms/hyp` on M4), trained with `models/v4`'s calibrated multipath + negative-row recipe.
@@ -258,11 +279,11 @@ Depending on how aggressively we want to cut CPU and whether platform-native `Ac
   - AWGN: **50% `−22.55 dB` / 90% `−21.29 dB`** (`0` false, 100% identical to `nn_v4_cal`).
   - Golden `C == Python` (`MallocScribble=1`): `00_40m` `870/870`, `08_80m` `636/636`, `run2/02_80m` `776/776`, `run2/00_40m --stream` `988/988`, `awgn` `428/428` — all **PASS** (`100%` all fields equal); `ci_smoke.py` `52/52` (`models/v4`) & `51/51` (`--model random`) **PASS**; `wsjtx/test_sidecar.sh` all 8 checks **PASS**; `pytest` `103 passed, 16 skipped`.
 
-### Phase 3 — Neural Inference Engine Leap (Choose One of 3A, 3B, or 3C)
-- **If macOS (M1 / M4) live & bench CPU + memory is the main pain point $\to$ Option 3A (`Accelerate` AMX C backend + ORT fallback):**
-  - Combined with Phases 1–2, brings M1 1-thread busy-slot CPU from **`13.89 s` down to `~3.2–3.8 s` (`−73%` to `−77%` CPU!)**, 4-core wall time to **`~1.0 s`**, and RSS from `540 MB` to `~80 MB`, with **zero model retraining or sensitivity risk**.
-- **If Linux/Windows x64/arm64 CPU must drop equally without custom BLAS $\to$ Option 3B (Tiny ONNX Screener Cascade):**
-  - Combined with Phases 1–2, brings 1-thread CPU down **`~65–70%` across all operating systems** while keeping ONNX Runtime everywhere.
+### Phase 3 — Neural Inference Engine Leap (`3A` on macOS, `3B` on Linux/Windows) — **DONE 2026-11-27 (tag `nn_v4_scr` for 3B)**
+- **macOS default (`Option 3A`: `c/src/nn_accel.c` `Accelerate` AMX + NEON, exact `models/v4` weights):**
+  - 6 busy `01_40m` slots on 8-core Apple M1: **`3.939 s/slot` at 1T (−71.6% cum.)**, **`1.614 s/slot` at 4T (−62.9% cum., 4T RSS `572 -> 155 MiB`, −72.8%)**, and **`0.802 s` mean (`0.835 s` max, −63.3% cum.)** on the 11.8 s live `--early` pass, with **zero decode changes** (`5/5` `golden_c.py` suites `100%` equal to `nn_v4_cpu`).
+- **Linux / Windows default (`Option 3B`: `230 KB` `models/v4/screener.onnx` -> `ft8nn.onnx` in ONNX Runtime, testable on macOS via `FT8NN_BACKEND=ort` + `FT8NN_SCREENER=1`):**
+  - 6 busy `01_40m` slots in ORT on 8-core Apple M1: **`5.691 s/slot` at 1T (−59.0% cum., 1T RSS `187 MiB`)**, **`1.828 s/slot` at 4T (−58.0% cum., 4T RSS `572 -> 287 MiB`, −49.8%)**, and **`0.622 s` mean (`0.689 s` max, −71.5% cum.)** on the 11.8 s live `--early` pass, retaining **99.99%** on unseen Run 2 (`31,287` vs `31,290`, `2` unconf, `0` noise false) and **100% `C == Python`** across all 5 `golden_c.py` suites.
 
 ---
 

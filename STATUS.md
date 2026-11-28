@@ -1,5 +1,32 @@
 # Status and plan (resume here)
 
+## Neural inference acceleration (`PLAN.md` Tier 3: 3A on Mac, 3B elsewhere) — done 2026-11-27 (tag `nn_v4_scr` for 3B)
+
+Addressed the ~83% post-Tier-2 `SoftDemod` CPU share on both macOS (Option 3A) and Linux/Windows ONNX Runtime (Option 3B), plus capped `NN_BATCH = 32` and reused `c->hyps_buf` across passes to eliminate multi-pass `50–95 MB` VM churn:
+- **3A — Native macOS `Accelerate` (`cblas_sgemm` AMX) + ARM NEON backend (`c/src/nn_accel.c`, `c/{Makefile,src/decode.c}`, `wsjtx/Makefile`):**
+  parses float32 initializers directly from `ft8nn.onnx` (falling back to ONNX Runtime automatically for non-`SoftDemod` graphs or `FT8NN_BACKEND=ort`), runs `SoftDemod` in thread-local scratch with `VECLIB_MAXIMUM_THREADS=1`, and skips opening an `OrtSession` on macOS (`1.832 -> 0.448 ms/hyp` = **4.09× faster** NN on M1, `max |accel - ort| = 6.68e-6`, 100% sign agreement, **zero decode changes** vs `nn_v4_cpu`).
+- **3B — Direct-`exp_err` ONNX pre-screener cascade on Linux/Windows (`ft8nn/{model,nn_metric,decoder}.py`, `tools/{train_screener,export_onnx}.py`, `models/v4/screener.{pt,onnx}`, `c/src/decode.c`):**
+  Run-1 probing showed a 1-layer bit-LLR student inflates `exp_err` to `~75` under QRM when individual Gray-coded bits are ambiguous, so we trained `model.Screener(d=48, layers=1, ff=144)` (`53k` params, `230 KB` `screener.onnx`, `0.183 ms/hyp` in ORT = **10× faster** than `v4`) on training-recording multi-pass + `v4_cfg` + truncated early-pass hypotheses (`data/noise/train_bank_v4.npy`) with an asymmetric Huber + binary gate loss to predict `v4`'s `exp_err` directly. Main candidate-search passes gate full `v4` at `SCREEN_EE_GATE = 69.0`, while targeted post-stages (`cochannel`, `refine`, `repeat`) always run unscreened `v4` (`repeat` correlates whole codewords at `-26 dB` where `v4` `exp_err` is `~75`). Active by default on non-macOS (`FT8NN_BACKEND=ort` in C and `FT8NN_SCREENER=1` in Python test it on macOS; `tools/export_onnx.py` auto-exports sibling `screener.onnx` for Linux/Windows CI).
+Cumulative Tier 1 + 2 + 3 timing & RSS on 6 busy `01_40m` slots (8-core Apple M1, idle, `caffeinate -dims`, 0 sleep events, vs `HEAD` `83.31 s` 1T / `26.09 s` 4T / `29.48 s` live `--early` / `572 MiB` 4T RSS):
+- **macOS default (Option 3A `Accelerate` AMX):**
+  - `--threads 1`: `83.31 -> 23.63 s` (`13.884 -> 3.939 s/slot`, max `14.508 -> 4.182 s`, **−71.6%**), `325/325` byte-identical;
+  - `--threads 0` (4 P-cores): `26.09 -> 9.69 s` (`4.349 -> 1.614 s/slot`, max `4.570 -> 1.721 s`, **−62.9%**), **4T peak RSS `572 -> 155 MiB` (−72.8%)**, `325/325` byte-identical;
+  - `--threads 0 --early 141696`: `29.48 -> 11.07 s` (`4.913 -> 1.846 s/slot`, **−62.4%**; 11.8 s early pass `2.184 -> 0.802 s`, max `0.835 s`, **−63.3%**, `1.77 s` inside WSJT-X's `2.60 s` budget), `329/329` byte-identical.
+- **Cross-platform ORT mode (Option 3B `screener.onnx` -> `ft8nn.onnx`, `FT8NN_BACKEND=ort` on 8-core M1):**
+  - `--threads 1`: `83.31 -> 34.15 s` (`13.884 -> 5.691 s/slot`, **−59.0%**), **1T peak RSS `246 -> 187 MiB`**, `325/325` decodes;
+  - `--threads 0` (4 P-cores): `26.09 -> 10.97 s` (`4.349 -> 1.828 s/slot`, **−58.0%**), **4T peak RSS `572 -> 287 MiB` (−49.8%)**, `325/325` decodes;
+  - `--threads 0 --early 141696`: `29.48 -> 10.95 s` (`4.913 -> 1.825 s/slot`, **−62.9%**; 11.8 s early pass `2.184 -> 0.622 s`, max `0.689 s`, **−71.5%**), `329/329` decodes.
+Validation (8-core M1, idle, `caffeinate -dims`, 0 sleep events):
+- **3A (macOS default, vs `nn_v4_cpu`):** golden C == Python (`MallocScribble=1`, `--threads 4`) `00_40m` 870/870, `08_80m` 636/636, `run2/02_80m` 776/776, `run2/00_40m --stream` 988/988, AWGN 428/428 — all PASS; `tools/ci_smoke.py` 52/52 (`models/v4`) & 51/51 (`--model random`) PASS; `wsjtx/test_sidecar.sh` all 8 checks PASS; `pytest` 103 passed, 16 skipped.
+- **3B (`FT8NN_SCREENER=1 FT8NN_BACKEND=ort`, tag `nn_v4_scr` vs `nn_v4_cpu`):**
+  - noise (100 slots / 998): **0 false**;
+  - validation run 2 (unseen, 1,077 slots): **`31,287 / 22,870 / 2`** vs `31,290 / 22,873 / 2` (**99.99%**, same 2 unconf lines `K1BMW UA0LAQ -17` + `SP6FME DO4HCR MF82`, `100.0%` confirmed);
+  - validation run 1 (1,076 slots): **`37,352 / 28,465 / 1`** vs `37,363 / 28,471 / 1` (**99.97%**, same `CQ 7K7EGU/R GJ33`);
+  - training recordings: **`19,881`** (jt9-only `116`, `ours / jt9 = 1.264`, `96%` corroborated) vs `19,882`;
+  - AWGN: 50% **−22.55 dB** / 90% **−21.29 dB** (`0` false, identical at every SNR point);
+  - golden C == Python (`MallocScribble=1`, `--threads 4`): `00_40m` 870/870, `08_80m` 636/636, `run2/02_80m` 776/776, `run2/00_40m --stream` 987/987, AWGN 428/428 — all PASS; `ci_smoke.py` 52/52 PASS.
+Next: CPU efficiency roadmap (`PLAN.md` Tiers 1, 2, and 3) complete.
+
 ## Pipeline & LDPC CPU pruning (`PLAN.md` Tier 2: 2A–2E) — done 2026-11-27 (tag `nn_v4_cpu`)
 
 Ran a 225-slot empirical probe across all 9 stations of validation run 1 (`7,650` decodes, `664,099` hypotheses on the

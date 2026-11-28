@@ -13,8 +13,10 @@ and past decisions are there too. `README.md` covers setup; `docs/data-collectio
   OSD, a-priori/AP, slot-confirmed / unconfirmed). Tags like `nn_v2_rs` are labels, never the explanation.
 - **Whenever a run starts, say how long it will take and the clock time it should finish**, from the last comparable
   run (file times in `data/logs/<tag>/`); say when the estimate is shaky.
-- Don't build or compile third-party C without asking. Keep ONNX Runtime for the NN (the official build from
-  `tools/get_onnxruntime.sh`; Homebrew's is 2.3x slower). The FFT and everything else in `c/` is our own code.
+- Don't build or compile third-party C without asking. On macOS `c/src/nn_accel.c` runs `SoftDemod` via Apple
+  `-framework Accelerate` (`cblas_sgemm` AMX) with ONNX Runtime fallback; elsewhere (Linux/Windows, or
+  `FT8NN_BACKEND=ort` on macOS) keep ONNX Runtime (the official build from `tools/get_onnxruntime.sh`; Homebrew's is
+  2.3x slower) paired with `models/v4/screener.onnx`. The FFT and everything else in `c/` is our own code.
 
 ## Data and evaluation rules
 

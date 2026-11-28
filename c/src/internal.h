@@ -2,6 +2,7 @@
  * in ft8nn/ (frontend.py, ldpc.py, ft8.py, subtract.py, message.py, decoder.py). */
 #pragma once
 #include <complex.h>
+#include <stddef.h>
 #include <stdint.h>
 
 typedef double complex cplx;
@@ -137,3 +138,11 @@ void ht_free(hash_table *h);
 void ht_clear(hash_table *h);
 void unpack77(const uint8_t *bits77, hash_table *ht, char *out, int outlen);
 int plausible77(const uint8_t *bits77, int deep); /* message.plausible */
+
+/* ---- nn_accel.c: native SoftDemod inference via Apple Accelerate BLAS/AMX on macOS */
+#define NN_ACCEL_MAXB 32
+typedef struct nn_accel nn_accel;
+nn_accel *nn_accel_open(const char *onnx_path);
+void nn_accel_close(nn_accel *m);
+size_t nn_accel_scratch_floats(const nn_accel *m);
+void nn_accel_run(const nn_accel *m, const float *feat, int b, double *llr, float *scratch);

@@ -152,7 +152,8 @@ static int prof = -1;
 #define Q1_EE0_GATE 72.0
 #define Q1_ALT_SCORE 1.70
 #define Q1_ALT_RAT 0.70
-#define NN_BATCH 128
+#define SCREEN_EE_GATE 69.0
+#define NN_BATCH 32
 #define BASE_MEDIAN 1 /* candidate score baseline: 1 = 1.77 * median of all cells (A/B 2026-11-04: real +281), 0 = old pct40 of per-freq max */
 /* candidate search range (f0, Hz; frontend.FMIN_DEFAULT / FMAX_DEFAULT, F_LO / F_HI): 150..4000 unless
  * ft8nn_set_range gives WSJT-X's [nfa, nfb], which is clamped to F_LO..F_HI as jt9 clamps it */
@@ -191,12 +192,16 @@ typedef struct {
 } dec;
 
 struct ft8nn_ctx {
+    nn_accel *accel; /* macOS Accelerate/AMX SoftDemod backend; NULL when using ONNX Runtime */
     const OrtApi *api;
     OrtEnv *env;
     OrtSession *sess;
+    OrtSession *scr_sess; /* optional lightweight screener session on ORT platforms (Option 3B) */
     OrtMemoryInfo *mem;
     par *pool; /* decode threads (ft8nn_open n_threads) */
     hash_table *ht;
+    sync_hyp *hyps_buf; /* reusable hypothesis waveform buffer across passes (avoids >50 MB vm_allocate churn) */
+    size_t hyps_cap;
     struct {
         int64_t t; /* slot start, s; INT64_MIN = empty */
         int n;
@@ -212,6 +217,10 @@ struct ft8nn_ctx {
 
 static once_t init_once = ONCE_INIT;
 static void global_init(void) {
+#ifdef __APPLE__
+    /* One thread per Accelerate BLAS call: our worker pool runs batches concurrently across cores. */
+    setenv("VECLIB_MAXIMUM_THREADS", "1", 0);
+#endif
     ft8_init();
     ldpc_init();
     frontend_init();
@@ -232,39 +241,69 @@ ft8nn_ctx *ft8nn_open(const char *onnx_path, int n_threads) {
     c->fmax = FMAX_DEFAULT;
     c->snr_nfa = BASE_NFA;
     c->snr_nfb = BASE_NFB;
-    c->api = OrtGetApiBase()->GetApi(ORT_API_VERSION);
-    const OrtApi *api = c->api;
-    OrtSessionOptions *so = NULL;
+    const char *be = getenv("FT8NN_BACKEND");
+    if (!be || strcmp(be, "ort") != 0) c->accel = nn_accel_open(onnx_path);
+    if (!c->accel) {
+        c->api = OrtGetApiBase()->GetApi(ORT_API_VERSION);
+        const OrtApi *api = c->api;
+        OrtSessionOptions *so = NULL;
 #ifdef _WIN32 /* ONNX Runtime takes wide-character paths on Windows */
-    wchar_t model[4096];
-    if (!MultiByteToWideChar(CP_UTF8, 0, onnx_path, -1, model, 4096)) {
-        free(c);
-        return NULL;
-    }
+        wchar_t model[4096];
+        if (!MultiByteToWideChar(CP_UTF8, 0, onnx_path, -1, model, 4096)) {
+            free(c);
+            return NULL;
+        }
 #else
-    const char *model = onnx_path;
+        const char *model = onnx_path;
 #endif
-    /* ONNX Runtime 1.31 sends usage telemetry (device ID, hardware, OS, program name, errors) to Microsoft unless
-       ORT_DISABLE_TELEMETRY is set; it reads the variable when the environment is created. A user's own setting
-       wins. DisableTelemetryEvents covers builds that ignore the variable (on Windows, ETW tracing). */
+        /* ONNX Runtime 1.31 sends usage telemetry (device ID, hardware, OS, program name, errors) to Microsoft unless
+           ORT_DISABLE_TELEMETRY is set; it reads the variable when the environment is created. A user's own setting
+           wins. DisableTelemetryEvents covers builds that ignore the variable (on Windows, ETW tracing). */
 #ifdef _WIN32
-    if (!getenv("ORT_DISABLE_TELEMETRY")) _putenv_s("ORT_DISABLE_TELEMETRY", "1");
+        if (!getenv("ORT_DISABLE_TELEMETRY")) _putenv_s("ORT_DISABLE_TELEMETRY", "1");
 #else
-    setenv("ORT_DISABLE_TELEMETRY", "1", 0);
+        setenv("ORT_DISABLE_TELEMETRY", "1", 0);
 #endif
-    if (ort_check(api, api->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "ft8nn", &c->env)) ||
-        ort_check(api, api->DisableTelemetryEvents(c->env)) ||
-        ort_check(api, api->CreateSessionOptions(&so)) ||
-        /* one ONNX Runtime thread per Run: our own threads call Run concurrently on chunks of hypotheses */
-        ort_check(api, api->SetIntraOpNumThreads(so, 1)) || ort_check(api, api->SetInterOpNumThreads(so, 1)) ||
-        ort_check(api, api->SetSessionGraphOptimizationLevel(so, ORT_ENABLE_ALL)) ||
-        ort_check(api, api->CreateSession(c->env, model, so, &c->sess)) ||
-        ort_check(api, api->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &c->mem))) {
-        if (so) api->ReleaseSessionOptions(so);
-        ft8nn_close(c);
-        return NULL;
+        if (ort_check(api, api->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "ft8nn", &c->env)) ||
+            ort_check(api, api->DisableTelemetryEvents(c->env)) ||
+            ort_check(api, api->CreateSessionOptions(&so)) ||
+            /* one ONNX Runtime thread per Run: our own threads call Run concurrently on chunks of hypotheses */
+            ort_check(api, api->SetIntraOpNumThreads(so, 1)) || ort_check(api, api->SetInterOpNumThreads(so, 1)) ||
+            ort_check(api, api->SetSessionGraphOptimizationLevel(so, ORT_ENABLE_ALL)) ||
+            ort_check(api, api->CreateSession(c->env, model, so, &c->sess)) ||
+            ort_check(api, api->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &c->mem))) {
+            if (so) api->ReleaseSessionOptions(so);
+            ft8nn_close(c);
+            return NULL;
+        }
+        /* Option 3B: load companion screener.onnx next to onnx_path when present (unless FT8NN_SCREENER=0) */
+        const char *se = getenv("FT8NN_SCREENER");
+        if (!se || strcmp(se, "0") != 0) {
+            const char *sl1 = strrchr(onnx_path, '/'), *sl2 = strrchr(onnx_path, '\\');
+            const char *sl = sl1 && sl2 ? (sl1 > sl2 ? sl1 : sl2) : (sl1 ? sl1 : sl2);
+            const char *base = sl ? sl + 1 : onnx_path;
+            if (strcmp(base, "screener.onnx") != 0) {
+                char spath[4096];
+                size_t dlen = sl ? (size_t)(sl - onnx_path + 1) : 0;
+                if (dlen + sizeof("screener.onnx") <= sizeof spath) {
+                    if (dlen) memcpy(spath, onnx_path, dlen);
+                    memcpy(spath + dlen, "screener.onnx", sizeof("screener.onnx"));
+                    FILE *sf = fopen(spath, "rb");
+                    if (sf) {
+                        fclose(sf);
+#ifdef _WIN32
+                        wchar_t smodel[4096];
+                        if (MultiByteToWideChar(CP_UTF8, 0, spath, -1, smodel, 4096))
+                            ort_check(api, api->CreateSession(c->env, smodel, so, &c->scr_sess));
+#else
+                        ort_check(api, api->CreateSession(c->env, spath, so, &c->scr_sess));
+#endif
+                    }
+                }
+            }
+        }
+        api->ReleaseSessionOptions(so);
     }
-    api->ReleaseSessionOptions(so);
     c->pool = par_new(n_threads);
     c->ht = ht_new();
     for (int i = 0; i < CTX_HIST; i++) {
@@ -278,12 +317,17 @@ ft8nn_ctx *ft8nn_open(const char *onnx_path, int n_threads) {
 
 void ft8nn_close(ft8nn_ctx *c) {
     if (!c) return;
+    if (c->accel) nn_accel_close(c->accel);
     const OrtApi *api = c->api;
-    if (c->mem) api->ReleaseMemoryInfo(c->mem);
-    if (c->sess) api->ReleaseSession(c->sess);
+    if (api) {
+        if (c->mem) api->ReleaseMemoryInfo(c->mem);
+        if (c->scr_sess) api->ReleaseSession(c->scr_sess);
+        if (c->sess) api->ReleaseSession(c->sess);
+        if (c->env) api->ReleaseEnv(c->env);
+    }
     par_free(c->pool);
-    if (c->env) api->ReleaseEnv(c->env);
     ht_free(c->ht);
+    free(c->hyps_buf);
     for (int i = 0; i < CTX_HIST; i++) {
         free(c->hist[i].d);
         free(c->hist[i].fail);
@@ -322,15 +366,88 @@ void ft8nn_get_range(const ft8nn_ctx *c, double *fmin, double *fmax) {
 
 int ft8nn_threads(const ft8nn_ctx *c) { return par_threads(c->pool); }
 
-/* NN LLRs for nh hypotheses -> llr[h*174 ...]; feat holds NN_BATCH feature rows. Safe to call from several threads
- * at once (ONNX Runtime sessions allow concurrent Run). */
-static int run_nn(ft8nn_ctx *c, sync_hyp *const *hyps, int nh, double *llr, float *feat) {
+static sync_hyp *ensure_hyps(ft8nn_ctx *c, size_t need) {
+    if (need > c->hyps_cap) {
+        size_t nc = c->hyps_cap ? c->hyps_cap : 2048;
+        while (nc < need) nc *= 2;
+        sync_hyp *p = realloc(c->hyps_buf, sizeof(sync_hyp) * nc);
+        if (!p) return NULL;
+        c->hyps_buf = p;
+        c->hyps_cap = nc;
+    }
+    return c->hyps_buf;
+}
+
+static size_t nn_buf_bytes(const ft8nn_ctx *c) {
+    size_t n = (size_t)NN_BATCH * NN * NFEAT;
+    if (c->accel) n += nn_accel_scratch_floats(c->accel);
+    else if (c->scr_sess) n *= 2; /* second NN_BATCH feature buffer for compacting kept hypotheses */
+    return sizeof(float) * n;
+}
+
+/* NN LLRs for nh hypotheses -> llr[h*174 ...]; feat holds nn_buf_bytes(c). When screen != 0 and c->scr_sess is
+ * loaded, pure-noise pass hypotheses (see >= screen_gate) skip full SoftDemod. */
+static int run_nn(ft8nn_ctx *c, sync_hyp *const *hyps, int nh, double *llr, float *feat, int screen) {
+    if (c->accel) {
+        float *scr = feat + (size_t)NN_BATCH * NN * NFEAT;
+        for (int i0 = 0; i0 < nh; i0 += NN_BATCH) {
+            int b = nh - i0 < NN_BATCH ? nh - i0 : NN_BATCH;
+            for (int i = 0; i < b; i++)
+                nn_features(hyps[i0 + i]->y, hyps[i0 + i]->start, c->nv_bb, feat + (size_t)i * NN * NFEAT);
+            nn_accel_run(c->accel, feat, b, llr + (size_t)i0 * 174, scr);
+        }
+        return 0;
+    }
     const OrtApi *api = c->api;
-    const char *in_names[] = {"features"}, *out_names[] = {"llr"};
+    const char *in_names[] = {"features"}, *out_names[] = {"llr"}, *scr_out[] = {"ee"};
     int rc = 0;
     for (int i0 = 0; i0 < nh && !rc; i0 += NN_BATCH) {
         int b = nh - i0 < NN_BATCH ? nh - i0 : NN_BATCH;
         for (int i = 0; i < b; i++) nn_features(hyps[i0 + i]->y, hyps[i0 + i]->start, c->nv_bb, feat + (size_t)i * NN * NFEAT);
+        if (screen && c->scr_sess) {
+            int64_t sshape[3] = {b, NN, NFEAT};
+            OrtValue *sin = NULL, *sout = NULL;
+            float *see = NULL;
+            if (ort_check(api, api->CreateTensorWithDataAsOrtValue(c->mem, feat, sizeof(float) * b * NN * NFEAT, sshape,
+                                                                   3, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &sin)) ||
+                ort_check(api, api->Run(c->scr_sess, NULL, in_names, (const OrtValue *const *)&sin, 1, scr_out, 1, &sout)) ||
+                ort_check(api, api->GetTensorMutableData(sout, (void **)&see))) {
+                if (sin) api->ReleaseValue(sin);
+                if (sout) api->ReleaseValue(sout);
+                return -1;
+            }
+            int keep[NN_BATCH], nk = 0;
+            for (int i = 0; i < b; i++) {
+                if ((double)see[i] < SCREEN_EE_GATE) keep[nk++] = i;
+                else memset(llr + (size_t)(i0 + i) * 174, 0, sizeof(double) * 174);
+            }
+            api->ReleaseValue(sin);
+            api->ReleaseValue(sout);
+            if (nk == 0) continue;
+            float *fkeep = feat + (size_t)NN_BATCH * NN * NFEAT;
+            for (int u = 0; u < nk; u++)
+                memcpy(fkeep + (size_t)u * NN * NFEAT, feat + (size_t)keep[u] * NN * NFEAT, sizeof(float) * NN * NFEAT);
+            int64_t kshape[3] = {nk, NN, NFEAT};
+            OrtValue *in = NULL, *out = NULL;
+            if (ort_check(api, api->CreateTensorWithDataAsOrtValue(c->mem, fkeep, sizeof(float) * nk * NN * NFEAT,
+                                                                   kshape, 3, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &in)) ||
+                ort_check(api, api->Run(c->sess, NULL, in_names, (const OrtValue *const *)&in, 1, out_names, 1, &out))) {
+                rc = -1;
+            } else {
+                float *o;
+                if (ort_check(api, api->GetTensorMutableData(out, (void **)&o))) rc = -1;
+                else {
+                    for (int u = 0; u < nk; u++) {
+                        double *dst = llr + (size_t)(i0 + keep[u]) * 174;
+                        const float *src = o + (size_t)u * 174;
+                        for (int j = 0; j < 174; j++) dst[j] = src[j];
+                    }
+                }
+            }
+            if (in) api->ReleaseValue(in);
+            if (out) api->ReleaseValue(out);
+            continue;
+        }
         int64_t shape[3] = {b, NN, NFEAT};
         OrtValue *in = NULL, *out = NULL;
         if (ort_check(api, api->CreateTensorWithDataAsOrtValue(c->mem, feat, sizeof(float) * b * NN * NFEAT, shape, 3,
@@ -662,26 +779,28 @@ static void decode_hyp(const sync_hyp *hy, const double *nn_l, double cscore, in
     uint8_t bits[174], a91[91];
     int nhard, method = -1;
     double dist;
-    r->n_bp++;
     /* early-DT candidates have weaker sync evidence: no OSD on BP sums or under a-priori bits, no erasure stages */
     /* every stage's result must be a plausible message (decoder._plausible); if not, the next stage tries */
-    if (bp_decode(nn_l, 30, bits, &nhard) && crc_ok(bits)) {
-        memcpy(a91, bits, 91);
-        method = plausible(FT8NN_BP, a91);
-    }
-    if (method < 0 && exp_err < OSD_GATE && ++r->n_osd) {
-        if (osd_decode(nn_l, OSD_ORDER, bits, &dist, &nhard) && nhard <= OSD_MAX_HARD) {
+    if (exp_err < 86.9) {
+        r->n_bp++;
+        if (bp_decode(nn_l, 30, bits, &nhard) && crc_ok(bits)) {
             memcpy(a91, bits, 91);
-            method = plausible(FT8NN_OSD, a91);
+            method = plausible(FT8NN_BP, a91);
         }
-        if (method < 0 && OSD_SNAPS > 0 && !early && !cons) method = plausible(try_osd_bp(nn_l, a91), a91);
+        if (method < 0 && exp_err < OSD_GATE && ++r->n_osd) {
+            if (osd_decode(nn_l, OSD_ORDER, bits, &dist, &nhard) && nhard <= OSD_MAX_HARD) {
+                memcpy(a91, bits, 91);
+                method = plausible(FT8NN_OSD, a91);
+            }
+            if (method < 0 && OSD_SNAPS > 0 && !early && !cons) method = plausible(try_osd_bp(nn_l, a91), a91);
+        }
+        if (method < 0 && ncx > 0 && !early && exp_err < CTX_GATE)
+            method = plausible(try_ctx(nn_l, cx, ncx, hy->f0, hy->dt, a91), a91);
+        if (method < 0 && !cons && exp_err < AP_GATE)
+            method = plausible(try_ap(nn_l, a91, early ? -1 : OSD_ORDER), a91);
+        if (method < 0 && exp_err < ERASE_BP_GATE && !early)
+            method = plausible(try_erase(nn_l, a91, !cons && exp_err < ERASE_GATE), a91);
     }
-    if (method < 0 && ncx > 0 && !early && exp_err < CTX_GATE)
-        method = plausible(try_ctx(nn_l, cx, ncx, hy->f0, hy->dt, a91), a91);
-    if (method < 0 && !cons && exp_err < AP_GATE)
-        method = plausible(try_ap(nn_l, a91, early ? -1 : OSD_ORDER), a91);
-    if (method < 0 && exp_err < ERASE_BP_GATE && !early)
-        method = plausible(try_erase(nn_l, a91, !cons && exp_err < ERASE_GATE), a91);
     if (method >= 0) {
         if (!any_bits(a91, 77)) {
             r->status = 2;
@@ -789,14 +908,14 @@ typedef struct {
 
 static void hyp_worker(void *arg, int w) {
     hyp_job *j = arg;
-    float *feat = malloc(sizeof(float) * NN_BATCH * NN * NFEAT);
+    float *feat = malloc(nn_buf_bytes(j->c));
     double *nnl = malloc(sizeof(double) * NN_CHUNK * 174);
     for (;;) {
         int i0 = atomic_fetch_add(&j->next, NN_CHUNK);
         if (i0 >= j->nh || atomic_load(&j->err)) break;
         int b = j->nh - i0 < NN_CHUNK ? j->nh - i0 : NN_CHUNK;
         double t0 = tthr();
-        if (run_nn(j->c, j->hp + i0, b, nnl, feat)) {
+        if (run_nn(j->c, j->hp + i0, b, nnl, feat, 1)) {
             atomic_store(&j->err, 1);
             break;
         }
@@ -961,7 +1080,7 @@ static int decode_pass(ft8nn_ctx *c, const double *x, int n, dec *all, int nall,
     }
     baseband bb;
     baseband_init(&bb, x, n, c->snr_nfa, c->snr_nfb, c->pool);
-    sync_hyp *hyps = malloc(sizeof(sync_hyp) * (size_t)(ns * N_HYP + 1));
+    sync_hyp *hyps = ensure_hyps(c, (size_t)(ns * N_HYP + 1));
     int *nk = malloc(sizeof(int) * (size_t)(ns + 1));
     {
         sync_job *sj = calloc(1, sizeof *sj);
@@ -1134,7 +1253,6 @@ done:
                 st[ST_NN], st[ST_CL], st[ST_DEC], n_bp, n_osd, s_bp - n_bp, s_osd - n_osd, added);
     free(cands);
     free(sel);
-    free(hyps);
     free(nk);
     return added;
 }
@@ -1157,6 +1275,7 @@ static void cc_decode_hyp(const sync_hyp *hy, const double *l, int cons, hyp_res
     double exp_err = 0, dist;
     for (int i = 0; i < 174; i++) exp_err += 1.0 / (1.0 + exp(fabs(l[i])));
     *ee = exp_err;
+    if (exp_err >= 86.9) return;
     uint8_t bits[174], a91[91];
     int nhard, method = -1;
     if (bp_decode(l, 30, bits, &nhard) && crc_ok(bits)) {
@@ -1272,7 +1391,7 @@ static void cc_search(void *arg, int ci) {
 static void cc_worker(void *arg, int w) {
     (void)w;
     cc_job *j = arg;
-    float *feat = malloc(sizeof(float) * NN_BATCH * NN * NFEAT);
+    float *feat = malloc(nn_buf_bytes(j->c));
     double *llr = malloc(sizeof(double) * NN_CHUNK * 174);
     sync_hyp *hy = malloc(sizeof(sync_hyp) * NN_CHUNK), *hp[NN_CHUNK];
     for (;;) {
@@ -1290,7 +1409,7 @@ static void cc_worker(void *arg, int w) {
             hy[i].nratio = baseband_noise_ratio(j->bb, hy[i].f0);
             hp[i] = &hy[i];
         }
-        if (run_nn(j->c, hp, b, llr, feat)) {
+        if (run_nn(j->c, hp, b, llr, feat, 0)) {
             atomic_store(&j->err, 1);
             break;
         }
@@ -1524,14 +1643,14 @@ typedef struct {
 static void rf_worker(void *arg, int w) {
     (void)w;
     rf_job *j = arg;
-    float *feat = malloc(sizeof(float) * NN_BATCH * NN * NFEAT);
+    float *feat = malloc(nn_buf_bytes(j->c));
     sync_hyp *hp[NN_CHUNK];
     for (;;) {
         int i0 = atomic_fetch_add(&j->next, NN_CHUNK);
         if (i0 >= j->nh || atomic_load(&j->err)) break;
         int b = j->nh - i0 < NN_CHUNK ? j->nh - i0 : NN_CHUNK;
         for (int i = 0; i < b; i++) hp[i] = &j->hyps[i0 + i];
-        if (run_nn(j->c, hp, b, j->llr + (size_t)i0 * 174, feat)) {
+        if (run_nn(j->c, hp, b, j->llr + (size_t)i0 * 174, feat, 0)) {
             atomic_store(&j->err, 1);
             break;
         }
@@ -1556,7 +1675,7 @@ static int refine_stage(ft8nn_ctx *c, const double *x, int n, const chase_hyp *c
     double t0 = tnow();
     ensure_bb(c, x, n, bb, bb_ready);
     int nh = ns * 8;
-    sync_hyp *hyps = malloc(sizeof(sync_hyp) * (size_t)nh);
+    sync_hyp *hyps = ensure_hyps(c, (size_t)nh);
     static const double oa[8] = {-RF_RDF, -RF_RDF, -RF_RDF, 0.0, 0.0, RF_RDF, RF_RDF, RF_RDF};
     static const int ob[8] = {-RF_RDT, 0, RF_RDT, -RF_RDT, RF_RDT, -RF_RDT, 0, RF_RDT};
     cplx y0[NBB];
@@ -1620,7 +1739,6 @@ static int refine_stage(ft8nn_ctx *c, const double *x, int n, const chase_hyp *c
         all[rc++] = d;
     }
     if (prof && rc >= 0) fprintf(stderr, "refine: seeds %d -> %d, %.2fs\n", ns, rc - nall, tnow() - t0);
-    free(hyps);
     free(llr);
     return rc;
 }
@@ -1727,7 +1845,7 @@ static int repeat_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int nall
     uint8_t(*alt)[77] = malloc(sizeof *alt * MAXALT);
     double *S = malloc(sizeof(double) * MAXALT * 174), *rho = malloc(sizeof(double) * MAXALT);
     sync_hyp *hyps = malloc(sizeof(sync_hyp) * N_HYP), *hp[N_HYP];
-    float *feat = malloc(sizeof(float) * NN_BATCH * NN * NFEAT);
+    float *feat = malloc(nn_buf_bytes(c));
     double llr[N_HYP * 174];
     int rc = nall;
     for (int g = 0; g < ncx; g++) {
@@ -1832,7 +1950,7 @@ static int repeat_stage(ft8nn_ctx *c, const double *x, int n, dec *all, int nall
             int nh = fine_sync2(bb, &loc, N_HYP, hyps);
             if (nh <= 0) continue;
             for (int h = 0; h < nh; h++) hp[h] = &hyps[h];
-            if (run_nn(c, hp, nh, llr, feat)) {
+            if (run_nn(c, hp, nh, llr, feat, 0)) {
                 rc = -1;
                 goto out;
             }

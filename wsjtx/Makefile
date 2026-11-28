@@ -12,8 +12,12 @@ CXX ?= c++
 CXXFLAGS ?= -O2 -Wall -Wextra -Wno-unused-parameter -std=c++17
 # timegm() and gmtime_r() are POSIX/BSD, and glibc hides them when -std=c++17 asks for strict ANSI.
 DEFS = -D_DEFAULT_SOURCE
+UNAME := $(shell uname -s)
 CPPFLAGS += -I$(ORT_PREFIX)/include -I$(ORT_PREFIX)/include/onnxruntime
 LDLIBS += -L$(ORT_PREFIX)/lib -lonnxruntime -lm -lpthread -Wl,-rpath,$(ORT_PREFIX)/lib
+ifeq ($(UNAME),Darwin)
+LDLIBS += -framework Accelerate
+endif
 
 all: build/ft8nn_sidecar build/fake_wsjtx
 

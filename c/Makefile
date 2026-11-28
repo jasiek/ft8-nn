@@ -26,6 +26,7 @@ RUNTIME = build/onnxruntime.dll
 else
 LDLIBS += -L$(ORT_PREFIX)/lib -lonnxruntime -lm -lpthread -Wl,-rpath,$(ORT_PREFIX)/lib
 ifeq ($(UNAME),Darwin)
+LDLIBS += -framework Accelerate
 SHLIB = build/libft8nn.dylib
 SHFLAGS = -dynamiclib
 else
@@ -34,7 +35,7 @@ SHFLAGS = -shared
 endif
 endif
 
-SRC = src/par.c src/fft.c src/ft8.c src/ldpc.c src/frontend.c src/subtract.c src/unpack.c src/decode.c
+SRC = src/par.c src/fft.c src/ft8.c src/ldpc.c src/frontend.c src/subtract.c src/unpack.c src/nn_accel.c src/decode.c
 OBJ = $(SRC:src/%.c=build/%.o)
 
 all: build/libft8nn.a $(SHLIB) build/ft8nn_cli$(EXE) $(RUNTIME)

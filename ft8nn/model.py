@@ -71,7 +71,7 @@ class SoftDemod(nn.Module):
             nn.Conv1d(d, d, conv_k, padding=conv_k // 2), nn.GELU(),
         )
         layer = nn.TransformerEncoderLayer(d, heads, ff, dropout, batch_first=True, norm_first=True, activation="gelu")
-        self.tf = nn.TransformerEncoder(layer, layers)
+        self.tf = nn.TransformerEncoder(layer, layers, enable_nested_tensor=False)
         self.norm = nn.LayerNorm(d)
         self.out = nn.Linear(d, 3)
         self.register_buffer("data_pos", torch.tensor(ft8.DATA_POS), persistent=False)
@@ -147,7 +147,36 @@ class GRUDemod(nn.Module):
         return h.reshape(h.shape[0], 174)
 
 
-KINDS = {"tf": SoftDemod, "conv": ConvDemod, "gru": GRUDemod}
+class Screener(nn.Module):
+    """Lightweight pre-screener predicting SoftDemod's expected bit errors (exp_err) directly from (B, 79, 48)
+    features, used on ONNX Runtime platforms to skip full SoftDemod evaluation on pure-noise hypotheses."""
+
+    def __init__(self, d=64, layers=1, heads=4, ff=192, conv_k=5, dropout=0.0):
+        super().__init__()
+        self.inp = nn.Linear(2 * NBINS, d)
+        self.pos = nn.Parameter(torch.randn(1, 79, d) * 0.02)
+        self.conv = nn.Sequential(
+            nn.Conv1d(d, d, conv_k, padding=conv_k // 2), nn.GELU(),
+            nn.Conv1d(d, d, conv_k, padding=conv_k // 2), nn.GELU(),
+        )
+        layer = nn.TransformerEncoderLayer(d, heads, ff, dropout, batch_first=True, norm_first=True, activation="gelu")
+        self.tf = nn.TransformerEncoder(layer, layers, enable_nested_tensor=False)
+        self.norm = nn.LayerNorm(d)
+        self.head = nn.Sequential(nn.Linear(2 * d, d), nn.GELU(), nn.Linear(d, 1))
+
+    def forward(self, x):
+        """x: (B, 79, F) features -> (B,) predicted exp_err."""
+        h = self.inp(x) + self.pos
+        gelu = nn.functional.gelu
+        h = h + gelu(_conv_bl(gelu(_conv_bl(h, self.conv[0])), self.conv[2]))
+        for lyr in self.tf.layers:
+            h = lyr(h)
+        u = self.norm(h)
+        pooled = torch.cat([u.mean(dim=1), u.amax(dim=1)], dim=-1)
+        return self.head(pooled).squeeze(-1)
+
+
+KINDS = {"tf": SoftDemod, "conv": ConvDemod, "gru": GRUDemod, "scr": Screener}
 
 
 def build(arch):
