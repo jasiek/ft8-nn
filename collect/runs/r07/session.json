@@ -1,0 +1,127 @@
+{
+ "start_utc": 1794938700.0,
+ "until_utc": 1794940501.0,
+ "pskr_tail_s": 720,
+ "bands": [
+  "40m",
+  "80m"
+ ],
+ "topics": [
+  "pskr/filter/v2/40m/FT8/#",
+  "pskr/filter/v2/80m/FT8/#"
+ ],
+ "owrx_lead_s": 30,
+ "owrx_tail_s": 70,
+ "confirmers": [
+  [
+   "40m",
+   "http://laradiocb.ddns.me:8073/"
+  ],
+  [
+   "40m",
+   "http://nc-home.tgws.de:8773/"
+  ],
+  [
+   "40m",
+   "http://noradio86.ddns.net:8073/"
+  ],
+  [
+   "40m",
+   "http://radarmaarssen.nl:8073/"
+  ],
+  [
+   "40m",
+   "http://sdr.22dx.ru:8073/"
+  ],
+  [
+   "40m",
+   "http://sdr.ukvpn.cloud:91/"
+  ],
+  [
+   "40m",
+   "http://sdrkosutnjak.321.rs:8073/"
+  ],
+  [
+   "40m",
+   "http://sdrmaarssen.nl:8073/"
+  ],
+  [
+   "40m",
+   "https://14alt266.freeboxos.fr/openwebrx/"
+  ],
+  [
+   "40m",
+   "https://3.websdr.jestok.com/"
+  ],
+  [
+   "40m",
+   "https://ea1rcr.org/"
+  ],
+  [
+   "40m",
+   "https://ec5m.ddns.net/"
+  ],
+  [
+   "40m",
+   "https://openwebrx.iv3hqc.it/"
+  ],
+  [
+   "40m",
+   "https://openwebrx.zl3bcj.duckdns.org/"
+  ],
+  [
+   "40m",
+   "https://sdr-1.giarel.li/"
+  ],
+  [
+   "40m",
+   "https://sdr-serpuhov.ru/"
+  ],
+  [
+   "40m",
+   "https://sdr.henry.lan64.de/"
+  ],
+  [
+   "40m",
+   "https://sdr.s59ekl.si/"
+  ],
+  [
+   "40m",
+   "https://sdr.vanish125.netcraze.pro/"
+  ],
+  [
+   "80m",
+   "http://oh6kk.dy.fi:8073/"
+  ],
+  [
+   "80m",
+   "http://thomas0177.ddns.net:8077/"
+  ],
+  [
+   "80m",
+   "http://yo2cps.go.ro:8073/"
+  ],
+  [
+   "80m",
+   "https://sdr.pajadam.me/"
+  ],
+  [
+   "80m",
+   "https://sdr.wireless-access.de:9078/"
+  ],
+  [
+   "80m",
+   "https://ub3aww.ru:8073/"
+  ],
+  [
+   "80m",
+   "https://waldbeere.crabdance.com/"
+  ],
+  [
+   "80m",
+   "https://websdr.dl8ldn.de/"
+  ]
+ ],
+ "pskr_feed_delay_s": 110.0,
+ "pskr_capture_end_utc": 1794941331.1
+}

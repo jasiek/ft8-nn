@@ -1,6 +1,6 @@
 # `ft8nn_sidecar` — this decoder inside WSJT-X
 
-`ft8nn_sidecar` makes WSJT-X decode FT8 with this project's decoder (`libft8nn`, `models/v3`)
+`ft8nn_sidecar` makes WSJT-X decode FT8 with this project's decoder (`libft8nn`, `models/v4`)
 instead of its own `jt9`. It is WSJT-X's *external FT8 decoder*: a long-running process that WSJT-X
 starts at startup and hands each FT8 decode pass to. WSJT-X then turns the answers into `jt9` output
 lines and runs them through its usual path, so nothing downstream notices — false-decode filtering,
@@ -57,7 +57,7 @@ shared memory here (`json.h` is a 200-line reader for the handful of fields we u
 ## Using it with WSJT-X
 
 ```bash
-WSJTX_FT8_DECODER="$HOME/github/ft8-nn/wsjtx/build/ft8nn_sidecar --model $HOME/github/ft8-nn/models/v3/ft8nn.onnx" \
+WSJTX_FT8_DECODER="$HOME/github/ft8-nn/wsjtx/build/ft8nn_sidecar --model $HOME/github/ft8-nn/models/v4/ft8nn.onnx" \
   /Applications/wsjtx.app/Contents/MacOS/wsjtx
 ```
 
@@ -66,11 +66,11 @@ pipes in a wrapper script. On macOS, an app started from Finder or the Dock sees
 environment, so either start WSJT-X from a terminal as above or
 
 ```bash
-launchctl setenv WSJTX_FT8_DECODER "$HOME/github/ft8-nn/wsjtx/build/ft8nn_sidecar --model $HOME/github/ft8-nn/models/v3/ft8nn.onnx"
+launchctl setenv WSJTX_FT8_DECODER "$HOME/github/ft8-nn/wsjtx/build/ft8nn_sidecar --model $HOME/github/ft8-nn/models/v4/ft8nn.onnx"
 ```
 
 and restart the app. Without `--model`, `$FT8NN_MODEL` is used, then `ft8nn.onnx` next to the
-binary, in `$WSJTX_DATA_DIR` or `$WSJTX_SHARE_DIR` (WSJT-X exports both), or in `../models/v3` of a
+binary, in `$WSJTX_DATA_DIR` or `$WSJTX_SHARE_DIR` (WSJT-X exports both), or in `../models/v4` (falling back to `../models/v3`) of a
 source tree. If no model can be opened the process exits at once: WSJT-X logs that, says so in the
 status bar and falls back to its own `jt9`, which is more useful than a session that decodes nothing.
 
@@ -125,7 +125,7 @@ per WSJT-X pass (`seq 7:   decoder pass 0: 28 decode(s) sent at 2.41 s` …
 ## Other ways to run it
 
 ```bash
-wsjtx/build/ft8nn_sidecar --model models/v3/ft8nn.onnx slot1.wav slot2.wav   # like 'jt9 -8 file.wav'
+wsjtx/build/ft8nn_sidecar --model models/v4/ft8nn.onnx slot1.wav slot2.wav   # like 'jt9 -8 file.wav'
 ```
 
 With `.wav` files on the command line it decodes those instead of talking to WSJT-X, printing the

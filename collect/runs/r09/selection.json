@@ -1,0 +1,330 @@
+{
+ "probed_utc": "2026-11-18T06:01:05.052739+00:00",
+ "source": "receiverbook-fresh",
+ "regions": [
+  "EU"
+ ],
+ "excluded_sites": "excluded_sites.json",
+ "bands": [
+  "20m",
+  "30m"
+ ],
+ "chosen": [
+  {
+   "station": "PE1MUQ | Netherlands",
+   "lat": 52.315707,
+   "lon": 5.971058,
+   "label": "PE1MUQ | Netherlands",
+   "version": "1.902.0",
+   "url": "http://77.160.7.126:8073/",
+   "type": "KiwiSDR",
+   "grid": "JO22xh",
+   "gps_good": "5",
+   "loc_check": "1 km from JO22xh centre (limit 14)",
+   "band": "20m",
+   "probe_decodes": 12,
+   "probe_sample": [
+    "060030 -13 -0.1 1535 ~  9H1FJ UB9MEU MO64",
+    "060030  17  0.1 2821 ~  F4NBB UZ5CA RR73",
+    "060030 -10  0.2 1443 ~  9H1FJ RX3DTN KO85",
+    "060030 -17  0.3 1995 ~  <...> R9XAC R-05",
+    "060030  -5  0.1 2472 ~  CQ UN0GY MN83"
+   ],
+   "freq_khz": 14074.0
+  },
+  {
+   "station": "0-30 MHz SDR, VICTOR DELTA PARIS FRANCE",
+   "lat": 48.740203,
+   "lon": 2.561324,
+   "label": "0-30 MHz SDR, VICTOR DELTA PARIS FRANCE",
+   "version": "1.902.0",
+   "url": "http://90.46.27.243:8073/",
+   "type": "KiwiSDR",
+   "grid": "JN18gr",
+   "gps_good": "2",
+   "loc_check": "2 km from JN18gr centre (limit 14)",
+   "band": "20m",
+   "probe_decodes": 10,
+   "probe_sample": [
+    "060030   1  0.1  768 ~  RA0ZIH R6ML 73",
+    "060030  -6  0.1  429 ~  UB6ZDJ D44JB -21",
+    "060030  -8  0.1 2472 ~  CQ UN0GY MN83",
+    "060030   1 -0.6  632 ~  US5MUW UA6AFS LN05",
+    "060030  15  0.1 2820 ~  F4NBB UZ5CA RR73"
+   ],
+   "freq_khz": 14074.0
+  },
+  {
+   "station": "0-30 MHz SDR | Nailsea, Bristol",
+   "lat": 51.421651,
+   "lon": -2.753674,
+   "label": "0-30 MHz SDR | Nailsea, Bristol",
+   "version": "1.902.0",
+   "url": "http://g4ahg.ddns.net:8073/",
+   "type": "KiwiSDR",
+   "grid": "io81ok",
+   "gps_good": "0",
+   "loc_check": "3 km from io81ok centre (limit 14)",
+   "band": "20m",
+   "probe_decodes": 6,
+   "probe_sample": [
+    "060030  20  0.1 2781 ~  F4NBB UZ5CA RR73",
+    "060030   2  0.1  329 ~  RC9A D44JB RR73",
+    "060030  -6  0.1 2494 ~  RV9WJP UE6DX -19",
+    "060030  -6  0.2  728 ~  RA0ZIH R6ML 73",
+    "060030   3  0.1  389 ~  UB6ZDJ D44JB -21"
+   ],
+   "freq_khz": 14074.0
+  },
+  {
+   "station": "KiwiSDR at Taikorea Road | Palmerston North, New Zealand",
+   "lat": -40.36,
+   "lon": 175.38,
+   "label": "KiwiSDR at Taikorea Road | Palmerston North, New Zealand",
+   "version": "1.842.0",
+   "url": "http://kiwisdr.tko.zlwan.net:8073/",
+   "type": "KiwiSDR",
+   "grid": "RE79qp",
+   "gps_good": "1",
+   "loc_check": "1 km from RE79qp centre (limit 14)",
+   "band": "30m",
+   "probe_decodes": 29,
+   "probe_sample": [
+    "060045  -2  2.4  619 ~  R2BPS RW6HPS -05",
+    "060045   1  1.1 1453 ~  C8K EA5HM IM99",
+    "060045  13  1.0 2641 ~  <...> R7KKO +04",
+    "060045   1  1.0 1784 ~  I3WXX UA3PAB R+00",
+    "060045  -2  0.0  698 ~  CQ KB8GUN EM89"
+   ],
+   "freq_khz": 10136.0,
+   "relaxed_group": true
+  }
+ ],
+ "confirmers": [
+  {
+   "url": "http://138.118.215.154:8073/",
+   "band": "20m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 107,
+   "users": 2,
+   "max_clients": 20,
+   "version": "v1.2.82",
+   "lat_lon": {
+    "lat": -51.68000987480535,
+    "lon": -69.21657773703642
+   },
+   "asl": 16,
+   "location": "Rio Gallegos, Patagonia, Argentina"
+  },
+  {
+   "url": "http://82.67.147.130:8080/",
+   "band": "20m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 189,
+   "users": 4,
+   "max_clients": 20,
+   "version": "v1.2.130",
+   "lat_lon": {
+    "lat": 50.20411309776767,
+    "lon": 2.584360575239688
+   },
+   "asl": 160,
+   "location": "La Cauchie"
+  },
+  {
+   "url": "http://nc-home.tgws.de:8773/",
+   "band": "20m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 48,
+   "users": 3,
+   "max_clients": 20,
+   "version": "v1.2.130",
+   "lat_lon": {
+    "lat": 50.82,
+    "lon": 7.62
+   },
+   "asl": 210,
+   "location": "Windeck,NRW,FRG"
+  },
+  {
+   "url": "http://owrxbreezand.duckdns.org/",
+   "band": "20m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 9,
+   "users": 1,
+   "max_clients": 4,
+   "version": "v1.2.130",
+   "lat_lon": {
+    "lat": 52.88704747759002,
+    "lon": 4.8548774754952895
+   },
+   "asl": 42,
+   "location": "Breezand,Nederland"
+  },
+  {
+   "url": "http://thomas0177.ddns.net:8077/",
+   "band": "20m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 30,
+   "users": 0,
+   "max_clients": 5,
+   "version": "v1.2.130",
+   "lat_lon": {
+    "lat": 52.41876,
+    "lon": 13.30633
+   },
+   "asl": 90,
+   "location": "Berlin - Lichterfelde, Germany"
+  },
+  {
+   "url": "http://yo2cps.go.ro:8073/",
+   "band": "20m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 189,
+   "users": 0,
+   "max_clients": 10,
+   "version": "v1.2.123",
+   "lat_lon": {
+    "lat": 45.863523648352725,
+    "lon": 22.89565117516746
+   },
+   "asl": 187,
+   "location": "Deva, Romania"
+  },
+  {
+   "url": "https://14alt266.freeboxos.fr/openwebrx/",
+   "band": "20m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 154,
+   "users": 1,
+   "max_clients": 20,
+   "version": "v1.2.130",
+   "lat_lon": {
+    "lat": 43.6228932497094,
+    "lon": 7.04648735875531
+   },
+   "asl": 165,
+   "location": "Sophia-Antipolis, France"
+  },
+  {
+   "url": "https://bn-rx.bluecylabs.com/",
+   "band": "20m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 8,
+   "users": 0,
+   "max_clients": 20,
+   "version": "v1.2.130",
+   "lat_lon": {
+    "lat": 21.0008471,
+    "lon": 106.2047978
+   },
+   "asl": 20,
+   "location": "Bac Ninh, Vietnam"
+  },
+  {
+   "url": "https://rxtb.hmpepca.com/",
+   "band": "20m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 3,
+   "users": 1,
+   "max_clients": 5,
+   "version": "v1.2.130",
+   "lat_lon": {
+    "lat": 20.436529753168806,
+    "lon": 106.4561539512476
+   },
+   "asl": 15,
+   "location": "Hung Yen, Vietnam"
+  },
+  {
+   "url": "https://sdr-serpuhov.ru/",
+   "band": "20m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 198,
+   "users": 20,
+   "max_clients": 100,
+   "version": "v1.2.130",
+   "lat_lon": {
+    "lat": 54.917727384972494,
+    "lon": 37.427252188946035
+   },
+   "asl": 165,
+   "location": "RUSSIA, Serpuhov"
+  },
+  {
+   "url": "https://sdr.s59ekl.si/",
+   "band": "20m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 36,
+   "users": 4,
+   "max_clients": 10,
+   "version": "v1.2.2",
+   "lat_lon": {
+    "lat": 46.356830335200236,
+    "lon": 15.120766413765745
+   },
+   "asl": 340,
+   "location": "Velenje, Slovenia"
+  },
+  {
+   "url": "https://ub3aww.ru:8073/",
+   "band": "20m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 120,
+   "users": 2,
+   "max_clients": 100,
+   "version": "v1.2.113",
+   "lat_lon": {
+    "lat": 55.9462022066859,
+    "lon": 36.50373666149901
+   },
+   "asl": 236,
+   "location": "Pervomayskoe, Moscow Region, Russia"
+  },
+  {
+   "url": "https://websdr.dl8ldn.de/",
+   "band": "20m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 100,
+   "users": 0,
+   "max_clients": 5,
+   "version": "v1.2.130",
+   "lat_lon": {
+    "lat": 53.82714,
+    "lon": 9.94113
+   },
+   "asl": 33,
+   "location": "Kaltenkirchen, Germany"
+  },
+  {
+   "url": "https://sdr.vanish125.netcraze.pro/",
+   "band": "30m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 26,
+   "users": 0,
+   "max_clients": 4,
+   "version": "v1.2.126",
+   "lat_lon": {
+    "lat": 55.70267067829901,
+    "lon": 38.9587778063207
+   },
+   "asl": 200,
+   "location": "East MO, Russia"
+  },
+  {
+   "url": "https://sdr.wireless-access.de:9078/",
+   "band": "30m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 84,
+   "users": 0,
+   "max_clients": 20,
+   "version": "v1.2.128",
+   "lat_lon": {
+    "lat": 48.57915,
+    "lon": 13.46749
+   },
+   "asl": 390,
+   "location": "Passau, Germany"
+  }
+ ]
+}

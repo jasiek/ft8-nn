@@ -1,0 +1,71 @@
+{
+ "start_utc": 1795003470.0,
+ "until_utc": 1795005271.0,
+ "pskr_tail_s": 720,
+ "bands": [
+  "17m",
+  "20m"
+ ],
+ "topics": [
+  "pskr/filter/v2/17m/FT8/#",
+  "pskr/filter/v2/20m/FT8/#"
+ ],
+ "owrx_lead_s": 30,
+ "owrx_tail_s": 70,
+ "confirmers": [
+  [
+   "17m",
+   "http://sdr.ukvpn.cloud:91/"
+  ],
+  [
+   "20m",
+   "http://138.118.215.154:8073/"
+  ],
+  [
+   "20m",
+   "http://nc-home.tgws.de:8773/"
+  ],
+  [
+   "20m",
+   "http://radio.nkpa.co.uk/"
+  ],
+  [
+   "20m",
+   "http://thomas0177.ddns.net:8077/"
+  ],
+  [
+   "20m",
+   "http://yo2cps.go.ro:8073/"
+  ],
+  [
+   "20m",
+   "http://yu1ado.duckdns.org:443/"
+  ],
+  [
+   "20m",
+   "https://bn-rx.bluecylabs.com/"
+  ],
+  [
+   "20m",
+   "https://rx.xv2da.com/"
+  ],
+  [
+   "20m",
+   "https://sdr-serpuhov.ru/"
+  ],
+  [
+   "20m",
+   "https://sdr.vanish125.netcraze.pro/"
+  ],
+  [
+   "20m",
+   "https://sdr.wireless-access.de:9078/"
+  ],
+  [
+   "20m",
+   "https://ub3aww.ru:8073/"
+  ]
+ ],
+ "pskr_feed_delay_s": 1326.7,
+ "pskr_capture_end_utc": 1795007317.8
+}

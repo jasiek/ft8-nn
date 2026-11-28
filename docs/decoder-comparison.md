@@ -1,7 +1,85 @@
-# ft8nn vs JTDX and FT8TW on the validation set
+# ft8nn vs WSJT-X `jt9`, JTDX, JTDX deep, and `ft8_lib`
 
-Measured 2026-11-10 on validation runs 2, 3 and 4 — the 36 KiwiSDR receivers never used for
-training, 4,302 slots of 15 s — and scored with `collect/verify.py` against the PSK Reporter spots
+## 1. Current comparison — `models/v4` (`libft8nn`) on the v2 multi-receiver validation set (2026-11-28)
+
+Measured 2026-11-28 on the v2 validation set (`datasets/ft8-validation-set` `6a95807`: `runs/r02` and `runs/r05`–`r14`, 60 unseen KiwiSDRs across all 10 HF bands `160–10 m` and all 6 continents, disjoint from training and v1 runs 1–4, paired with simultaneous PSK Reporter spots and live OpenWebRX decode streams) on an **8-core Apple M1** (`6` workers, `caffeinate -dims`, 0 sleep/DarkWake events), using `tools/run_set.py`, `collect/verify.py`, and `tools/compare_decoders.py`.
+
+Each block in `sets/small.txt` (16 blocks = 128 scored + 32 lead-in slots) and `sets/third.txt` (265 blocks = 2,120 scored + 530 lead-in slots) is decoded as its own 10-slot chronological sequence so stateful decoders (`ft8nn`, `JTDX`) have identical context/memory warm-up.
+
+### Pooled results — `sets/third.txt` (265 blocks, 2,120 scored slots across 11 runs)
+
+| Decoder | Decodes | vs `jt9` | Checkable | `slot` (>50 km) | `xconf` (≥50 km) | **Confirmed (`slot+xconf`)** | vs `jt9` | Conf % | `active` | `repeat` | `unconf` | `n/a` |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `ft8_lib` (`9fec6ca` `decode_ft8`) | 29,780 | −44.2% | 29,175 | 22,029 | 6,527 | 28,556 | −43.6% | 97.9% | 618 | 1 | **0** | 605 |
+| `jt9 -8 -d 3` (WSJT-X 3.0.2 Improved) | 53,322 | – | 52,301 | 39,445 | 11,228 | 50,673 | – | 96.9% | 1,577 | 7 | **44** | 1,021 |
+| `JTDX 2.2.x` (`2a0e2be`, defaults) | 56,642 | +6.2% | 56,120 | 41,862 | 12,168 | 54,030 | +6.6% | 96.3% | 2,081 | 4 | **5** | 522 |
+| `JTDX` deep (`-w -c 3 -s 2`, ceiling) | 59,340 | +11.3% | 58,800 | 43,704 | 12,665 | 56,369 | +11.2% | 95.9% | 2,403 | 8 | **20** | 540 |
+| **`ft8nn` (`models/v4`, `c/build/ft8nn_cli` `3A`)** | **65,919** | **+23.6%** | **64,783** | **48,169** | **13,649** | **61,818** | **+22.0%** | **95.4%** | **2,951** | **8** | **6** | 1,136 |
+
+- **`ft8nn` vs `jt9 -8 -d 3`:** **`+12,597` decodes (`+23.6%`)** and **`+11,145` confirmed (`+22.0%`)**, ahead on **all 11 runs**.
+- **`ft8nn` vs `JTDX` defaults:** **`+9,277` decodes (`+16.4%`)** and **`+7,788` confirmed (`+14.4%`)**, while running **faster per core** (`4.04 s` vs `4.39 s`).
+- **`ft8nn` vs `JTDX` deep (`-w -c 3 -s 2`):** **`+6,579` decodes (`+11.1%`)** and **`+5,449` confirmed (`+9.7%`)**, at **`8.2×` lower CPU** (`29.77 min` vs `244.02 min` wall).
+- **`unconf` inspection on `sets/third.txt`:**
+  - **`ft8nn` (`6` `unconf`, only `2` actual false decodes = `0.003%`):** 4 of the 6 are genuine on-air transmissions (`CQ D01GMW JO31` on `r11` 160 m and `CQ DX IN80CE` on `r12` 40 m, both decoded via plain BP by all four deep decoders; `<UA1AAP> R8QBH/1` on `r02` 15 m, an active QSO partner also decoded by `jt9` and `JTDX` deep; and `DL1NB JO30` on `r02` 15 m, a free-text transmission from active station `DL1NB` where `verify.py` parsed `JO30` as the 2nd-word callsign). Only `CQ WP2IOF FN44` and `CQ MA3FML/R LH68` (`osd_ap0`) are false decodes.
+  - **`JTDX` defaults (`5` `unconf`):** 2 shared real (`D01GMW`, `IN80CE`), 1 plausible (`IQ5PJ EA5TA -14`), 2 random (`I05RYL 9I9YDL MR90`, `8Q7NES/P XE8ERK GM75`).
+  - **`JTDX` deep (`20` `unconf`):** 3 shared real (`R8QBH/1`, `D01GMW`, `IN80CE`) and **17 visibly random false decodes**, including **4 self-consistent double hallucinations** at identical slot & audio frequency (`DE TP9PLX TU` + `KV3CQB TP9PLX R 589 0110`; `DE H74KVQ TU` + `DP5SSO H74KVQ R 579 7856`; `DE SI5WYG TU` + `O53NXD SI5WYG R 599 2606`; `DE ZE2TAQ TU` + `AJ2VKS ZE2TAQ R 599 6485`).
+  - **`jt9` (`44` `unconf`):** 3 shared real (`R8QBH/1`, `D01GMW`, `IN80CE`) and **41 random false decodes**.
+
+### Strict exclusive confirmation (`verify.py --others`, 4 Hz / 0.2 s on another SDR ≥ 50 km away)
+
+| Decoder | Exclusive decodes (`third`) | `xconf-strict` | Strict % | `unconfirmable` | `unconfirmable` base tiers |
+|---|---:|---:|---:|---:|---|
+| `ft8_lib` | 5 | 3 | 60.0% | 2 | `slot`: 1, `active`: 1 |
+| `JTDX` defaults | 96 | 45 | 46.9% | 51 | `slot`: 26, `active`: 24, `unconf`: 1 |
+| `jt9 -8 -d 3` | 167 | 88 | 52.7% | 79 | `slot`: 27, `active`: 11, `unconf`: 41 |
+| `JTDX` deep | 516 | 186 | 36.0% | 330 | `slot`: 173, `xconf`: 1, `active`: 140, `unconf`: 16 |
+| **`ft8nn` (`models/v4`)** | **7,102** | **4,590** | **64.6%** | **2,512** | **`slot`: 1,658, `xconf`: 8, `active`: 843, `unconf`: 3** |
+
+### Per-run breakdown (`sets/third.txt`, `decodes / confirmed / unconf`)
+
+| Run (bands, region) | `jt9 -8 -d 3` | `ft8_lib` | `JTDX` defaults | `JTDX` deep | **`ft8nn` (`models/v4`)** |
+|---|---:|---:|---:|---:|---:|
+| `r02` (15/17 m, EU) | 8,338 / 7,883 / 8 | 4,725 / 4,550 / 0 | 8,748 / 8,305 / 0 | 9,140 / 8,639 / 3 | **9,901 / 9,212 / 3** |
+| `r05` (40/20 m, EU) | 5,195 / 5,019 / 3 | 2,735 / 2,661 / 0 | 5,546 / 5,335 / 1 | 5,852 / 5,592 / 1 | **6,488 / 6,148 / 0** |
+| `r06` (10 m, NA) | 1,081 / 914 / 4 | 722 / 630 / 0 | 1,185 / 1,002 / 0 | 1,217 / 1,032 / 1 | **1,359 / 1,141 / 0** |
+| `r07` (40/80 m, EU) | 8,252 / 7,983 / 6 | 4,098 / 4,008 / 0 | 8,867 / 8,554 / 0 | 9,306 / 8,948 / 2 | **10,541 / 10,048 / 0** |
+| `r08` (20/30 m, NA+SA) | 5,964 / 5,720 / 4 | 3,114 / 3,018 / 0 | 6,581 / 6,271 / 0 | 7,040 / 6,682 / 1 | **7,918 / 7,479 / 0** |
+| `r09` (20/30 m, EU+OC) | 2,769 / 2,426 / 1 | 1,795 / 1,592 / 0 | 2,915 / 2,603 / 0 | 2,994 / 2,665 / 0 | **3,288 / 2,862 / 0** |
+| `r10` (20/17 m, EU+AS) | 6,916 / 6,584 / 3 | 4,245 / 4,077 / 0 | 7,309 / 7,057 / 0 | 7,600 / 7,311 / 5 | **8,317 / 7,869 / 0** |
+| `r11` (160/80 m, EU) | 8,241 / 7,980 / 5 | 4,693 / 4,547 / 0 | 8,442 / 8,285 / 3 | 8,756 / 8,561 / 5 | **9,353 / 8,950 / 2** |
+| `r12` (30/40 m, EU+AF) | 3,983 / 3,760 / 6 | 1,843 / 1,768 / 0 | 4,335 / 4,099 / 1 | 4,629 / 4,350 / 1 | **5,647 / 5,254 / 1** |
+| `r13` (12 m, NA) | 1,785 / 1,620 / 2 | 1,160 / 1,065 / 0 | 1,888 / 1,709 / 0 | 1,969 / 1,771 / 1 | **2,233 / 2,000 / 0** |
+| `r14` (60 m, EU dawn) | 798 / 784 / 2 | 650 / 640 / 0 | 826 / 810 / 0 | 837 / 818 / 0 | **874 / 855 / 0** |
+
+### Timing & agreement with `sets/small.txt` (8-core Apple M1, `6` workers)
+
+| Decoder | `small` (16 blocks) dec / conf / unconf | `small` wall / core-s per slot | `third` (265 blocks) dec / conf / unconf | `third` wall / core-s per slot |
+|---|---|---|---|---|
+| `ft8_lib` | 1,545 / 1,475 / 0 (−44.6%) | 0.02 min / 0.04 s | 29,780 / 28,556 / 0 (−44.2%) | 0.17 min / 0.02 s |
+| `jt9 -8 -d 3` | 2,789 / 2,633 / 2 (–) | 1.91 min / 3.48 s | 53,322 / 50,673 / 44 (–) | 27.05 min / 3.66 s |
+| `JTDX` defaults | 2,970 / 2,819 / 0 (+6.5%) | 2.34 min / 4.30 s | 56,642 / 54,030 / 5 (+6.2%) | 32.44 min / 4.39 s |
+| `JTDX` deep | 3,128 / 2,953 / 2 (+12.2%) | 18.29 min / 31.85 s | 59,340 / 56,369 / 20 (+11.3%) | 244.02 min / 33.05 s |
+| **`ft8nn` (`models/v4`)** | **3,396 / 3,154 / 0 (+21.8%)** | **1.99 min / 3.22 s** | **65,919 / 61,818 / 6 (+23.6%)** | **29.77 min / 4.04 s** |
+
+`small` (19–25 min total) and `third` (~5.6 h total) rank all five decoders in the exact same order, with relative margins agreeing within ~1–2 percentage points.
+
+### Pairwise overlaps on `sets/third.txt` (`(run, station, slot, sender)` pairs)
+
+| Pair (`A` vs `B`) | Both | `A`-only (`confirmed [slot+xconf] / active / repeat / unconf`) | `B`-only (`confirmed [slot+xconf] / active / repeat / unconf`) |
+|---|---:|---|---|
+| `jt9` vs `ft8nn` (`nn_v4`) | 51,416 | 769 (`694 [552+142] / 33 / 1 / 41`) | **13,211 (`11,808 [9,267+2,541] / 1,398 / 2 / 3`)** |
+| `jtdx` vs `ft8nn` (`nn_v4`) | 54,265 | 1,675 (`1,473 [895+578] / 199 / 1 / 2`) | **10,362 (`9,241 [7,219+2,022] / 1,113 / 4 / 4`)** |
+| `jtdx_deep` vs `ft8nn` (`nn_v4`) | 56,414 | 2,150 (`1,829 [1,180+649] / 307 / 1 / 13`) | **8,213 (`7,287 [5,691+1,596] / 922 / 1 / 3`)** |
+| `jtdx` vs `jtdx_deep` | 55,474 | 466 (`414 [324+90] / 51 / 0 / 1`) | 3,090 (`2,713 [2,136+577] / 361 / 3 / 13`) |
+| `jt9` vs `jtdx` | 50,067 | 2,118 (`1,919 [1,484+435] / 154 / 3 / 42`) | 5,873 (`5,250 [3,874+1,376] / 620 / 0 / 3`) |
+| `jt9` vs `ft8_lib` | 29,076 | 23,109 (`22,103 [17,432+4,671] / 956 / 6 / 44`) | 52 (`50 [40+10] / 2 / 0 / 0`) |
+
+---
+
+## 2. Historical comparison — `models/v3` on archived v1 validation runs 2–4 (2026-11-10)
+
+Measured 2026-11-10 on archived v1 validation runs 2, 3 and 4 — 36 KiwiSDR receivers never used for
+training, 4,302 slots of 15 s — and scored with legacy `collect/verify.py` (`--near-km 0 --xconf off`) against the PSK Reporter spots
 captured during the same sessions. `nn_v3` and `jt9` columns are the measurements already recorded
 in `STATUS.md`, on the same slots with the same scorer, so the rows are directly comparable.
 

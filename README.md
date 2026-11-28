@@ -1,306 +1,239 @@
 # ft8nn — neural soft-demodulation FT8 decoder
 
-Goal: an FT8 decoder more sensitive than WSJT-X, packaged so other software can embed it.
+`ft8nn` is a high-sensitivity FT8 decoder implemented as an embeddable C11 library (`libft8nn`), a drop-in external FT8 decoder sidecar for WSJT-X (`ft8nn_sidecar`), and a bit-matched Python/PyTorch reference and training pipeline.
 
-Approach: keep FT8's LDPC(174,91) + CRC-14 (near-optimal, gives false-decode protection) and replace
-the hand-made soft metrics with a small neural net that turns baseband symbol spectra into bit LLRs.
+Instead of replacing FT8's error-correcting code, `ft8nn` keeps FT8's exact **LDPC(174,91) + CRC-14** structure — preserving algebraic protection against false decodes — and replaces hand-crafted tone-energy soft metrics with **`SoftDemod`** (`models/v4`, 0.84M parameters: 1-D dilated convolutions + 4-layer Transformer), which maps 200 Hz baseband complex symbol spectra directly into calibrated per-bit log-likelihood ratios (LLRs). Around the neural demodulator, the decoder runs:
 
-## Results vs stock WSJT-X `jt9`
+- **4 decode-and-subtract passes** with exact `sin²`-shaped GFSK waveform reconstruction and interference cancellation;
+- **Belief propagation (BP) + ordered-statistics decoding (OSD-2)**, with gated **OSD-3** fallback inside multi-constraint verified stages;
+- **DT re-centring** for receivers with clock offset or packet drift, plus **SNR baseline estimation** matched to WSJT-X 3.0 (`±0.1 dB` median vs `jt9` across 80k shared decodes);
+- **3-minute station context a-priori (`30..180 s`)** for standard and `i3=4` non-standard callsigns, **cross-slot soft LLR Chase combining (`30/60 s`)**, **full-codeword repeat & clear-winning successor correlation**, **co-channel collision recovery**, and **3×3 micro-shift refinement** on marginal hypotheses.
 
-Baseline everywhere below: WSJT-X's own FT8 decoder run as `jt9 -8 -d 3`, i.e. depth 3, its deepest routine
-search (`bench/run_jt9.py`; the real-recording baselines were made with WSJT-X Improved 3.0.2, see
-`docs/data-collection.md`).
-Ours: the shipped default, `models/v3` + the decoder defaults (4 passes with subtraction, OSD, CQ and context
-a-priori decoding, DT re-centring for receivers whose clock drifts, the co-channel retry that finds a second station
-hidden under one already decoded, and the repeat stage that tests a station's message from 30/60 s earlier as a
-whole known codeword against only the messages a station could send next), tag `nn_v3_ccrpc`. The AWGN and fading
-rows are unaffected by the last three (no slot times, so no context; the re-centring gate never arms; synthetic
-slots hold no co-channel pairs - AWGN re-measured with `nn_v3_ccrpc`: identical) and were measured with `nn_v3`.
+---
 
-### Sensitivity: about 1.2 dB on AWGN
+## Results
 
-Synthetic benchmark sets (`bench/make_set.py`, commands under [Reproduce](#reproduce)): 10 signals per 15 s slot,
-30 slots per SNR, real messages; a decode counts only on exact text match and DT ≤ 0.5 s. The number is the SNR
-(in 2.5 kHz, the WSJT-X convention) at which 50% of the signals decode, so **lower is better and the gain is the
-difference**:
+All comparisons below evaluate the shipped **`models/v4`** decoder (`libft8nn` / `bench/run_real.py` defaults) against four external decoders on identical 12 kHz mono WAV recordings:
 
-| set | `jt9 -d 3` | ft8nn | gain |
-|---|---|---|---|
-| AWGN | −21.31 dB | **−22.49 dB** | **1.18 dB** |
-| moderate fading (0.5 Hz spread / 1 ms delay) | −19.40 dB | **−20.12 dB** | **0.72 dB** |
-| disturbed fading (1 Hz / 2 ms) | −19.19 dB | **−20.16 dB** | **0.97 dB** |
-| 10,000 noise-only slots | – | 0 false decodes | – |
+- **`jt9` deep (`jt9 -8 -d 3`)** — WSJT-X 3.0.2 Improved at its deepest search setting;
+- **`jtdx` (`JTDX 2.2.x` defaults)** — `ndepth=3`, `nft8cycles=1`, low sync thresholds, duplicate suppression on (`tools/jtdx_ft8_file.f90`);
+- **`jtdx` deep (`JTDX -w -c 3 -s 2`)** — JTDX at its sensitivity ceiling (SWL 51-block mode, 9 subtraction passes, extra sub-pass; ~8–10× `ft8nn` CPU);
+- **`ft8lib` (`kgoba/ft8_lib` `decode_ft8`)** — lightweight single-pass BP baseline (the reference implementation family used by mobile apps such as FT8CN/FT8TW).
 
-All three ft8nn rows are the shipped default, measured 2026-11-10 (90% thresholds: −21.24, −17.48 and −18.09 dB;
-no false decodes on any of the three sets). The `jt9` column is the recorded baseline for the same sets, not re-run
-for this table — the sets regenerate byte-identically from their seeds (1, 2, 3 in [Reproduce](#reproduce)), and the
-AWGN 50% and 90% thresholds came out identical to the earlier run on different hardware, which is the check that
-they do. 1.2 dB is roughly the difference between hearing a station and not: on FT8's exponential-ish SNR
-distribution it is what produces the double-digit decode gains below.
+### Sensitivity
 
-### Extra decodes on real air: +24% over `jt9`, on receivers we never trained on
+Synthetic 15 s benchmark sets (`bench/make_set.py`: 10 signals per slot, 30 slots per 1 dB SNR step, real messages from `ft8nn/data/messages.json`; a decode counts only on exact text match with `|DT| ≤ 0.5 s`, anything else is a false decode). Thresholds are SNR in 2,500 Hz (WSJT-X convention) for 50% decode probability — **lower is better**:
 
-The validation set (`datasets/ft8-validation-set`) is KiwiSDR recordings of 120 consecutive 15 s slots per receiver,
-together with every FT8 spot that PSK Reporter logged worldwide in those same slots. That outside spot list is the
-ground truth: the set's own `tools/verify.py` (here `collect/verify.py`) checks each decode's sender against it
-and puts the decode in a tier — **slot-confirmed** (somebody else also spotted that station in that very slot: as close to proof as real air gets)
-down to **unconf** (nobody anywhere heard that station, so an unconfirmed decode is very probably a false one).
-Both decoders are scored the same way on the same audio.
+| Channel (`bench/make_set.py`, `models/v4`) | `jt9 -8 -d 3` (50%) | `ft8nn` (50% / 90%) | Gain at 50% | False decodes |
+|---|---:|---:|---:|---:|
+| **AWGN** (`seed 1`, 300 slots) | −21.31 dB | **−22.55 dB** / −21.29 dB | **+1.24 dB** | 0 / 3,000 signals |
+| **Moderate Watterson fading** (`0.5 Hz` Doppler / `1 ms` delay, `seed 2`, 390 slots) | −19.40 dB | **−20.27 dB** / −17.70 dB | **+0.87 dB** | 0 / 3,900 signals |
+| **Disturbed Watterson fading** (`1.0 Hz` Doppler / `2 ms` delay, `seed 3`, 450 slots) | −19.19 dB | **−20.23 dB** / −18.19 dB | **+1.04 dB** | 0 / 4,500 signals |
+| **Pure Gaussian noise** (`10,000` slots `noise10k` + `100` slots `noise`) | – | – | – | **0 false decodes** |
 
-| run (unseen = no receiver shared with training) | slots | `jt9` decodes | ft8nn decodes | extra decodes | slot-confirmed | unconf (≈ false) |
-|---|---|---|---|---|---|---|
-| 1 — 9 training-site Kiwis, other bands and times | 1086 | 27,730 | 34,727 | **+6,997 (+25.2%)** | 21,492 → 26,615 (+23.8%) | 13 → 1 |
-| 2 — 9 unseen Kiwis, Wed 22:30 UTC, 160–10 m | 1086 | 24,291 | 29,691 | **+5,400 (+22.2%)** | 17,993 → 21,820 (+21.3%) | 16 → 1 |
-| 3 — 12 unseen Kiwis, Mon 05:32 UTC, 80–10 m | 1447 | 23,524 | 28,418 | **+4,894 (+20.8%)** | 17,888 → 21,421 (+19.8%) | 17 → 1 |
-| 4 — 15 unseen Kiwis, Mon 15:00 UTC, 80–10 m | 1790 | 38,432 | 48,999 | **+10,567 (+27.5%)** | 28,053 → 35,541 (+26.7%) | 29 → 2 |
-| **runs 2 + 3 + 4 — unseen receivers only** | **4323** | **86,247** | **107,108** | **+20,861 (+24.2%)** | 63,934 → 78,782 (+23.2%) | 62 → 4 |
-| all four runs, 45 receivers | 5409 | 113,977 | 141,835 | +27,858 (+24.4%) | 85,426 → 105,397 (+23.4%) | 75 → 5 |
+On HF's steep weak-signal density distribution, ~1.0–1.2 dB of threshold gain translates into **+22–28% more real off-air decodes** per 15 s period without raising the false-decode floor.
 
-What this says:
+### Extra Decodes
 
-- **About 20,900 extra decodes** out of 4,323 slots of unseen-receiver audio, i.e. **+4.8 decodes in every 15 s
-  slot** on top of `jt9` — +5.9 on run 4's busy daytime high bands, +3.4 on run 3's quiet dawn ones.
-- The gain is not a counting artefact: slot-confirmed decodes, the ones independently spotted by other receivers,
-  rise almost as much (+23.2%); before the repeat stage, 99% of our extra decodes named a callsign `jt9` itself
-  heard at that receiver.
-- It is **not bought with false decodes** — the opposite. Across the four runs `jt9` leaves 75 unconfirmed
-  decodes and ft8nn 5, and ft8nn finds no decode at all in 10,000 noise-only slots. FT8's CRC-14 plus the LDPC
-  code does the filtering, and we kept both; the repeat stage, which skips both, is held to 0 accepted in 223,643
-  tests with a wrong receiver's context, and of its decodes that `jt9` or JTDX also decoded, 1,936 of 1,939 carry
-  the same message (`STATUS.md` plan 12; the competitor change kept that null at 0 and its 578 new decodes on runs
-  2–4 agree with every one of the 319 that a reference also decoded). The co-channel retry, which decodes at places no sync search proposed,
-  made 0 false decodes from 1.17 million hypotheses forced onto noise-only audio, and none of its 874 decodes on
-  the four runs is unconfirmed (`STATUS.md` plan 7.1 item 1c).
-- Runs 2, 3 and 4 are the honest numbers (receivers, days, times and bands never used for training, and never
-  used to tune a threshold). Run 1 reuses training receivers on other bands and times, and scores in the same
-  range. The gain grows with band activity: run 4's crowded afternoon high bands (up to 45 decodes per slot)
-  give +27.5%, run 3's quiet dawn bands +20.8%.
-- ft8nn is not a superset of `jt9`: some decodes are `jt9`-only (948 of run 4's 38,432, 850 on run 2 when that
-  count was last measured, with `nn_v3`), and surprisingly many of them are strong signals rather than marginal ones — 59 of
-  run 4's at ≥ 0 dB. Diagnosing the remainder is open work — see `STATUS.md`.
+#### Multi-receiver HF validation set (`datasets/ft8-validation-set`, `runs/r02` & `r05`–`r14`)
 
-### Against JTDX: +14.7% over its defaults, +9.6% over its most sensitive settings
+The off-air validation set comprises **7,172 slots** from **60 public KiwiSDR receivers** across all 10 HF FT8 bands (`160 m`–`10 m`), all 6 continents, and day/twilight/night propagation — strictly disjoint in receiver location (`0.1°` + URL) from the training recordings and from the earlier v1 validation runs (`excluded_sites.json`). Each band is recorded simultaneously on groups of 3–4 KiwiSDRs `50–1,500 km` apart alongside live OpenWebRX real-time FT8 decode streams and global PSK Reporter MQTT spots.
 
-JTDX 2.2.x (built from `git://git.code.sf.net/p/jtdx/code` by `tools/jtdx_build.py`) is the WSJT-X fork tuned for
-weak-signal FT8, so it is the stronger classical baseline. Same unseen runs, same audio, same scorer as above;
-"JTDX deep" is JTDX at its most sensitive settings (`-w -c 3 -s 2`: SWL mode, 9 subtraction passes, extra
-low-threshold pass), which costs it 5× the CPU of its defaults. `nn_v3` is our decoder before the repeat stage, DT re-centring and the co-channel retry, for reference.
-Decodes / slot-confirmed / unconf:
+Each block in `sets/{small,third,full}.txt` decodes 2 unscored lead-in slots followed by 8 scored slots (2 min) as an independent sequence so stateful decoders (`ft8nn`, `JTDX`) have identical warm-up across set sizes. `collect/verify.py` classifies every checkable decode (unhashed transmitter callsign) into:
 
-| run | `jt9` | JTDX defaults | JTDX deep | `nn_v3` | **ft8nn (`nn_v3_ccrpc`)** |
-|---|---|---|---|---|---|
-| 2 | 24,291 / 17,993 / 16 | 26,293 / 19,435 / 1 | 27,417 / 20,202 / 16 | 28,198 / 20,701 / 1 | **29,691 / 21,820 / 1** |
-| 3 | 23,524 / 17,888 / 17 | 25,279 / 19,125 / 3 | 26,321 / 19,855 / 9 | 26,688 / 20,105 / 0 | **28,418 / 21,421 / 1** |
-| 4 | 38,432 / 28,053 / 29 | 41,820 / 30,599 / 7 | 43,973 / 32,103 / 19 | 45,744 / 33,070 / 2 | **48,999 / 35,541 / 2** |
-| **runs 2 + 3 + 4** | 86,247 / 63,934 / 62 | 93,392 / 69,159 / 11 | 97,711 / 72,160 / 44 | 100,630 / 73,876 / 3 | **107,108 / 78,782 / 4** |
+1. **`slot`** — transmitter spotted on PSK Reporter by a reporter **> 50 km** from our receiver in the exact 15 s slot (`±50 Hz` after per-receiver calibration);
+2. **`xconf`** — identical message decoded without a-priori information in the same slot by another recorded KiwiSDR or live OpenWebRX stream **≥ 50 km** away (`±50 Hz`, `±0.5 s` of 6-min pair median DT);
+3. **`confirmed` = `slot + xconf`** — independent same-slot external corroboration;
+4. **`active`** / **`repeat`** — transmitter spotted on the band within `±10 min`, or decoded in `≥ 2` slots on the same receiver;
+5. **`unconf`** — never spotted on the band during the session and heard only once (false-decode proxy);
+6. **`xconf-strict` (`--others`)** — for decodes *exclusive* to a single decoder on that receiver, requires another SDR `≥ 50 km` away to have decoded the identical message within **4 Hz** and **0.2 s**.
 
-ft8nn's margin over JTDX, decodes / slot-confirmed:
+**5-decoder head-to-head on `sets/third.txt` (`265` blocks, `2,650` decoded / `2,120` scored slots across all 11 runs `r02`, `r05`–`r14`; 8-core Apple M1, `6` workers):**
 
-| run | `nn_v3` vs JTDX defaults | **ft8nn vs JTDX defaults** | `nn_v3` vs JTDX deep | **ft8nn vs JTDX deep** |
-|---|---|---|---|---|
-| 2 | +7.2% / +6.5% | **+12.9% / +12.3%** | +2.8% / +2.5% | **+8.3% / +8.0%** |
-| 3 | +5.6% / +5.1% | **+12.4% / +12.0%** | +1.4% / +1.3% | **+8.0% / +7.9%** |
-| 4 | +9.4% / +8.1% | **+17.2% / +16.2%** | +4.0% / +3.0% | **+11.4% / +10.7%** |
-| **runs 2 + 3 + 4** | +7.8% / +6.8% | **+14.7% / +13.9%** | +3.0% / +2.4% | **+9.6% / +9.2%** |
+| Decoder | Decodes | vs `jt9` | Checkable | `slot` | `xconf` | **Confirmed (`slot+xconf`)** | vs `jt9` | Conf % | `active` | `unconf` | Core-s / slot |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `ft8lib` (`decode_ft8`) | 29,780 | −44.2% | 29,175 | 22,029 | 6,527 | 28,556 | −43.6% | 97.9% | 618 | **0** | 0.02 s |
+| `jt9` deep (`jt9 -8 -d 3`) | 53,322 | – | 52,301 | 39,445 | 11,228 | 50,673 | – | 96.9% | 1,577 | **44** | 3.66 s |
+| `jtdx` (2.2.x defaults) | 56,642 | +6.2% | 56,120 | 41,862 | 12,168 | 54,030 | +6.6% | 96.3% | 2,081 | **5** | 4.39 s |
+| `jtdx` deep (`-w -c 3 -s 2`) | 59,340 | +11.3% | 58,800 | 43,704 | 12,665 | 56,369 | +11.2% | 95.9% | 2,403 | **20** | 33.05 s |
+| **`ft8nn` (`models/v4`, C `3A`)** | **65,919** | **+23.6%** | **64,783** | **48,169** | **13,649** | **61,818** | **+22.0%** | **95.4%** | **2,951** | **6** | **4.04 s** |
 
-- Pooled, that is 13,716 more decodes than JTDX at its defaults (9,623 more slot-confirmed) and 9,397 more than
-  JTDX at its ceiling (6,622 more slot-confirmed).
-- JTDX's extra sensitivity costs it false decodes: its deep settings raise unconf from 11 to 44, toward `jt9`'s 62;
-  ft8nn has 4.
-- Most of the jump from `nn_v3` comes from the repeat stage (a station's message from 30/60 s earlier tested whole
-  against the audio — the idea behind JTDX's own `^` stage, which this comparison found was most of what JTDX
-  decoded and we missed), about 1 point from DT re-centring and half a point from the co-channel retry (a second
-  station sharing a decoded station's frequency and time, whose sync the subtraction of the first took away) and
-  half a point from scoring repeats only against messages a station could send. Details, the JTDX build and the FT8TW / ft8_lib
-  comparison: `docs/decoder-comparison.md`.
+- **Gain over WSJT-X `jt9 -8 -d 3`:** **`+12,597` extra decodes (`+23.6%`, `+5.94` extra decodes in every 15 s slot)** and **`+11,145` extra confirmed decodes (`+22.0%`)**, winning on **all 11 of 11 runs** (`+9.5%` on quiet dawn 60 m up to `+41.8%` on crowded evening 40/30 m).
+- **Gain over JTDX:** **`+16.4%` decodes (`+9,277`) / `+14.4%` confirmed (`+7,788`)** over `jtdx` defaults while running **faster per core** (`4.04 s` vs `4.39 s`), and **`+11.1%` decodes (`+6,579`) / `+9.7%` confirmed (`+5,449`)** over `jtdx` deep (`-w -c 3 -s 2`) at **`8.2×` lower CPU** (`29.8 min` vs `244.0 min` wall).
+- **False-decode audit (`unconf`):** Of `ft8nn`'s **6** `unconf` rows in `65,919` decodes, **4 are genuine unspotted or free-text on-air signals** (`CQ D01GMW JO31` and `CQ DX IN80CE`, both decoded via plain BP by all four deep decoders; `<UA1AAP> R8QBH/1`, an active QSO partner also decoded by `jt9` and `jtdx_deep`; and `DL1NB JO30`, a free-text grid message from active station `DL1NB` where `verify.py` parsed `JO30` as the sender), leaving **only 2 actual false decodes in 65,919 (`0.003%`)** — vs **17** random false decodes in `jtdx` deep (including 4 `DE <call> TU` + contest-exchange double hallucinations) and **41** in `jt9`.
 
-`STATUS.md` has the per-decoder-version history behind these tables and the commands that produce them.
+**Strict exclusive confirmation on `sets/third.txt` (`verify.py --others`, 4 Hz / 0.2 s on another SDR ≥ 50 km away):**
 
-## System requirements
+| Decoder | Exclusive decodes | `xconf-strict` | Strict % | `unconfirmable` | `unconfirmable` base tiers |
+|---|---:|---:|---:|---:|---|
+| `ft8lib` | 5 | 3 | 60.0% | 2 | `slot`: 1, `active`: 1 |
+| `jtdx` | 96 | 45 | 46.9% | 51 | `slot`: 26, `active`: 24, `unconf`: 1 |
+| `jt9` deep | 167 | 88 | 52.7% | 79 | `slot`: 27, `active`: 11, `unconf`: 41 |
+| `jtdx` deep | 516 | 186 | 36.0% | 330 | `slot`: 173, `xconf`: 1, `active`: 140, `unconf`: 16 |
+| **`ft8nn` (`models/v4`)** | **7,102** | **4,590** | **64.6%** | **2,512** | **`slot`: 1,658, `xconf`: 8, `active`: 843, `unconf`: 3** |
 
-Two machines have been tested: Apple M1 Pro (10 cores, 16 GB, macOS 26) and Mac mini M4 (4 performance +
-6 efficiency cores, 16 GB, macOS 27), both arm64. The C timings below were measured on the M4; the Python ones on
-the M1 Pro. Other platforms and smaller machines have not been tried.
+`ft8nn` recovers **7,102 decodes that none of `{jt9, ft8lib, jtdx, jtdx_deep}` found on the same receiver**; **64.6% (`4,590`)** are independently verified within `4 Hz` and `0.2 s` on another SDR `≥ 50 km` away, and `99.9%` of the remainder (`2,509 / 2,512`, mostly on single-Kiwi continents or weaker than the partner SDRs' `jt9` confirmers) are PSK Reporter `slot` or `active`.
 
-### Decoding with the C library (`c/`, `libft8nn`)
+**Pairwise callsign-slot overlap on `sets/third.txt` (`(run, station, slot, sender)` pairs):**
 
-| | Requirement |
-|---|---|
-| OS | macOS arm64 (tested) and Linux: CI (`.github/workflows/linux.yml`) builds and tests on Ubuntu 24.04 x64 and arm64, including a C-vs-Python decode check (arm64 also verified locally with `act`). Native Windows needs its own build files; the code has `_WIN32` branches for threads, clocks and paths that have not been compiled yet. |
-| Build tools | C11 compiler (tested: Apple clang 21; the code is plain C11 without variable-length arrays or 128-bit integers) and `make` |
-| Libraries | ONNX Runtime 1.31.1, Microsoft's official build: `tools/get_onnxruntime.sh` downloads its NuGet package (152 MB, every platform; checked against a pinned SHA-256) and unpacks the library for this machine (macOS arm64, Linux x64/aarch64, Windows x64) into `third_party/onnxruntime`, where `make -C c` finds it. Homebrew's `onnxruntime` is used as a fallback, but it runs this model 2.3× slower. `make -C c ORT_PREFIX=<dir>` uses any other copy. No other dependencies. |
-| Model | `ft8nn.onnx`, 3.5 MB (exported from a trained checkpoint by `tools/export_onnx.py`) |
-| Memory | about 540 MB peak resident per decoding context on the busiest receivers (360–570 MB across stations) |
-| CPU | To keep up in real time every 15 s slot must finish decoding within 15 s. On one core, slots average 2.8 s (first 20 slots of each of the 10 training stations, max 7.5 s). The busiest receiver tested (40 m, about 48 decodes per slot) takes 6.9 s per slot (max 8.0 s), so one core keeps up with room to spare. Measured with `ft8nn_cli --time` and the official ONNX Runtime build, machine awake and otherwise idle (Homebrew's build: 10.9 s per busy slot). `--threads N` splits every pass across N cores with exactly the same decodes (0.3% more instructions); the WSJT-X sidecar uses one thread per performance core and hands out decodes while a pass is still running, so the strongest signals of a busy slot appear about 0.3 s after the decode starts (STATUS.md plan 6). |
+| Comparison (`A` vs `B`) | Decoded by both | `A`-only (`confirmed` / `active` / `unconf`) | `B`-only (`confirmed` / `active` / `unconf`) |
+|---|---:|---|---|
+| `jt9` vs `ft8nn` (`nn_v4`) | 51,416 | 769 (`694` / `33` / `41`) | **13,211 (`11,808` / `1,398` / `3`)** |
+| `jtdx` vs `ft8nn` (`nn_v4`) | 54,265 | 1,675 (`1,473` / `199` / `2`) | **10,362 (`9,241` / `1,113` / `4`)** |
+| `jtdx` deep vs `ft8nn` (`nn_v4`) | 56,414 | 2,150 (`1,829` / `307` / `13`) | **8,213 (`7,287` / `922` / `3`)** |
 
-### Decoding with the Python reference (`ft8nn/`)
+**Quick-check `sets/small.txt` (`16` blocks, `128` scored slots across all 10 bands & 6 continents):** ranks all 5 decoders in the exact same order — `ft8lib` `1,545` (`−44.6%`, `0` `unconf`), `jt9` `2,789` (`2` `unconf`), `jtdx` `2,970` (`+6.5%`, `0` `unconf`), `jtdx` deep `3,128` (`+12.2%`, `2` `unconf`), and **`ft8nn` `3,396` (`+21.8%` vs `jt9`, `+14.3%` vs `jtdx`, `+8.6%` vs `jtdx` deep, `0` `unconf`, `3.22 s/slot/core`)**.
 
-| | Requirement |
-|---|---|
-| Python | ≥ 3.12, managed with [uv](https://docs.astral.sh/uv/) |
-| Packages | numpy, scipy, torch (the environment is about 0.9 GB on disk) |
-| Model | `model.pt`, 3.4 MB |
-| Memory | about 690 MB peak resident for one decoding process |
-| CPU | about 4 s per slot per core on average (torch uses Accelerate on Apple Silicon), measured before the 4th decode pass and context a-priori decoding were added, so now higher |
+#### Archived v1 unseen validation runs (`val2`–`val4`, full 30-minute continuous streams)
 
-### Training and benchmarks
+On the earlier v1 full-receiver validation runs (`120` consecutive slots per receiver, PSK Reporter `slot` confirmation without `xconf`; see `docs/decoder-comparison.md` and `STATUS.md`):
 
-- Training: the v2 recipe takes about 4 h on M-series with MPS (Apple GPU). It has not been tried on CPU only
-  or with less than 16 GB RAM.
-- jt9 baselines need WSJT-X's `jt9` at `/usr/local/bin/jt9`. The real-recording benchmarks need the recordings: git
-  submodules under `datasets/` (Git LFS, ~680 MB packed), fetched and unpacked as in `docs/data-collection.md`:
-  `git submodule update --init`, then `tools/datarepo.py unpack` in each.
+- **Unseen runs 2 + 3 (`21` fresh KiwiSDRs, `2,524` slots, `models/v4`):** **`61,169` decodes / `45,313` slot-confirmed / `2` unconf** (1 real unspotted DX `K1BMW UA0LAQ -17` spotted 13 min later, 1 actual false) vs `jt9 -d 3`'s **`47,815 / 35,881 / 33`** (**`+27.9%` decodes / `+26.3%` slot-confirmed**), `JTDX` defaults' **`51,572 / 38,560 / 4`** (**`+18.6%` / `+17.5%`**), and `JTDX` deep's **`53,738 / 40,057 / 25`** (**`+13.8%` / `+13.1%`**).
+- **Repeat & Chase stage integrity:** across wrong-band shuffle nulls (`223,643` repeat tests and `106,000` cross-band Chase pairs), false acceptances are **0**, and on unseen Run 2 every one of the `205` `rp` decodes whose sender `jt9` also decoded matches `jt9` **205 / 205 (`100%`)** in exact message text (`0` stale repeats).
 
-## Layout
+---
 
-| Path | What |
-|---|---|
-| `models/v3/` | the shipped model: `model.pt` (PyTorch), `ft8nn.onnx` (for the C library), training `log.json` |
-| `models/v2/` | its predecessor and starting point (synthetic noise only) |
-| `ft8nn/ft8.py` | CRC-14, LDPC encode, tone map, GFSK waveform (bit-exact vs WSJT-X `ft8code`) |
-| `ft8nn/channel.py` | 12 kHz slot synthesis, AWGN/Watterson fading, ft8sim-calibrated SNR |
-| `ft8nn/frontend.py` | candidate search, 200 Hz downsampler, semi-coherent Costas fine sync, classical metrics |
-| `ft8nn/ldpc.py` | batched BP + ordered-statistics decoding (OSD) |
-| `ft8nn/synth_bb.py` | on-the-fly batched training data at baseband (torch), matched to the front end |
-| `ft8nn/model.py` | `SoftDemod` (conv + transformer) and feature extraction |
-| `ft8nn/decoder.py` | end-to-end slot decoder with pluggable metric |
-| `train.py` | training with built-in NN-vs-classical BP validation |
-| `bench/` | benchmark set generation, jt9 runner, our runner, comparison report |
-| `tools/` | LDPC table extraction, message pool, sync diagnostics |
-| `datasets/` | submodules: the training recordings and the validation set (packed; unpack in place) |
-| `collect/` | real-data collection: KiwiSDR recorder, PSK Reporter capture, jt9 labelling, spot scoring, run records and SHA-256 manifests (`docs/data-collection.md`) |
-| `wsjtx/` | `ft8nn_sidecar`: this decoder as WSJT-X's external FT8 decoder (`WSJTX_FT8_DECODER`, JSON lines + raw audio on a pipe), so WSJT-X decodes FT8 with it (`wsjtx/README.md`) |
+## Performance & Resource Footprint
 
-## Tools
+`libft8nn` (`c/`) is plain C11 with zero external runtime dependencies on macOS (links Apple `-framework Accelerate`) and a single shared library (`onnxruntime`) on Linux and Windows:
 
-### Live receiver directory and comparison
+| Platform / Backend | Busy 40 m (`~54` dec/slot), 1 thread | Busy 40 m, 4 P-cores (`--threads 0`) | Live 11.8 s early pass (`--early 141696`, 4T) | Peak RSS (4T) |
+|---|---:|---:|---:|---:|
+| **macOS arm64 default** (`c/src/nn_accel.c`: `Accelerate` AMX + NEON, parses `ft8nn.onnx` directly) | **3.94 s/slot** (max 4.18 s) | **1.61 s/slot** (max 1.72 s) | **0.80 s** (max 0.84 s; budget 2.60 s) | **155 MiB** |
+| **Linux / Windows default** (`FT8NN_BACKEND=ort`: ONNX Runtime 1.31.1 + `230 KB` `screener.onnx`) | **5.69 s/slot** | **1.83 s/slot** | **0.62 s** (max 0.69 s; budget 2.60 s) | **287 MiB** (187 MiB 1T) |
 
-By default, `tools/live_compare.py` reads the live public-instance API from
-[UberSDR](https://instances.ubersdr.org/), keeps online receivers that advertise digital decoding, and offers
-their supported FT8 bands. It consumes the selected receiver's 12 kHz Opus stream and matching FT8 messages from
-UberSDR's digital-spot WebSocket. `libopus` must be available at runtime.
+*(Measured on an idle 8-core Apple M1, `caffeinate -dims`, 0 sleep events; Mac mini M4 is ~1.8× faster. Decoding is deterministic across thread counts; in streaming mode, the strongest pass-0 signals are emitted ~0.2–0.3 s after a request begins.)*
 
-`collect/receiverbook_directory.py` can snapshot that API to `datasets/receiverbook-directory.json`. It also
-continues to accept a Receiverbook map URL or saved HTML through `--source`; for that legacy OpenWebRX input it
-performs the active stream probes and 60-second traffic measurement described by `--traffic-window`.
+- **Option 3A (macOS):** `c/src/nn_accel.c` loads float32 weights straight from `models/v4/ft8nn.onnx` (`3.38 MB`) and executes `SoftDemod` in thread-local scratch via `cblas_sgemm` + ARM NEON (`max |accel − ort| = 6.7e-6`, **zero decode changes** vs ONNX Runtime), falling back to ONNX Runtime automatically for custom graphs or `FT8NN_BACKEND=ort`.
+- **Option 3B (Linux / Windows):** pairs `ft8nn.onnx` with `models/v4/screener.onnx` (`53k` params, `230 KB` 1-layer `Screener` trained to predict `v4` expected bit errors), screening main-pass candidate hypotheses at `exp_err < 69.0` while running targeted `cochannel`, `refine`, and `repeat` stages unscreened (`99.99%` unseen real-air parity with unscreened `v4`, `0` noise false decodes).
+- **ONNX Runtime privacy:** `ft8nn_open()` sets `ORT_DISABLE_TELEMETRY=1` and calls `DisableTelemetryEvents` before session creation.
+
+---
+
+## Quick Start
+
+### 1. Build the C library & CLI (`c/`)
+
+Supported in CI on **macOS arm64**, **Ubuntu 24.04 x64 & arm64** (`.github/workflows/linux.yml`), and **Windows x64** via MSYS2 MinGW-w64 UCRT64 (`.github/workflows/windows.yml`).
 
 ```sh
-python3 collect/receiverbook_directory.py                 # optional UberSDR directory snapshot
-make -C c                                                 # build libft8nn if needed
-python3 tools/live_compare.py                             # choose a receiver and compare live decodes
-python3 tools/live_compare.py --instance 192.168.1.20:8080  # benchmark against one UberSDR instance (IP, host:port or URL)
+./tools/get_onnxruntime.sh      # downloads pinned official ONNX Runtime 1.31.1 into third_party/ (once)
+make -C c                       # builds c/build/libft8nn.{a,dylib|so|dll} and c/build/ft8nn_cli
+
+# Decode 15 s 12 kHz mono WAV slots (chronological order enables cross-slot context, Chase & hash resolution):
+c/build/ft8nn_cli --threads 0 --time models/v4/ft8nn.onnx slot1.wav slot2.wav
 ```
 
-`--instance` skips the public directory, so it also works for a private or LAN instance. A bare address means
-`http://` (`https://` on port 443). The tool reads the instance's own `/api/description` for its callsign and
-tuning range, then offers every FT8 band inside that range in the same picker; an instance without that endpoint
-gets UberSDR's default 10 kHz–30 MHz. It refuses an instance whose digital decoding is switched off, because that
-instance sends no FT8 decodes to compare against.
+Key C API entry points (`c/include/ft8nn.h`):
+- `ft8nn_open(onnx_path, n_threads)` / `ft8nn_close(ctx)` — `n_threads = 0` uses one worker per performance core;
+- `ft8nn_decode_at(ctx, audio12k, n, slot_time, out, max_out)` — full-slot decode with cross-slot context, Chase, and callsign hash learning;
+- `ft8nn_decode_stream(...)` — streams finalized decode batches via callback during each pass;
+- `ft8nn_decode_early(...)` + `ft8nn_decode_final(...)` — two-stage live decoding at `11.8 s` and `14.4 s`;
+- `ft8nn_set_range(ctx, nfa, nfb)` — clamps search range to `100..4910 Hz` matching `jt9`.
 
-`live_compare.py` presents a curses receiver picker with arrow-key navigation and substring filtering. Once a
-receiver-band pair is selected, it consumes the same UberSDR audio and remote FT8-decoder messages, divides the
-audio into UTC FT8 slots, and decodes it locally with `libft8nn`. The view has three columns. Local and remote
-results occupy the first two frequency-ordered columns: matching messages share a row, while a decode found by only one side has a blank in
-the other column. The picker shows each receiver's current per-band SNR when supplied by the directory, and the
-streaming header links back to the UberSDR directory.
+### 2. Use inside WSJT-X (`wsjtx/ft8nn_sidecar`)
 
-The third column subscribes to `pskr/filter/v2/<selected-band>/FT8/#` on
-[mqtt.pskreporter.info](https://www.mqtt.pskreporter.info/) over TLS (port 1884), with automatic reconnect.
-It shows each transmitting station's RF frequency in MHz, running number of received reports, callsign and grid.
-Reports for the same callsign in the same 15-second slot accumulate into one row, even when receivers report
-slightly different frequencies. Counts restart for each slot. These are worldwide reception reports, not full
-FT8 messages or measurements from the selected receiver. PSK reports align with the transmitting callsign in
-our decoded message (or the remote message when ours is absent). Exact-slot reports take priority; otherwise the
-latest earlier report for that sender on the selected band is used for up to five minutes. This keeps station
-context visible through QSO exchanges that do not generate new spots. Prior context displays `prev Ns` (the
-age in seconds) instead of a report count, so it does not imply reception of the current transmission. Expiry
-uses transmit time, not packet arrival time; viewing history never uses reports from a later slot.
-For example, `W2BBB K1ABC -10` matches reports for `K1ABC`, not `W2BBB`. Frequency breaks ties between
-multiple rows from the same sender; proximity alone never attaches a report to an unrelated or unresolved call.
-Only reports matching a transmitting callsign in the first or second column are displayed; unmatched reports
-are hidden. The PSK header counts matched stations, exact-slot reports, and stations using prior context separately. Resolved calls inside angle brackets can
-match; unresolved hashes and free text remain unmatched. Slot browsing includes only local/remote decode slots.
-
-Slot assignment uses `t_tx` when available, otherwise `t` (receiver timing can vary). Live view follows the
-latest local/remote slot; delayed reports update their original slot and can supply recent station context
-for later QSO messages, within the five-minute limit. Use `[` / `]` or left/right arrows to browse retained slots, and `l` to return to live view.
-Forty recent slots (ten minutes at continuous FT8 activity) are retained per source for late updates.
-Connection status is shown separately so a feed outage does not interrupt local decoding. No additional Python
-packages are needed. Press `q` to return to the picker.
-
-### Script reference
-
-| Script | Description |
-|---|---|
-| `tools/ab_run2.sh` | Runs the quick decoder-change A/B gate: noise-only false-decode testing followed by validation run 2 and PSK Reporter scoring. |
-| `tools/calib_snr.py` | Calibrates the decoder's estimated SNR against known SNRs in synthetic benchmark slots. |
-| `tools/cmp_snr_jt9.py` | Compares our reported SNR with jt9's on the decodes both made, by jt9 SNR, audio frequency and receiver, for one or more decoder tags side by side. |
-| `tools/ci_smoke.py` | Generates a small synthetic workload and checks that the C and Python decoding pipelines produce identical results without needing recorded data. |
-| `tools/compare_decoders.py` | Compares verified decoder outputs across validation runs, including totals, confirmation tiers, overlap, and exclusive signals. |
-| `tools/diag_ctx_miss.py` | Diagnoses reference-only repeated messages that context a-priori decoding should have been able to recover. |
-| `tools/diag_real_miss.py` | Replays a real slot and traces each `jt9`-only signal through residual candidate search, fine synchronization, and NN/LDPC decoding. |
-| `tools/diag_ref_only.py` | Profiles signals decoded by a reference decoder, normally JTDX, but missed by ft8nn. |
-| `tools/diag_strong_miss.py` | Classifies stronger `jt9`-only signals by the pipeline stage at which ft8nn loses them. |
-| `tools/diag_sync.py` | Measures where weak synthetic signals are lost by comparing candidate search and fine synchronization with oracle synchronization. |
-| `tools/diag_sync2.py` | Compares the old and semi-coherent fine synchronizers for timing/frequency accuracy and decode rate. |
-| `tools/export_onnx.py` | Exports a PyTorch `SoftDemod` checkpoint to ONNX and verifies its output with ONNX Runtime. |
-| `tools/extract_ldpc.py` | Extracts the FT8 LDPC generator and parity-check tables from ft8_lib into `ft8nn/data/ldpc.npz`. |
-| `tools/ft8lib_build.sh` | Builds kgoba/ft8_lib's file decoder for use as an FT8CN/FT8TW-family comparison baseline. |
-| `tools/ft8lib_run.py` | Runs ft8_lib over validation recordings and writes `jt9`-format output for the verification pipeline. |
-| `tools/gen_c_tables.py` | Generates the C LDPC header from the same NumPy tables used by the Python decoder. |
-| `tools/gen_call_blocks.py` | Generates the Python and C amateur-call-prefix tables used for message plausibility checks. |
-| `tools/get_onnxruntime.sh` | Downloads Microsoft's official ONNX Runtime build (NuGet package, pinned SHA-256) for the current platform and installs the repository-local link used by the C build. |
-| `tools/golden_c.py` | Checks C-decoder output field by field against saved Python-decoder results on real or synthetic slots. |
-| `tools/jtdx_build.py` | Clones and builds the JTDX FT8 decoder together with the repository's WAV-file driver. |
-| `tools/jtdx_ft8_file.f90` | Provides a command-line WAV-file front end for JTDX's otherwise shared-memory-only FT8 decoder. |
-| `tools/jtdx_run.py` | Runs JTDX over validation stations in chronological order and writes output for verification. |
-| `tools/live_compare.py` | Selects a public UberSDR receiver and compares local ft8nn and remote FT8 decodes live in aligned columns. |
-| `tools/make_message_pool.py` | Uses WSJT-X `ft8code` to generate realistic FT8 messages and their 77-bit payloads for benchmarks. |
-| `tools/make_noise_bank.py` | Builds a training bank of real residual receiver noise after subtracting known decodes from recorded slots. |
-| `tools/mini.sh` | Synchronizes code, data, and results with a configured Mac mini and runs experiments there. |
-| `tools/rp_eval.py` | Evaluates the repeat-decoding stage from saved base decodes without rerunning the complete decoder. |
-| `tools/rp_stale.py` | Detects repeat-stage decodes that incorrectly reuse an older message after a station has moved on. |
-| `tools/try_real_slots.py` | Quickly compares ft8nn and `jt9` on a selected set of real receiver slots. |
-| `tools/validate_full.sh` | Runs the complete pre-commit decoder validation: real runs, noise, AWGN, C build, and C/Python golden comparisons. |
-
-## Reproduce
+`ft8nn_sidecar` implements the external FT8 decoder pipe protocol (`WSJTX_FT8_DECODER`, documented in [`wsjtx/README.md`](wsjtx/README.md)): WSJT-X streams period metadata as JSON + 12 kHz PCM over stdin and receives streaming FT8 decodes over stdout, falling back cleanly to `jt9` if the sidecar exits or no model is found.
 
 ```sh
-uv run pytest -q tests                                     # encoder vs ft8code, LDPC, calibration
-# benchmark sets (byte-identical to the ones behind all results; 10 signals per 15 s slot, 30 slots per SNR)
-uv run python bench/make_set.py --out data/bench/awgn --channel awgn --snrs=-25:-16 --files 30 --seed 1
-uv run python bench/make_set.py --out data/bench/moderate --channel moderate --snrs=-24:-12 --files 30 --seed 2
+make -C c && make -C wsjtx
+make -C wsjtx test              # runs 8 protocol, range, early/final sequence, and fallback checks
+
+WSJTX_FT8_DECODER="$PWD/wsjtx/build/ft8nn_sidecar --model $PWD/models/v4/ft8nn.onnx" \
+  /Applications/wsjtx.app/Contents/MacOS/wsjtx
+```
+
+### 3. Live off-air side-by-side comparison (`tools/live_compare.py`)
+
+Streams live 12 kHz audio (`pcm-zstd` lossless when supported, Opus fallback) and remote FT8 decodes from public UberSDR instances with the skimmer add-on, private `--instance HOST:PORT` receivers, or live OpenWebRX servers, displaying local `libft8nn` decodes, remote decodes, and live TLS PSK Reporter MQTT spots (`mqtt.pskreporter.info:1884`) in aligned curses columns:
+
+```sh
+make -C c
+python3 tools/live_compare.py                             # interactive picker (fair skimmer/OpenWebRX sources)
+python3 tools/live_compare.py --instance 192.168.1.20:8080  # compare against a specific UberSDR instance
+```
+
+---
+
+## Repository Layout
+
+| Path | Contents |
+|---|---|
+| `models/v4/` | Shipped model: `model.pt` (PyTorch), `ft8nn.onnx` (`3.38 MB`), `screener.{pt,onnx}` (`230 KB` ORT pre-screener), `log.json` (`models/v3/` kept as its starting point) |
+| `c/` | `libft8nn` portable C11 decoder (`src/nn_accel.c`, `decode.c`, `frontend.c`, `ldpc.c`, `subtract.c`, `fft.c`, `par.c`) and `ft8nn_cli` |
+| `wsjtx/` | `ft8nn_sidecar` external FT8 decoder for WSJT-X + `fake_wsjtx` protocol test harness (`wsjtx/README.md`) |
+| `ft8nn/` | Python reference decoder (`ft8.py`, `frontend.py`, `model.py`, `nn_metric.py`, `ldpc.py`, `decoder.py`, `subtract.py`, `message.py`) and synthetic baseband generator (`synth_bb.py`, `channel.py`) |
+| `train.py` | Synthetic + real-noise-bank PyTorch training loop (`--cfg v4`) |
+| `bench/` | Synthetic benchmark generator (`make_set.py`), `jt9` & `ft8nn` runners (`run_jt9.py`, `run_ours.py`, `run_real.py`), SNR threshold reporter (`report.py`) |
+| `collect/` | KiwiSDR recorder, PSK Reporter MQTT capture, `verify.py` ground-truth scorer, SHA-256 manifest tools, and archived run metadata (`docs/data-collection.md`) |
+| `tools/` | Validation set block runner (`run_set.py`), multi-decoder comparison (`compare_decoders.py`), ONNX exporter (`export_onnx.py`), screener trainer (`train_screener.py`), C==Python golden verifier (`golden_c.py`), JTDX & `ft8_lib` build/run drivers, and live comparison UI (`live_compare.py`) |
+| `datasets/` | Read-only Git LFS submodules (`ft8-training-data`, `ft8-validation-set`; packed FLAC + `.jsonl.xz`) |
+
+---
+
+## Reproducing Benchmarks & Training
+
+### Python environment & unit tests
+
+Requires Python ≥ 3.12 with [`uv`](https://docs.astral.sh/uv/):
+
+```sh
+uv sync
+uv run pytest -q
+uv run python tools/ci_smoke.py                           # C == Python check on synthetic slots (no LFS data needed)
+```
+
+### Synthetic sensitivity & noise benchmarks
+
+```sh
+uv run python bench/make_set.py --out data/bench/awgn      --channel awgn      --snrs=-25:-16 --files 30 --seed 1
+uv run python bench/make_set.py --out data/bench/moderate  --channel moderate  --snrs=-24:-12 --files 30 --seed 2
 uv run python bench/make_set.py --out data/bench/disturbed --channel disturbed --snrs=-24:-10 --files 30 --seed 3
-uv run python bench/make_set.py --out data/bench/noise --channel awgn --snrs=-80:-80 --files 100 --seed 9   # noise only
-uv run python bench/make_set.py --out data/bench/noise10k --channel awgn --snrs=-80:-80 --files 10000 --seed 19   # 10,000 noise-only slots (false-rate bound)
-uv run python bench/run_jt9.py data/bench/awgn             # WSJT-X baseline (needs jt9 on PATH or /usr/local/bin)
-# the shipped model is models/v3; to retrain it: v1 and v2 (74 min on an M4 with MPS, ~4 h on an M1 Pro) ...
-uv run python train.py --cfg v1 --steps 6000 --out runs/v1
-uv run python train.py --cfg v2 --init runs/v1/model.pt --lr 5e-4 --steps 8000 --out runs/v2
-# ... then v3 = v2 fine-tuned with real receiver noise from the training recordings (needs datasets/, 21 min on the M4):
-uv run python bench/run_real.py datasets/ft8-training-data/recordings --model models/v2/model.pt --also-classical --tag nn_v2_pl --workers 6
-uv run python tools/make_noise_bank.py datasets/ft8-training-data/recordings data/real nn_v2_pl data/noise/train_bank.npy
-uv run python train.py --cfg v2 --init models/v2/model.pt --lr 2e-4 --steps 4000 --noise-bank data/noise/train_bank.npy --real-noise-p 0.5 --seed 1 --workers 8 --out runs/v3
-uv run python bench/run_ours.py data/bench/awgn --tag nn --model models/v3/model.pt --also-classical
+uv run python bench/make_set.py --out data/bench/noise     --channel awgn      --snrs=-80:-80 --files 100 --seed 9
+uv run python bench/make_set.py --out data/bench/noise10k  --channel awgn      --snrs=-80:-80 --files 10000 --seed 19
+
+uv run python bench/run_ours.py data/bench/awgn --tag nn_v4 --model models/v4/model.pt --also-classical
 uv run python bench/report.py data/bench/awgn --dt-max 0.5
-# real recordings and the validation set: see STATUS.md and docs/data-collection.md
 ```
 
-C library:
+### Off-air validation set & 5-decoder comparison
+
+Fetch and unpack the validation recordings (`docs/data-collection.md`), then run and score any block set (`small`, `third`, or `full`):
 
 ```sh
-tools/get_onnxruntime.sh                                    # official ONNX Runtime into third_party/ (once)
-make -C c                                                   # c/build/libft8nn.{a,dylib|so}, c/build/ft8nn_cli
-uv run python tools/export_onnx.py models/v3/model.pt models/v3/ft8nn.onnx
-c/build/ft8nn_cli models/v3/ft8nn.onnx slot.wav               # one line per decode; --threads N, --time
+git submodule update --init
+(cd datasets/ft8-validation-set && python3 tools/datarepo.py unpack runs \
+  --manifest runs/r02/MANIFEST.sha256 --manifest runs/r05/MANIFEST.sha256 --manifest runs/r06/MANIFEST.sha256 \
+  --manifest runs/r07/MANIFEST.sha256 --manifest runs/r08/MANIFEST.sha256 --manifest runs/r09/MANIFEST.sha256 \
+  --manifest runs/r10/MANIFEST.sha256 --manifest runs/r11/MANIFEST.sha256 --manifest runs/r12/MANIFEST.sha256 \
+  --manifest runs/r13/MANIFEST.sha256 --manifest runs/r14/MANIFEST.sha256)
+
+# Optional external baselines (requires gfortran, cmake, pkg-config, fftw, boost for JTDX):
+python3 tools/jtdx_build.py
+sh tools/ft8lib_build.sh
+
+# Decode & score a validation block set (small = 16 blocks, third = 265 blocks, full = 807 blocks):
+for dec in ft8lib jt9 jtdx jtdx_deep; do
+  python3 tools/run_set.py --set third --decoder "$dec" --tag "$dec" --workers 6
+done
+python3 tools/run_set.py --set third --decoder ft8nn --tag nn_v4 --workers 6
+
+POOL="jt9,nn_v4,jtdx,jtdx_deep,ft8lib"
+python3 tools/run_set.py --set third --verify-only --tag nn_v4 --others jt9,ft8lib,jtdx,jtdx_deep --pool-tags "$POOL" --list
+python3 tools/compare_decoders.py --set third --tags jt9 ft8lib jtdx jtdx_deep nn_v4
 ```
 
-Inside WSJT-X (`wsjtx/README.md` has the install steps and the limits):
+### Retraining `models/v4` & exporting ONNX
 
 ```sh
-make -C wsjtx                                                # wsjtx/build/ft8nn_sidecar
-make -C wsjtx test                                           # drives the whole sidecar protocol
+# 1. Build residual real-noise bank from training recordings only:
+uv run python tools/make_noise_bank.py datasets/ft8-training-data/recordings data/real nn_v3_opt8 data/noise/train_bank_v4.npy
+
+# 2. Fine-tune calibrated multipath SoftDemod (v4) from models/v3 and export ONNX + screener:
+uv run python train.py --cfg v4 --init models/v3/model.pt --lr 2e-4 --steps 6000 \
+  --noise-bank data/noise/train_bank_v4.npy --real-noise-p 0.5 --seed 1 --workers 8 --out runs/v4_cal
+uv run python tools/train_screener.py --teacher runs/v4_cal/model.pt --noise-bank data/noise/train_bank_v4.npy --out runs/v4_cal/screener.pt
+uv run python tools/export_onnx.py runs/v4_cal/model.pt runs/v4_cal/ft8nn.onnx
 ```
 
-Benchmark scoring: 10 signals per 15 s slot, real messages from `ft8nn/data/messages.json`;
-a decode counts only on exact text match, anything else is a false decode.
+Detailed development history, ablation numbers, and per-stage validations are recorded in [`STATUS.md`](STATUS.md) and [`docs/decoder-comparison.md`](docs/decoder-comparison.md).

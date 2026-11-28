@@ -1,0 +1,141 @@
+{
+ "probed_utc": "2026-11-17T17:02:06.969425+00:00",
+ "source": "receiverbook-fresh",
+ "regions": [
+  "NA"
+ ],
+ "excluded_sites": "excluded_sites.json",
+ "bands": [
+  "10m"
+ ],
+ "chosen": [
+  {
+   "station": "KF2DA KiwiSDR 2 | Elmira, NY",
+   "lat": 42.08,
+   "lon": -76.82,
+   "label": "KF2DA KiwiSDR 2 | Elmira, NY",
+   "version": "1.902.0",
+   "url": "http://kf2da.ddns.net:8073/",
+   "type": "KiwiSDR",
+   "grid": "FN12ob",
+   "gps_good": "8",
+   "loc_check": "3 km from FN12ob centre (limit 14)",
+   "band": "10m",
+   "probe_decodes": 21,
+   "probe_sample": [
+    "170130  19  0.3 2376 ~  Z21ML K5XI DM52",
+    "170130 -16  0.3 1859 ~  Z21ML W7VA -17",
+    "170130 -11  0.3 1407 ~  CQ CT7AUT IM67",
+    "170130   6  0.6 2520 ~  K5TC <...> -15",
+    "170130 -15  0.4 1692 ~  CQ EA2JE IN92"
+   ],
+   "freq_khz": 28074.0
+  },
+  {
+   "station": "0-30 MHz SDR | Sutton, MA USA",
+   "lat": 42.11,
+   "lon": -71.71,
+   "label": "0-30 MHz SDR | Sutton, MA USA",
+   "version": "1.902.0",
+   "url": "http://kiwisdr.njctech.com:8073/",
+   "type": "KiwiSDR",
+   "grid": "FN42dc",
+   "gps_good": "8",
+   "loc_check": "1 km from FN42dc centre (limit 14)",
+   "band": "10m",
+   "probe_decodes": 14,
+   "probe_sample": [
+    "170130  -7  0.2 1498 ~  CQ AG6X DM12",
+    "170130   7  0.3 1859 ~  Z21ML W7VA -17",
+    "170130  23  0.5 2956 ~  CQ DX AA6MU CM87",
+    "170130  -6  0.2  609 ~  N6AV C8K -07",
+    "170130  -1  0.6 2521 ~  K5TC <...> -15"
+   ],
+   "freq_khz": 28074.0
+  },
+  {
+   "station": "KC3MN 0-30 MHz SDR | Duryea, Pennsylvania , USA.",
+   "lat": 41.355,
+   "lon": -75.7778,
+   "label": "KC3MN 0-30 MHz SDR | Duryea, Pennsylvania , USA.",
+   "version": "1.902.0",
+   "url": "http://23.28.39.73:8073/",
+   "type": "KiwiSDR",
+   "grid": "FN21",
+   "gps_good": "0",
+   "loc_check": "67 km from FN21 centre (limit 110)",
+   "band": "10m",
+   "probe_decodes": 10,
+   "probe_sample": [
+    "170130  -2  0.2 1372 ~  AA6GT XE2KK RR73",
+    "170130  13  0.4 2410 ~  Z21ML K5XI DM52",
+    "170130  -9  0.3 1848 ~  CQ D2UY JI64",
+    "170130   0  0.6 2556 ~  K5TC <...> -15",
+    "170130 -11  0.3 1102 ~  KK4RXE V51CO -23"
+   ],
+   "freq_khz": 28074.0
+  }
+ ],
+ "confirmers": [
+  {
+   "url": "http://ea8ee.ddns.net:8073/",
+   "band": "10m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 144,
+   "users": 0,
+   "max_clients": 4,
+   "version": "v1.2.130",
+   "lat_lon": {
+    "lat": 27.76307141772238,
+    "lon": -15.60191184930471
+   },
+   "asl": 70,
+   "location": "Gran Canaria Island"
+  },
+  {
+   "url": "http://laradiocb.ddns.me:8073/",
+   "band": "10m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 35,
+   "users": 2,
+   "max_clients": 50,
+   "version": "v1.2.89",
+   "lat_lon": {
+    "lat": 40.71576315376277,
+    "lon": -4.1557705822241315
+   },
+   "asl": 1348,
+   "location": "\ud83d\udccd Ubicado en la Sierra de Guadarrama, Madrid"
+  },
+  {
+   "url": "https://3.websdr.jestok.com/",
+   "band": "10m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 2,
+   "users": 2,
+   "max_clients": 15,
+   "version": "v1.2.130",
+   "lat_lon": {
+    "lat": 54.8350916408096,
+    "lon": 18.3107377988517
+   },
+   "asl": 60,
+   "location": "Jastrz\u0119bia G\u00f3ra"
+  },
+  {
+   "url": "https://websdr.frogden.org:8443/",
+   "band": "10m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 53,
+   "users": 2,
+   "max_clients": 24,
+   "version": "v1.2.126",
+   "lat_lon": {
+    "lat": -22.90332931413584,
+    "lon": -47.103712381925774
+   },
+   "asl": 675,
+   "location": "Campinas, S\u00e3o Paulo"
+  }
+ ]
+}

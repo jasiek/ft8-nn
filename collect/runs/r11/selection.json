@@ -1,0 +1,335 @@
+{
+ "probed_utc": "2026-11-18T18:58:12.869918+00:00",
+ "source": "receiverbook-fresh",
+ "regions": [
+  "EU"
+ ],
+ "excluded_sites": "excluded_sites.json",
+ "bands": [
+  "160m",
+  "80m"
+ ],
+ "chosen": [
+  {
+   "station": "0-30 MHz SDR | Wels AT",
+   "lat": 48.15224,
+   "lon": 13.998464,
+   "label": "0-30 MHz SDR | Wels AT",
+   "version": "1.902.0",
+   "url": "http://witikiwi.ddns.net:8073/",
+   "type": "KiwiSDR",
+   "grid": "JN68xd",
+   "gps_good": "5",
+   "loc_check": "3 km from JN68xd centre (limit 14)",
+   "band": "80m",
+   "probe_decodes": 48,
+   "probe_sample": [
+    "185745  -1 -0.8 1498 ~  CQ SQ4KBF KO13",
+    "185745   8  0.1 1337 ~  UE4DX 9A5BDE JN83",
+    "185745  -5  0.3  247 ~  CQ RX6AOB KN94",
+    "185745   3 -0.2 1217 ~  OE8PIT OK4RQ +13",
+    "185745   1  0.2  323 ~  CQ RA3AV KO94"
+   ],
+   "freq_khz": 3573.0
+  },
+  {
+   "station": "DF3LZ, KiwiSDR1 | Hamburg, Germany, 33m T2FD ",
+   "lat": 53.452118,
+   "lon": 10.221034,
+   "label": "DF3LZ, KiwiSDR1 | Hamburg, Germany, 33m T2FD ",
+   "version": "1.902.0",
+   "url": "http://85.183.11.108:8073/",
+   "type": "KiwiSDR",
+   "grid": "JO53CK",
+   "gps_good": "5",
+   "loc_check": "2 km from JO53CK centre (limit 14)",
+   "band": "80m",
+   "probe_decodes": 44,
+   "probe_sample": [
+    "185745   9 -0.7 1498 ~  CQ SQ4KBF KO13",
+    "185745  10  0.1  937 ~  RX4SA SQ4FDK -20",
+    "185745   0  0.3  247 ~  CQ RX6AOB KN94",
+    "185745  20  0.1  756 ~  DO9SAM DF7PX RRR",
+    "185745  12  0.2  652 ~  RW3YS SP9EVL JO90"
+   ],
+   "freq_khz": 3573.0
+  },
+  {
+   "station": "IZ2442SWL 0.0-30.0 MHz SDR | Capiago Intimiano, Como, Italy",
+   "lat": 45.77,
+   "lon": 9.13,
+   "label": "IZ2442SWL 0.0-30.0 MHz SDR | Capiago Intimiano, Como, Italy",
+   "version": "1.902.0",
+   "url": "http://internal.croci.it:8073/",
+   "type": "KiwiSDR",
+   "grid": "JN45ns",
+   "gps_good": "6",
+   "loc_check": "0 km from JN45ns centre (limit 14)",
+   "band": "80m",
+   "probe_decodes": 43,
+   "probe_sample": [
+    "185745 -12 -0.8 1498 ~  CQ SQ4KBF KO13",
+    "185745  -1  0.2  653 ~  RW3YS SP9EVL JO90",
+    "185745   8  0.1 1337 ~  UE4DX 9A5BDE JN83",
+    "185745  11  0.1 2454 ~  <...> I8OHQ -10",
+    "185745  -4  0.2  322 ~  CQ RA3AV KO94"
+   ],
+   "freq_khz": 3573.0
+  },
+  {
+   "station": "0-32 MHz SDR | ManuSDR | GERWISCH, GERMANY",
+   "lat": 52.1802,
+   "lon": 11.7325,
+   "label": "0-32 MHz SDR | ManuSDR | GERWISCH, GERMANY",
+   "version": "1.902.0",
+   "url": "http://kiwisdr.servepics.com:8073/",
+   "type": "KiwiSDR",
+   "grid": "JO52ue",
+   "gps_good": "6",
+   "loc_check": "2 km from JO52ue centre (limit 14)",
+   "band": "80m",
+   "probe_decodes": 42,
+   "probe_sample": [
+    "185745  -9 -0.7 1499 ~  CQ SQ4KBF KO13",
+    "185745  10  0.2  938 ~  RX4SA SQ4FDK -20",
+    "185745  -6  0.2 2453 ~  <...> I8OHQ -10",
+    "185745  -8  0.3  323 ~  CQ RA3AV KO94",
+    "185745  -3  0.0 1843 ~  R7DN RA2FCF R+08"
+   ],
+   "freq_khz": 3573.0
+  },
+  {
+   "station": "0-30 MHz SDR | DL3ZID    Schwerin",
+   "lat": 53.599,
+   "lon": 11.329,
+   "label": "0-30 MHz SDR | DL3ZID    Schwerin",
+   "version": "1.902.0",
+   "url": "http://pdbh2d76wb7bt5z2.myfritz.net:8073/",
+   "type": "KiwiSDR",
+   "grid": "JO53PO",
+   "gps_good": "6",
+   "loc_check": "3 km from JO53PO centre (limit 14)",
+   "band": "160m",
+   "probe_decodes": 16,
+   "probe_sample": [
+    "185745   4  0.3 1700 ~  OH0Z IT9GUL JM78",
+    "185745  14  0.2 1769 ~  GM1DMC LX1JH R-10",
+    "185745  -2  0.2 2324 ~  RA9AJ DL1MEV JN58",
+    "185745  -9  0.2 2195 ~  LY7M R3LDK KO64",
+    "185745  -7  0.2 2487 ~  SP6AXW F4HGF 73"
+   ],
+   "freq_khz": 1840.0
+  },
+  {
+   "station": "S53A | Polsece Slovenia 900m ASL",
+   "lat": 45.83,
+   "lon": 14.49,
+   "label": "S53A | Polsece Slovenia 900m ASL",
+   "version": "1.902.0",
+   "url": "http://89.212.54.101:8073/",
+   "type": "KiwiSDR",
+   "grid": "JN75ft",
+   "gps_good": "8",
+   "loc_check": "3 km from JN75ft centre (limit 14)",
+   "band": "160m",
+   "probe_decodes": 10,
+   "probe_sample": [
+    "185745   7  0.3 1700 ~  OH0Z IT9GUL JM78",
+    "185745 -10  0.4 1956 ~  GU4WRP IW8EDA JN70",
+    "185745  11  0.2 2324 ~  RA9AJ DL1MEV JN58",
+    "185745  -9  0.1 1540 ~  DL0GSH SQ7KMT JO91",
+    "185745  -7  0.3 1769 ~  GM1DMC LX1JH R-10"
+   ],
+   "freq_khz": 1840.0
+  },
+  {
+   "station": "0-30 MHz SDR | Jena Germany",
+   "lat": 50.93,
+   "lon": 11.57,
+   "label": "0-30 MHz SDR | Jena Germany",
+   "version": "1.902.0",
+   "url": "http://kiwisdr.ddnss.de:8073/",
+   "type": "KiwiSDR",
+   "grid": "JO50sw",
+   "gps_good": "7",
+   "loc_check": "2 km from JO50sw centre (limit 14)",
+   "band": "160m",
+   "probe_decodes": 5,
+   "probe_sample": [
+    "185745  -4  0.3 1700 ~  OH0Z IT9GUL JM78",
+    "185745  11  0.2 2324 ~  RA9AJ DL1MEV JN58",
+    "185745   0  0.2 1769 ~  GM1DMC LX1JH R-10",
+    "185745 -21  0.4 1956 ~  GU4WRP IW8EDA JN70",
+    "185745 -23 -0.1 1358 ~  CQ DG4BRT JO43"
+   ],
+   "freq_khz": 1840.0
+  }
+ ],
+ "confirmers": [
+  {
+   "url": "http://oh6kk.dy.fi:8073/",
+   "band": "160m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 120,
+   "users": 1,
+   "max_clients": 5,
+   "version": "v1.2.101",
+   "lat_lon": {
+    "lat": 63.864949,
+    "lon": 23.158584
+   },
+   "asl": 20,
+   "location": "Kokkola, Finland"
+  },
+  {
+   "url": "http://90.187.72.177:8073/",
+   "band": "80m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 108,
+   "users": 5,
+   "max_clients": 20,
+   "version": "v1.2.130",
+   "lat_lon": {
+    "lat": 52.40779629238412,
+    "lon": 13.40388133168175
+   },
+   "asl": 65,
+   "location": "Berlin, Germany"
+  },
+  {
+   "url": "http://nc-home.tgws.de:8773/",
+   "band": "80m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 88,
+   "users": 0,
+   "max_clients": 20,
+   "version": "v1.2.130",
+   "lat_lon": {
+    "lat": 50.82,
+    "lon": 7.62
+   },
+   "asl": 210,
+   "location": "Windeck,NRW,FRG"
+  },
+  {
+   "url": "http://radio.nkpa.co.uk/",
+   "band": "80m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 58,
+   "users": 1,
+   "max_clients": 5,
+   "version": "v1.2.130",
+   "lat_lon": {
+    "lat": 52.22609520584887,
+    "lon": -0.9268577317469995
+   },
+   "asl": 100,
+   "location": "Northampton"
+  },
+  {
+   "url": "http://thomas0177.ddns.net:8077/",
+   "band": "80m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 217,
+   "users": 0,
+   "max_clients": 5,
+   "version": "v1.2.130",
+   "lat_lon": {
+    "lat": 52.41876,
+    "lon": 13.30633
+   },
+   "asl": 90,
+   "location": "Berlin - Lichterfelde, Germany"
+  },
+  {
+   "url": "http://yo2cps.go.ro:8073/",
+   "band": "80m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 313,
+   "users": 0,
+   "max_clients": 10,
+   "version": "v1.2.123",
+   "lat_lon": {
+    "lat": 45.863523648352725,
+    "lon": 22.89565117516746
+   },
+   "asl": 187,
+   "location": "Deva, Romania"
+  },
+  {
+   "url": "https://sdr-serpuhov.ru/",
+   "band": "80m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 255,
+   "users": 26,
+   "max_clients": 100,
+   "version": "v1.2.130",
+   "lat_lon": {
+    "lat": 54.917727384972494,
+    "lon": 37.427252188946035
+   },
+   "asl": 165,
+   "location": "RUSSIA, Serpuhov"
+  },
+  {
+   "url": "https://sdr.pajadam.me/",
+   "band": "80m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 187,
+   "users": 3,
+   "max_clients": 32,
+   "version": "v1.2.130",
+   "lat_lon": {
+    "lat": 50.430249446103076,
+    "lon": 18.837746464376014
+   },
+   "asl": 316,
+   "location": "Tarnowskie G\u00f3ry, Poland"
+  },
+  {
+   "url": "https://sdr.wireless-access.de:9078/",
+   "band": "80m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 216,
+   "users": 0,
+   "max_clients": 20,
+   "version": "v1.2.128",
+   "lat_lon": {
+    "lat": 48.57915,
+    "lon": 13.46749
+   },
+   "asl": 390,
+   "location": "Passau, Germany"
+  },
+  {
+   "url": "https://ub3aww.ru:8073/",
+   "band": "80m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 248,
+   "users": 1,
+   "max_clients": 100,
+   "version": "v1.2.113",
+   "lat_lon": {
+    "lat": 55.9462022066859,
+    "lon": 36.50373666149901
+   },
+   "asl": 236,
+   "location": "Pervomayskoe, Moscow Region, Russia"
+  },
+  {
+   "url": "https://waldbeere.crabdance.com/",
+   "band": "80m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 643,
+   "users": 1,
+   "max_clients": 10,
+   "version": "v1.2.130",
+   "lat_lon": {
+    "lat": 52.2670602411619,
+    "lon": 13.6547171410772
+   },
+   "asl": 54,
+   "location": "K\u00f6nigs Wusterhausen, Germany"
+  }
+ ]
+}

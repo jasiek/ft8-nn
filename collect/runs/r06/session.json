@@ -1,0 +1,33 @@
+{
+ "start_utc": 1794935085.0,
+ "until_utc": 1794936886.0,
+ "pskr_tail_s": 720,
+ "bands": [
+  "10m"
+ ],
+ "topics": [
+  "pskr/filter/v2/10m/FT8/#"
+ ],
+ "owrx_lead_s": 30,
+ "owrx_tail_s": 70,
+ "confirmers": [
+  [
+   "10m",
+   "http://ea8ee.ddns.net:8073/"
+  ],
+  [
+   "10m",
+   "http://laradiocb.ddns.me:8073/"
+  ],
+  [
+   "10m",
+   "https://3.websdr.jestok.com/"
+  ],
+  [
+   "10m",
+   "https://websdr.frogden.org:8443/"
+  ]
+ ],
+ "pskr_feed_delay_s": 526.5,
+ "pskr_capture_end_utc": 1794938132.8
+}

@@ -1,0 +1,91 @@
+{
+ "start_utc": 1795031985.0,
+ "until_utc": 1795033786.0,
+ "pskr_tail_s": 720,
+ "bands": [
+  "30m",
+  "40m"
+ ],
+ "topics": [
+  "pskr/filter/v2/30m/FT8/#",
+  "pskr/filter/v2/40m/FT8/#"
+ ],
+ "owrx_lead_s": 30,
+ "owrx_tail_s": 70,
+ "confirmers": [
+  [
+   "30m",
+   "http://sv1cmg.no-ip.org:8073/"
+  ],
+  [
+   "30m",
+   "https://openwebrx.zl3bcj.duckdns.org/"
+  ],
+  [
+   "40m",
+   "http://176.128.152.202:8073/"
+  ],
+  [
+   "40m",
+   "http://nc-home.tgws.de:8773/"
+  ],
+  [
+   "40m",
+   "http://sdr.ukvpn.cloud:91/"
+  ],
+  [
+   "40m",
+   "http://sdrkosutnjak.321.rs:8073/"
+  ],
+  [
+   "40m",
+   "http://thomas0177.ddns.net:8077/"
+  ],
+  [
+   "40m",
+   "https://14alt266.freeboxos.fr/openwebrx/"
+  ],
+  [
+   "40m",
+   "https://3.websdr.jestok.com/"
+  ],
+  [
+   "40m",
+   "https://ec5m.ddns.net/"
+  ],
+  [
+   "40m",
+   "https://openwebrx.iv3hqc.it/"
+  ],
+  [
+   "40m",
+   "https://sdr-1.giarel.li/"
+  ],
+  [
+   "40m",
+   "https://sdr-serpuhov.ru/"
+  ],
+  [
+   "40m",
+   "https://sdr.henry.lan64.de/"
+  ],
+  [
+   "40m",
+   "https://sdr.pajadam.me/"
+  ],
+  [
+   "40m",
+   "https://sdr.s59ekl.si/"
+  ],
+  [
+   "40m",
+   "https://sdr.wireless-access.de:9078/"
+  ],
+  [
+   "40m",
+   "https://ub3aww.ru:8073/"
+  ]
+ ],
+ "pskr_feed_delay_s": 728.6,
+ "pskr_capture_end_utc": 1795035234.6
+}

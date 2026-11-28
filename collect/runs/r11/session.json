@@ -1,0 +1,63 @@
+{
+ "start_utc": 1795028460.0,
+ "until_utc": 1795030261.0,
+ "pskr_tail_s": 720,
+ "bands": [
+  "160m",
+  "80m"
+ ],
+ "topics": [
+  "pskr/filter/v2/160m/FT8/#",
+  "pskr/filter/v2/80m/FT8/#"
+ ],
+ "owrx_lead_s": 30,
+ "owrx_tail_s": 70,
+ "confirmers": [
+  [
+   "160m",
+   "http://oh6kk.dy.fi:8073/"
+  ],
+  [
+   "80m",
+   "http://90.187.72.177:8073/"
+  ],
+  [
+   "80m",
+   "http://nc-home.tgws.de:8773/"
+  ],
+  [
+   "80m",
+   "http://radio.nkpa.co.uk/"
+  ],
+  [
+   "80m",
+   "http://thomas0177.ddns.net:8077/"
+  ],
+  [
+   "80m",
+   "http://yo2cps.go.ro:8073/"
+  ],
+  [
+   "80m",
+   "https://sdr-serpuhov.ru/"
+  ],
+  [
+   "80m",
+   "https://sdr.pajadam.me/"
+  ],
+  [
+   "80m",
+   "https://sdr.wireless-access.de:9078/"
+  ],
+  [
+   "80m",
+   "https://ub3aww.ru:8073/"
+  ],
+  [
+   "80m",
+   "https://waldbeere.crabdance.com/"
+  ]
+ ],
+ "pskr_feed_delay_s": 130.3,
+ "pskr_capture_end_utc": 1795031111.8
+}

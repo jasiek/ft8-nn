@@ -4,7 +4,9 @@ The NN is trained only on synthetic data (`ft8nn/synth_bb.py`, generated on the 
 off-air recordings are used for two things:
 
 - **Evaluation:** the training recordings are the "real" benchmark, decoded by `bench/run_real.py` and compared
-  with jt9's labels. Validation runs 1 and 2 add PSK Reporter spots as ground truth for false decodes.
+  with jt9's labels. The validation set (`datasets/ft8-validation-set/runs/r02`, `r05`–`r14`, block lists
+  `sets/{small,third,full}.txt`) adds PSK Reporter spots, cross-receiver KiwiSDR confirmations (`xconf`), and live
+  OpenWebRX decode streams as ground truth (including `xconf-strict` for exclusive decodes).
 - **Design:** the v2 training distribution (`synth_bb.py`, "built from real-recording failures") and most
   decoder stages came from analysing what failed on these recordings.
 
@@ -21,15 +23,15 @@ collection run gives a *new* data set made the same way, not the same files.
 | `val.py` | the run driver for the validation runs: `probe`, `probe-fresh`, `record`, `decode` (below) |
 | `ft8rec.py` | the run driver of the training recordings (`probe`, `record`, `decode`); `val.py` is its successor |
 | `fill.py` | second probe pass of the training run: fills bands `ft8rec.py probe` left empty |
-| `verify.py` | scores a decoder's output against the spots (tiers slot > active > repeat > unconf) |
+| `verify.py` | scores a decoder's output against PSK Reporter spots and cross-receiver/OpenWebRX confirmers (tiers `slot` > `xconf` > `active` > `repeat` > `unconf`, plus `xconf-strict` / `unconfirmable` with `--others` and block-list scoring with `--set`) |
 | `manifest.py` | SHA-256 manifest of a run (`make`, `check`) |
 | `datarepo.py` | packs a run folder for its Git LFS data repo (FLAC + xz) and unpacks it byte for byte |
 
-These are copies of the data repos' `tools/*.py` (`datasets/ft8-validation-set`, 2026-11-04; `datasets/ft8-training-data`
+These are copies of the data repos' `tools/*.py` (`datasets/ft8-validation-set`, synced 2026-11-28 for `verify.py`; `datasets/ft8-training-data`
 `ft8rec.py`, `fill.py`, 2026-11-03; their `kiwi.py` is byte-identical). Only the default paths changed (and, since 2026-11-14, the passband and the jt9 range, below): `val.py`
 and `ft8rec.py` write to `$OUTDIR` (default `.`) and reads the training receiver list from `$TRAIN_SELECTION` (default
 `collect/runs/train/selection.json`); `verify.py` reads the validation set from `$V` (default
-`datasets/ft8-validation-set`). `tools/ab_run2.sh` and `tools/validate_full.sh` call `collect/verify.py`.
+`datasets/ft8-validation-set`). `tools/run_set.py`, `tools/ab_run2.sh` and `tools/validate_full.sh` call `collect/verify.py`.
 
 Requirements: network access to the Kiwis (HTTP/WebSocket, usually port 8073) and to PSK Reporter MQTT;
 `jt9` from WSJT-X on `PATH` for `decode` and the probes (mini: `/usr/local/bin/jt9`, WSJT-X 3.0.2 Improved; it also
@@ -97,7 +99,11 @@ checks the manifests. Needs `git-lfs`, `flac`, `xz`.
 
 ```sh
 git submodule update --init                      # or clone with --recurse-submodules
-(cd datasets/ft8-validation-set && python3 tools/datarepo.py unpack . --manifest MANIFEST.sha256 --manifest run2/MANIFEST.sha256)
+(cd datasets/ft8-validation-set && python3 tools/datarepo.py unpack runs \
+  --manifest runs/r02/MANIFEST.sha256 --manifest runs/r05/MANIFEST.sha256 --manifest runs/r06/MANIFEST.sha256 \
+  --manifest runs/r07/MANIFEST.sha256 --manifest runs/r08/MANIFEST.sha256 --manifest runs/r09/MANIFEST.sha256 \
+  --manifest runs/r10/MANIFEST.sha256 --manifest runs/r11/MANIFEST.sha256 --manifest runs/r12/MANIFEST.sha256 \
+  --manifest runs/r13/MANIFEST.sha256 --manifest runs/r14/MANIFEST.sha256)
 (cd datasets/ft8-training-data && python3 tools/datarepo.py unpack . --manifest MANIFEST.sha256)
 ```
 
@@ -111,14 +117,40 @@ fetches part of a set (`GIT_LFS_SKIP_SMUDGE=1 git submodule update --init`, then
 
 ## Runs archived so far
 
+### Current validation set (`datasets/ft8-validation-set/runs/`, block lists `sets/{small,third,full}.txt`)
+
+All 60 KiwiSDR sites below are disjoint from the training recordings, archived v1 runs 1–4, and `val5`
+(`excluded_sites.json`), grouped 3–4 receivers per band (50–1,500 km apart) plus live OpenWebRX real-time FT8 decode
+confirmers (`confirmers/`). Block sets (`sets/small.txt`: 16 blocks / 128 scored slots; `sets/third.txt`: 265 blocks /
+2,120 scored slots; `sets/full.txt`: 807 blocks / 6,456 scored slots, each block preceded by 2 decoded lead-in slots)
+are drawn from these runs (`r05` up to `261117_162815` UTC):
+
+| run | `collect/runs/` | data folder | when (UTC) | bands & regions | receivers (+ OpenWebRX) | slots |
+|---|---|---|---|---|---|---|
+| r02 | `r02/` | `datasets/ft8-validation-set/runs/r02` | 2026-11-15 ~11:52–12:22 | 15 m, 17 m (EU, Kiwi-only) | 3 + 3 Kiwis | 719 |
+| r05 | `r05/` | `datasets/ft8-validation-set/runs/r05` | 2026-11-17 16:08–16:38 | 40 m, 20 m (EU; scored to 16:28) | 3 + 3 Kiwis (+ 33 OWRX) | 720 |
+| r06 | `r06/` | `datasets/ft8-validation-set/runs/r06` | 2026-11-17 17:04–17:34 | 10 m (NA) | 3 Kiwis (+ 1 OWRX) | 360 |
+| r07 | `r07/` | `datasets/ft8-validation-set/runs/r07` | 2026-11-17 18:06–18:36 | 40 m, 80 m (EU) | 3 + 3 Kiwis (+ 24 OWRX) | 702 |
+| r08 | `r08/` | `datasets/ft8-validation-set/runs/r08` | 2026-11-18 00:04–00:34 | 20 m, 30 m (NA + SA Brazil) | 3 + 4 + 1 Kiwis (+ 8 OWRX) | 960 |
+| r09 | `r09/` | `datasets/ft8-validation-set/runs/r09` | 2026-11-18 06:03–06:33 | 20 m, 30 m (EU + OC NZ) | 3 + 1 Kiwis (+ 15 OWRX) | 477 |
+| r10 | `r10/` | `datasets/ft8-validation-set/runs/r10` | 2026-11-18 12:04–12:34 | 20 m, 17 m (EU + AS Thailand) | 4 + 4 + 1 Kiwis (+ 13 OWRX) | 1,080 |
+| r11 | `r11/` | `datasets/ft8-validation-set/runs/r11` | 2026-11-18 19:01–19:31 | 160 m, 80 m (EU) | 3 + 4 Kiwis (+ 11 OWRX) | 840 |
+| r12 | `r12/` | `datasets/ft8-validation-set/runs/r12` | 2026-11-18 19:59–20:29 | 30 m, 40 m (EU + AF Canary Is.) | 3 + 1 Kiwis (+ 18 OWRX) | 475 |
+| r13 | `r13/` | `datasets/ft8-validation-set/runs/r13` | 2026-11-19 15:32–16:02 | 12 m (NA day) | 3 Kiwis (+ 2 OWRX) | 359 |
+| r14 | `r14/` | `datasets/ft8-validation-set/runs/r14` | 2026-11-20 06:20–06:50 | 60 m (EU dawn) | 4 Kiwis (+ 2 OWRX) | 480 |
+
+### Training set and archived v1 validation runs (`val1`–`val5`)
+
+Historical numbers in `STATUS.md` through `9ffe3ce` (`nn_v1`–`nn_v4_scr`) were measured on v1 runs 1–4 below:
+
 | run | `collect/runs/` | data folder | when (UTC) | receivers | slots | spots |
 |---|---|---|---|---|---|---|
 | training recordings | `train/` | `datasets/ft8-training-data/recordings` | 2026-11-04 03:02–03:33 | 10 (random receiverbook sites) | 1,197 | none captured |
-| validation run 1 | `val1/` | `datasets/ft8-validation-set` | 2026-11-04 22:17:45–22:47:45 | 9 (training receivers, other bands) | 1,077 | 920k |
-| validation run 2 | `val2/` | `datasets/ft8-validation-set/run2` | 2026-11-04 22:28:30–22:58:30 | 9 (fresh sites) | 1,077 | 853k |
-| validation run 3 | `val3/` | `datasets/ft8-validation-set/run3` | 2026-11-09 05:32:00–06:02:00 (Mon) | 12 (fresh sites, none from run 2) | 1,435 | 556k |
-| validation run 4 | `val4/` | `datasets/ft8-validation-set/run4` | 2026-11-09 15:00:00–15:30:00 (Mon) | 15 (fresh sites, none from runs 2–3) | 1,790 | 1,473k |
-| validation run 5 | `val5/` | local only so far: `data/collect/2026-11-14-run5` (not uploaded) | 2026-11-14 17:15:45–17:45:45 (Sat) | 16 (fresh sites, none from runs 1–4; **200–5400 Hz passband**) | 1,909 | 1,196k |
+| validation run 1 (v1) | `val1/` | `datasets/ft8-validation-set` | 2026-11-04 22:17:45–22:47:45 | 9 (training receivers, other bands) | 1,077 | 920k |
+| validation run 2 (v1) | `val2/` | `datasets/ft8-validation-set/run2` | 2026-11-04 22:28:30–22:58:30 | 9 (fresh sites) | 1,077 | 853k |
+| validation run 3 (v1) | `val3/` | `datasets/ft8-validation-set/run3` | 2026-11-09 05:32:00–06:02:00 (Mon) | 12 (fresh sites, none from run 2) | 1,435 | 556k |
+| validation run 4 (v1) | `val4/` | `datasets/ft8-validation-set/run4` | 2026-11-09 15:00:00–15:30:00 (Mon) | 15 (fresh sites, none from runs 2–3) | 1,790 | 1,473k |
+| validation run 5 (v1) | `val5/` | local only: `data/collect/2026-11-14-run5` | 2026-11-14 17:15:45–17:45:45 (Sat) | 16 (fresh sites, none from runs 1–4; **200–5400 Hz passband**) | 1,909 | 1,196k |
 
 Each `collect/runs/<run>/` holds `selection.json` (receivers, bands, probe results), `session.json` (times,
 bands, MQTT topics) and `MANIFEST.sha256`. Run 2 also holds the receiverbook snapshot it was drawn from (runs 3, 4 and 5 reused it, `N_RX=16 PER_BAND=6`: 12, 15 and 16 passed; run 4 via the data repo's `tools/scheduled_run.sh`, which waits for a set UTC time); the

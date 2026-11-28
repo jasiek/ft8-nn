@@ -1,6 +1,28 @@
 # Status and plan (resume here)
 
-## Neural inference acceleration (`PLAN.md` Tier 3: 3A on Mac, 3B elsewhere) — done 2026-11-27 (tag `nn_v4_scr` for 3B)
+## v2 validation set sync (`6a95807`), 5-decoder comparison, & `README.md` rewrite — done 2026-11-28
+
+Removed completed CPU roadmap `PLAN.md`, updated `datasets/ft8-validation-set` submodule to `6a95807` (unpacking and manifest-verifying all `7,819 / 7,819` files across `runs/r02` and `runs/r05`–`r14`), synced `collect/verify.py` (27/27 unit tests passing) and `collect/runs/r02,r05..r14`, added unified block-set runner `tools/run_set.py` (with LPT block scheduling), updated `tools/{compare_decoders.py,ab_run2.sh,validate_full.sh}`, `CLAUDE.md`, `docs/{data-collection.md,decoder-comparison.md}`, `wsjtx/README.md`, and rewrote `README.md` around current `models/v4` (`libft8nn`) measurements.
+
+- **Watterson fading re-measured on shipped `models/v4` (`bench/make_set.py` seeds 2 & 3, 8-core Apple M1, `6` workers, `caffeinate -dims`):**
+  - **Moderate fading (`0.5 Hz / 1 ms`, 390 slots):** 50% **`−20.27 dB`** / 90% **`−17.70 dB`**, `0` false decodes (**`+0.87 dB`** over `jt9 -d 3` `−19.40 dB`, `+0.15 dB` over `models/v3` `−20.12 dB`).
+  - **Disturbed fading (`1.0 Hz / 2 ms`, 450 slots):** 50% **`−20.23 dB`** / 90% **`−18.19 dB`**, `0` false decodes (**`+1.04 dB`** over `jt9 -d 3` `−19.19 dB`, `+0.07 dB` over `models/v3` `−20.16 dB`).
+  - Together with AWGN (**`−22.55 dB`** 50% / **`−21.29 dB`** 90%, **`+1.24 dB`** over `jt9` `−21.31 dB`, `0` false), all synthetic rows in `README.md` are now `models/v4`.
+- **5-decoder off-air comparison on `sets/small.txt` (16 blocks, 160 decoded / 128 scored slots across 10 runs, all 10 bands & 6 continents; 8-core Apple M1, `6` workers, `caffeinate -dims`, 0 sleep events):**
+  - `ft8lib` (`decode_ft8`): `1,545` decodes (`−44.6%`), `1,475` confirmed (`97.1%`), `0` `unconf`, `0.02 min` wall (`0.04 s/slot/core`).
+  - `jt9 -8 -d 3` (WSJT-X 3.0.2): `2,789` decodes, `2,633` confirmed (`96.1%`), `2` `unconf`, `1.91 min` wall (`3.48 s/slot/core`).
+  - `jtdx` (`2a0e2be` defaults): `2,970` decodes (`+6.5%`), `2,819` confirmed (`+7.1%`, `95.6%`), `0` `unconf`, `2.34 min` wall (`4.30 s/slot/core`).
+  - `jtdx_deep` (`-w -c 3 -s 2`): `3,128` decodes (`+12.2%`), `2,953` confirmed (`+12.2%`, `95.1%`), `2` `unconf`, `18.29 min` wall (`31.85 s/slot/core`).
+  - **`nn_v4` (`c/build/ft8nn_cli` `3A`):** **`3,396` decodes (`+21.8%` vs `jt9`, `+14.3%` vs `jtdx`, `+8.6%` vs `jtdx_deep`)**, **`3,154` confirmed (`+19.8%` vs `jt9`, `+11.9%` vs `jtdx`, `+6.8%` vs `jtdx_deep`)**, **`0` `unconf`**, `1.99 min` wall (**`3.22 s/slot/core`**); `359` exclusives (`194` `xconf-strict`, remaining `165` all `slot` `116` + `active` `49`, `0` `unconf`). Matches `ft8-validation-set` Phase 5b reference counts (`2,789 / 1,545 / 2,970 / 3,396`) identically.
+- **5-decoder off-air comparison on `sets/third.txt` (265 blocks, 2,650 decoded / 2,120 scored slots across all 11 runs `r02, r05–r14`; 8-core Apple M1, `6` workers, `caffeinate -dims`, 0 sleep events):**
+  - `ft8lib`: `29,780` decodes (`−44.2%`), `28,556` confirmed (`97.9%`), `0` `unconf`, `0.17 min` wall (`0.02 s/slot/core`).
+  - `jt9 -8 -d 3`: `53,322` decodes, `50,673` confirmed (`96.9%`), `44` `unconf` (`41` exclusive random), `27.05 min` wall (`3.66 s/slot/core`).
+  - `jtdx` defaults: `56,642` decodes (`+6.2%`), `54,030` confirmed (`+6.6%`, `96.3%`), `5` `unconf`, `32.44 min` wall (`4.39 s/slot/core`).
+  - `jtdx_deep` (`-w -c 3 -s 2`): `59,340` decodes (`+11.3%`), `56,369` confirmed (`+11.2%`, `95.9%`), `20` `unconf` (`17` random incl. 4 `DE ... TU` double hallucinations), `244.02 min` wall (`33.05 s/slot/core`).
+  - **`nn_v4` (`c/build/ft8nn_cli` `3A`):** **`65,919` decodes (`+23.6%` vs `jt9`, `+16.4%` vs `jtdx`, `+11.1%` vs `jtdx_deep`)**, **`61,818` confirmed (`+22.0%` vs `jt9`, `+14.4%` vs `jtdx`, `+9.7%` vs `jtdx_deep`)**, **`6` `unconf`** (4 genuine on-air signals: 4-decoder BP matches `CQ D01GMW JO31` & `CQ DX IN80CE`, 3-decoder QSO partner `<UA1AAP> R8QBH/1`, and active `DL1NB`'s free-text `DL1NB JO30` → **only `2` actual false decodes = `0.003%`**), **`29.77 min` wall (`4.04 s/slot/core`, `8.2×` faster than `jtdx_deep`)**; **`7,102` exclusives**, **`4,590` (`64.6%`) `xconf-strict`** (`4 Hz / 0.2 s` on another SDR ≥50 km away).
+*(Note: all sections below in this file were measured on the archived v1 validation runs 1–4 before the 2026-11-28 submodule bump.)*
+
+## Neural inference acceleration (CPU roadmap Tier 3: 3A on Mac, 3B elsewhere) — done 2026-11-27 (tag `nn_v4_scr` for 3B)
 
 Addressed the ~83% post-Tier-2 `SoftDemod` CPU share on both macOS (Option 3A) and Linux/Windows ONNX Runtime (Option 3B), plus capped `NN_BATCH = 32` and reused `c->hyps_buf` across passes to eliminate multi-pass `50–95 MB` VM churn:
 - **3A — Native macOS `Accelerate` (`cblas_sgemm` AMX) + ARM NEON backend (`c/src/nn_accel.c`, `c/{Makefile,src/decode.c}`, `wsjtx/Makefile`):**

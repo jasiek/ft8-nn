@@ -1,0 +1,133 @@
+{
+ "probed_utc": "2026-11-20T06:16:02.672537+00:00",
+ "source": "receiverbook-fresh",
+ "regions": [
+  "EU"
+ ],
+ "excluded_sites": "excluded_sites.json",
+ "bands": [
+  "60m"
+ ],
+ "chosen": [
+  {
+   "station": "20 kHz - 30 MHz Roelof Bakker , pa0rdt [ACTIVE!] | Middelburg, Netherlands",
+   "lat": 51.5005,
+   "lon": 3.60069,
+   "label": "20 kHz - 30 MHz Roelof Bakker , pa0rdt [ACTIVE!] | Middelburg, Netherlands",
+   "version": "1.902.0",
+   "url": "http://62.45.55.124:8073/",
+   "type": "KiwiSDR",
+   "grid": "JO11tm",
+   "gps_good": "0",
+   "loc_check": "3 km from JO11tm centre (limit 14)",
+   "band": "60m",
+   "probe_decodes": 7,
+   "probe_sample": [
+    "061530   1  0.1 1459 ~  DL1UDO EA5HEU R-03",
+    "061530  -2  0.1 1652 ~  IK4MTF OH3JF RR73",
+    "061530  16 -0.2  292 ~  KB9ZM OE8PIT RR73",
+    "061530  -3  0.1 1096 ~  CQ IS0AFM JM49",
+    "061530 -17  0.3 1237 ~  KR4HRC F5GN JN13"
+   ],
+   "freq_khz": 5357.0
+  },
+  {
+   "station": "DG0JBD Marienberg Germany",
+   "lat": 50.67,
+   "lon": 13.26,
+   "label": "DG0JBD Marienberg Germany",
+   "version": "1.902.0",
+   "url": "https://kiwi-dg0jbd.stbach.de/",
+   "type": "KiwiSDR",
+   "grid": "JO60pq",
+   "gps_good": "3",
+   "loc_check": "3 km from JO60pq centre (limit 14)",
+   "band": "60m",
+   "probe_decodes": 8,
+   "probe_sample": [
+    "061530  12 -0.2  301 ~  KB9ZM OE8PIT RR73",
+    "061530 -11  0.3 1245 ~  KR4HRC F5GN JN13",
+    "061530 -10  0.2 1660 ~  IK4MTF OH3JF RR73",
+    "061530 -19  0.1 1468 ~  DL1UDO EA5HEU R-03",
+    "061530 -12  0.1 1104 ~  CQ IS0AFM JM49"
+   ],
+   "freq_khz": 5357.0
+  },
+  {
+   "station": "0-32 MHz SDR, HB9TTU, Russikon Switzerland, optimized for 20-30 MHz",
+   "lat": 47.385085,
+   "lon": 8.781054,
+   "label": "0-32 MHz SDR, HB9TTU, Russikon Switzerland, optimized for 20-30 MHz",
+   "version": "1.902.0",
+   "url": "http://hb9ttu.dyndns.org:8073/",
+   "type": "KiwiSDR",
+   "grid": "JN47JJ",
+   "gps_good": "0",
+   "loc_check": "1 km from JN47JJ centre (limit 14)",
+   "band": "60m",
+   "probe_decodes": 6,
+   "probe_sample": [
+    "061530  -5  0.1 1468 ~  DL1UDO EA5HEU R-03",
+    "061530  -1  0.1  394 ~  KB9ZM M0KSE IO83",
+    "061530 -14  0.1 1397 ~  CQ DG4HAD JO54",
+    "061530 -10  0.3 1245 ~  KR4HRC F5GN JN13",
+    "061530 -11  0.1 1104 ~  CQ IS0AFM JM49"
+   ],
+   "freq_khz": 5357.0
+  },
+  {
+   "station": "F1UBL - JN08 near Paris - Yvelines - France - 0-30 MHz SDR",
+   "lat": 48.77,
+   "lon": 1.94,
+   "label": "F1UBL - JN08 near Paris - Yvelines - France - 0-30 MHz SDR",
+   "version": "1.902.0",
+   "url": "http://f1ubl.ddns.net:8072/",
+   "type": "KiwiSDR",
+   "grid": "JN08xs",
+   "gps_good": "4",
+   "loc_check": "1 km from JN08xs centre (limit 14)",
+   "band": "60m",
+   "probe_decodes": 6,
+   "probe_sample": [
+    "061530  -7  0.1 1659 ~  IK4MTF OH3JF RR73",
+    "061530  -3  0.1 1468 ~  DL1UDO EA5HEU R-03",
+    "061530   9 -0.2  301 ~  KB9ZM OE8PIT RR73",
+    "061530 -12  0.1 1104 ~  CQ IS0AFM JM49",
+    "061530 -22  0.1 1397 ~  CQ DG4HAD JO54"
+   ],
+   "freq_khz": 5357.0
+  }
+ ],
+ "confirmers": [
+  {
+   "url": "http://sdr.ukvpn.cloud:91/",
+   "band": "60m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 19,
+   "users": 1,
+   "max_clients": 20,
+   "version": "v1.2.130",
+   "lat_lon": {
+    "lat": 53.816701,
+    "lon": -1.723016
+   },
+   "asl": 160,
+   "location": "Bradford, ENGLAND"
+  },
+  {
+   "url": "https://sdr.fomitchev.net/",
+   "band": "60m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 15,
+   "users": 1,
+   "max_clients": 20,
+   "version": "v1.2.130",
+   "lat_lon": {
+    "lat": 38.943781769843426,
+    "lon": -104.74556
+   },
+   "asl": 2040,
+   "location": "Colorado Springs, CO, USA"
+  }
+ ]
+}

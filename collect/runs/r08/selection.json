@@ -1,0 +1,313 @@
+{
+ "probed_utc": "2026-11-18T00:01:11.198929+00:00",
+ "source": "receiverbook-fresh",
+ "regions": [
+  "NA"
+ ],
+ "excluded_sites": "excluded_sites.json",
+ "bands": [
+  "20m",
+  "30m"
+ ],
+ "chosen": [
+  {
+   "station": "KG7PD Kiwi2 SDR | Lynnwood, WA USA",
+   "lat": 47.85,
+   "lon": -122.31,
+   "label": "KG7PD Kiwi2 SDR | Lynnwood, WA USA",
+   "version": "1.902.0",
+   "url": "http://50.47.86.85:8073/",
+   "type": "KiwiSDR",
+   "grid": "CN87",
+   "gps_good": "5",
+   "loc_check": "65 km from CN87 centre (limit 103)",
+   "band": "20m",
+   "probe_decodes": 47,
+   "probe_sample": [
+    "000045  -3  0.2 1500 ~  CQ N6ADL CM98",
+    "000045  13  1.2 1992 ~  CQ WC9I DM32",
+    "000045   6  0.5 2403 ~  CQ KO6MDG CM98",
+    "000045   1  0.1 2478 ~  K9BXR K7STY -07",
+    "000045   6  0.3  651 ~  WB6VEX KF0PSC -09"
+   ],
+   "freq_khz": 14074.0
+  },
+  {
+   "station": "KE3BK 0-30 MHz SDR | Mountain House, CA",
+   "lat": 37.777474,
+   "lon": -121.54955,
+   "label": "KE3BK 0-30 MHz SDR | Mountain House, CA",
+   "version": "1.902.0",
+   "url": "http://73.66.163.172:8073/",
+   "type": "KiwiSDR",
+   "grid": "CM97fs",
+   "gps_good": "0",
+   "loc_check": "1 km from CM97fs centre (limit 14)",
+   "band": "20m",
+   "probe_decodes": 45,
+   "probe_sample": [
+    "000045  18  0.8  788 ~  KF0MSJ KJ7WLL CN85",
+    "000045 -11  0.2 2237 ~  D44JB JH1MFN QM06",
+    "000045  -8 -0.4 1519 ~  K1JAK N4QEP EM60",
+    "000045  11  0.2 1672 ~  C91RU WX7HS R-11",
+    "000045  -4  0.2 1875 ~  D44JB W6SOL DN17"
+   ],
+   "freq_khz": 14074.0
+  },
+  {
+   "station": "KM6CQ Ponderosa SDR .1-30 MHz | Washoe Valley, Nevada USA",
+   "lat": 39.31,
+   "lon": -119.79,
+   "label": "KM6CQ Ponderosa SDR .1-30 MHz | Washoe Valley, Nevada USA",
+   "version": "1.902.0",
+   "url": "http://km6cq.hopto.org:8073/",
+   "type": "KiwiSDR",
+   "grid": "DM09ch",
+   "gps_good": "0",
+   "loc_check": "0 km from DM09ch centre (limit 14)",
+   "band": "20m",
+   "probe_decodes": 27,
+   "probe_sample": [
+    "000045 -12 -0.0 1504 ~  KG9OH N8WCR -20",
+    "000045   1  0.3  650 ~  WB6VEX KF0PSC -09",
+    "000045  14  0.8  863 ~  KF0MSJ KJ7WLL CN85",
+    "000045  -9  0.2 1107 ~  KF0MSJ KW2E -16",
+    "000045  -5  0.1  508 ~  TT1GD W1ABY FN54"
+   ],
+   "freq_khz": 14074.0
+  },
+  {
+   "station": "K3GMQ - Bucks County, PA USA",
+   "lat": 40.3211,
+   "lon": -75.072,
+   "label": "K3GMQ - Bucks County, PA USA",
+   "version": "1.902.0",
+   "url": "http://108.36.83.213:8073/",
+   "type": "KiwiSDR",
+   "grid": "FN20lh",
+   "gps_good": "6",
+   "loc_check": "3 km from FN20lh centre (limit 14)",
+   "band": "30m",
+   "probe_decodes": 26,
+   "probe_sample": [
+    "000045   5  1.9 1493 ~  YU7YZ KQ4HQZ EM66",
+    "000045   5  1.5 1038 ~  CQ K4CSD EM78",
+    "000045   8  0.1 1962 ~  KF9UG KA5PUD RR73",
+    "000045  -7  0.4 1224 ~  YS1CH F4FTV R-08",
+    "000045  -6  0.2 2100 ~  YS1CH N3RUT FM09"
+   ],
+   "freq_khz": 10136.0
+  },
+  {
+   "station": "0-30 MHz SDR, W3PIE Receiver #1, Uniontown, Western Pennsylvania, USA",
+   "lat": 39.869629,
+   "lon": -79.63939,
+   "label": "0-30 MHz SDR, W3PIE Receiver #1, Uniontown, Western Pennsylvania, USA",
+   "version": "1.902.0",
+   "url": "http://w3piesdr.ddns.net:8073/",
+   "type": "KiwiSDR",
+   "grid": "FM09eu",
+   "gps_good": "1",
+   "loc_check": "2 km from FM09eu centre (limit 14)",
+   "band": "30m",
+   "probe_decodes": 20,
+   "probe_sample": [
+    "000045   8  0.1  832 ~  CQ VO1ANJ GN37",
+    "000045  -9  0.2 1559 ~  IZ5WTV K8NK -18",
+    "000045  -1  0.4 1224 ~  YS1CH F4FTV R-08",
+    "000045   9  0.1  346 ~  KK7ZEQ KE0KKD -17",
+    "000045  -8  0.4 1126 ~  CQ N7ILO DM65"
+   ],
+   "freq_khz": 10136.0
+  },
+  {
+   "station": "KiwiSDR @ VE2RM | Mont-Rigaud, QC, CANADA",
+   "lat": 45.451991,
+   "lon": -74.296633,
+   "label": "KiwiSDR @ VE2RM | Mont-Rigaud, QC, CANADA",
+   "version": "1.902.0",
+   "url": "http://74.114.21.161:8073/",
+   "type": "KiwiSDR",
+   "grid": "FN25uk",
+   "gps_good": "3",
+   "loc_check": "2 km from FN25uk centre (limit 14)",
+   "band": "30m",
+   "probe_decodes": 20,
+   "probe_sample": [
+    "000045 -21  1.9 1492 ~  YU7YZ KQ4HQZ EM66",
+    "000045  -2  0.1 2035 ~  2E0UMF CT7BRV R-12",
+    "000045  -5  0.1 2238 ~  A92AE EA4FAM R-13",
+    "000045   6  0.2 2856 ~  CQ E70SZ JN84",
+    "000045  11  0.1 2545 ~  KO4QEX EA3NE -09"
+   ],
+   "freq_khz": 10136.0
+  },
+  {
+   "station": "0-30 MHz KiwiSDR Central NC KIWI 1",
+   "lat": 35.65,
+   "lon": -78.45,
+   "label": "0-30 MHz KiwiSDR Central NC KIWI 1",
+   "version": "1.902.0",
+   "url": "http://75.189.217.152:8073/",
+   "type": "KiwiSDR",
+   "grid": "FM05",
+   "gps_good": "8",
+   "loc_check": "52 km from FM05 centre (limit 116)",
+   "band": "30m",
+   "probe_decodes": 14,
+   "probe_sample": [
+    "000045   4 -0.4 2347 ~  YU7YZ W1FAM FN42",
+    "000045  -8  0.1 1962 ~  KF9UG KA5PUD RR73",
+    "000045  -2  0.2 2545 ~  KO4QEX EA3NE -09",
+    "000045  -3  0.2  834 ~  CE2EP N8UAS EN81",
+    "000045 -14  0.1 2035 ~  2E0UMF CT7BRV R-12"
+   ],
+   "freq_khz": 10136.0
+  },
+  {
+   "station": "0-30 MHz SDR | Fazenda S\u00e3o Francisco - Itapeva, SP - Brazil",
+   "lat": -23.704044,
+   "lon": -48.889371,
+   "label": "0-30 MHz SDR | Fazenda S\u00e3o Francisco - Itapeva, SP - Brazil",
+   "version": "1.837.0",
+   "url": "http://itapeva.websdr.com.br:8973/",
+   "type": "KiwiSDR",
+   "grid": "GG56NH",
+   "gps_good": "3",
+   "loc_check": "2 km from GG56NH centre (limit 15)",
+   "band": "20m",
+   "probe_decodes": 11,
+   "probe_sample": [
+    "000045   7  0.4 2768 ~  BD4VOJ BH4TVU -11",
+    "000045   3  0.2  997 ~  CQ PY1GB GG98",
+    "000045  12 -0.0  665 ~  CQ LU1DG GF05",
+    "000045   1  0.4 2916 ~  BG7IDX XE1TUZ DL90",
+    "000045   8  0.2  933 ~  LU7YKR W3FOX RR73"
+   ],
+   "freq_khz": 14074.0,
+   "relaxed_group": true
+  }
+ ],
+ "confirmers": [
+  {
+   "url": "http://138.118.215.154:8073/",
+   "band": "20m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 128,
+   "users": 3,
+   "max_clients": 20,
+   "version": "v1.2.82",
+   "lat_lon": {
+    "lat": -51.68000987480535,
+    "lon": -69.21657773703642
+   },
+   "asl": 16,
+   "location": "Rio Gallegos, Patagonia, Argentina"
+  },
+  {
+   "url": "http://nc-home.tgws.de:8773/",
+   "band": "20m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 3,
+   "users": 3,
+   "max_clients": 20,
+   "version": "v1.2.130",
+   "lat_lon": {
+    "lat": 50.82,
+    "lon": 7.62
+   },
+   "asl": 210,
+   "location": "Windeck,NRW,FRG"
+  },
+  {
+   "url": "http://sdr.ukvpn.cloud:91/",
+   "band": "20m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 3,
+   "users": 3,
+   "max_clients": 20,
+   "version": "v1.2.130",
+   "lat_lon": {
+    "lat": 53.816701,
+    "lon": -1.723016
+   },
+   "asl": 160,
+   "location": "Bradford, ENGLAND"
+  },
+  {
+   "url": "http://webrx.ddns.net/",
+   "band": "20m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 6,
+   "users": 0,
+   "max_clients": 8,
+   "version": "v1.2.123",
+   "lat_lon": {
+    "lat": 45.621818243796696,
+    "lon": 19.54714916298752
+   },
+   "asl": 200,
+   "location": "Kula, Vojvodina , Serbia"
+  },
+  {
+   "url": "http://yu1ado.duckdns.org:443/",
+   "band": "20m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 4,
+   "users": 4,
+   "max_clients": 20,
+   "version": "v1.2.123",
+   "lat_lon": {
+    "lat": 43.57657600667678,
+    "lon": 21.337048407505538
+   },
+   "asl": 200,
+   "location": "Krusevac, Serbia"
+  },
+  {
+   "url": "https://rx.xv2da.com/",
+   "band": "20m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 129,
+   "users": 0,
+   "max_clients": 5,
+   "version": "v1.2.113",
+   "lat_lon": {
+    "lat": 10.289737,
+    "lon": 105.75834
+   },
+   "asl": 20,
+   "location": "Vietnam"
+  },
+  {
+   "url": "https://sdr-serpuhov.ru/",
+   "band": "20m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 6,
+   "users": 14,
+   "max_clients": 100,
+   "version": "v1.2.130",
+   "lat_lon": {
+    "lat": 54.917727384972494,
+    "lon": 37.427252188946035
+   },
+   "asl": 165,
+   "location": "RUSSIA, Serpuhov"
+  },
+  {
+   "url": "https://sdr.wireless-access.de:9078/",
+   "band": "30m",
+   "type": "OpenWebRX",
+   "ft8_decodes_in_gap": 14,
+   "users": 0,
+   "max_clients": 20,
+   "version": "v1.2.128",
+   "lat_lon": {
+    "lat": 48.57915,
+    "lon": 13.46749
+   },
+   "asl": 390,
+   "location": "Passau, Germany"
+  }
+ ]
+}

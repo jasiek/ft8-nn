@@ -1,0 +1,25 @@
+{
+ "start_utc": 1795155525.0,
+ "until_utc": 1795157326.0,
+ "pskr_tail_s": 720,
+ "bands": [
+  "60m"
+ ],
+ "topics": [
+  "pskr/filter/v2/60m/FT8/#"
+ ],
+ "owrx_lead_s": 30,
+ "owrx_tail_s": 70,
+ "confirmers": [
+  [
+   "60m",
+   "http://sdr.ukvpn.cloud:91/"
+  ],
+  [
+   "60m",
+   "https://sdr.fomitchev.net/"
+  ]
+ ],
+ "pskr_feed_delay_s": 54.6,
+ "pskr_capture_end_utc": 1795158100.7
+}

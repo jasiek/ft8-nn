@@ -22,13 +22,15 @@ and past decisions are there too. `README.md` covers setup; `docs/data-collectio
 
 - The recordings are git submodules (Git LFS, packed): `datasets/ft8-training-data`, `datasets/ft8-validation-set`.
   Fetch and unpack them as in `docs/data-collection.md`. They are read-only; outputs go under `data/` (gitignored).
-- Validation runs 2–4 (unseen receivers) are the honest tests: never train or tune thresholds on them.
+- The validation set (`datasets/ft8-validation-set/runs/r02`, `runs/r05`–`r14`, block lists `sets/{small,third,full}.txt`,
+  all unseen receiver sites) is the honest test: never train or tune thresholds on it (nor on archived v1 runs 2–4).
 - Decoder changes: Python first (`ft8nn/`), then the C port (`c/`); C must equal Python (`tools/golden_c.py`).
-  Accept a change with `tools/ab_run2.sh TAG` (run 2 decodes and slot-confirmed up, unconfirmed not up, noise 0
-  false), then `tools/validate_full.sh TAG` (run 1, training recordings, AWGN, all golden tests).
+  Accept a change with `tools/ab_run2.sh TAG` (`SET=small` quick check, `SET=third` before committing: decodes and
+  confirmed `slot + xconf` up, `unconf` not up, noise 0 false), then `tools/validate_full.sh TAG` (`sets/third.txt`,
+  training recordings, AWGN, all golden tests).
 - `models/v4` is the shipped model (`models/v3` is kept as its starting point). New trainings write to `runs/`
-  (gitignored). Retraining moves run-2 unconfirmed decodes by several (1 vs 5 for the same recipe), so a new network
-  needs the AP/OSD gates re-checked; judge false decodes on runs 2–4 pooled and `data/bench/noise10k`.
+  (gitignored). Retraining moves unconfirmed decodes by several (1 vs 5 for the same recipe), so a new network
+  needs the AP/OSD gates re-checked; judge false decodes on `sets/third.txt` (or `full.txt`) and `data/bench/noise10k`.
 - The data repos (Git LFS) share 10 GiB/month of download bandwidth: avoid needless full clones.
 
 ## Machine notes (two Mac minis: an 8-core M1 and an M4, ssh alias `mini`, driven by `tools/mini.sh`)

@@ -1,0 +1,153 @@
+{
+ "probed_utc": "2026-11-15T11:53:31.685453+00:00",
+ "source": "receiverbook+ubersdr-fresh",
+ "regions": [
+  "AF",
+  "EU"
+ ],
+ "excluded_sites": "excluded_sites.json",
+ "bands": [
+  "10m",
+  "15m",
+  "17m"
+ ],
+ "chosen": [
+  {
+   "station": "15 kHz-30 MHz KiwiSDR2 - F1JEK/P - France - DX-500 active antenna.",
+   "lat": 45.79,
+   "lon": 0.65,
+   "label": "15 kHz-30 MHz KiwiSDR2 - F1JEK/P - France - DX-500 active antenna.",
+   "version": "1.902.0",
+   "url": "http://f1jeksdr1.ddns.net:8073/",
+   "type": "KiwiSDR",
+   "grid": "JN05hs",
+   "gps_good": "7",
+   "loc_check": "3 km from JN05hs centre (limit 14)",
+   "band": "15m",
+   "probe_decodes": 52,
+   "probe_sample": [
+    "115300  16  0.1 1872 ~  M8LBY SP9AWP JO90",
+    "115300  17 -0.6 2974 ~  9A5ZD UA3QNA -09",
+    "115300   4 -0.5  869 ~  ON7DE R7AW -15",
+    "115300  18  0.1 2351 ~  EA3GFA YL2GJX KO26",
+    "115300  23  0.2  997 ~  4X5AJ SP6M 73"
+   ],
+   "freq_khz": 21074.0
+  },
+  {
+   "station": "F6KOH SHTSF | Le Havre, France",
+   "lat": 49.51,
+   "lon": 0.16,
+   "label": "F6KOH SHTSF | Le Havre, France",
+   "version": "1.902.0",
+   "url": "http://shtsf.ddns.net:8073/",
+   "type": "KiwiSDR",
+   "grid": "JN09bm",
+   "gps_good": "5",
+   "loc_check": "3 km from JN09bm centre (limit 14)",
+   "band": "15m",
+   "probe_decodes": 52,
+   "probe_sample": [
+    "115300  19  0.1 1763 ~  DL4BBY <...> -08",
+    "115300  16  0.1 2826 ~  F4IRX TA2LE -10",
+    "115300   6  0.1 2351 ~  EA3GFA YL2GJX KO26",
+    "115300   6  0.1 1172 ~  2E0TZW <...> -09",
+    "115300   5  0.1 2560 ~  W3EWL SM7HZK JO76"
+   ],
+   "freq_khz": 21074.0
+  },
+  {
+   "station": " Funkclub Schl\u00f6ssli - HB9RE - DMR2282157 | Bodenberg, Switzerland",
+   "lat": 47.154132,
+   "lon": 7.923172,
+   "label": "Funkclub Schl\u00f6ssli - HB9RE - DMR2282157 | Bodenberg, Switzerland",
+   "version": "1.902.0",
+   "url": "http://hb9re.ddns.net:8081/",
+   "type": "KiwiSDR",
+   "grid": "JN37XD",
+   "gps_good": "4",
+   "loc_check": "3 km from JN37XD centre (limit 14)",
+   "band": "15m",
+   "probe_decodes": 39,
+   "probe_sample": [
+    "115300  14  0.1 2351 ~  EA3GFA YL2GJX KO26",
+    "115300  14  0.4 2631 ~  PE9JAN EW1MN 73",
+    "115300  16  0.2 2826 ~  F4IRX TA2LE -10",
+    "115300  27 -0.6 2974 ~  9A5ZD UA3QNA -09",
+    "115300   1  0.2 1775 ~  WK2M R2ST -13"
+   ],
+   "freq_khz": 21074.0
+  },
+  {
+   "station": "AutreRadioAutreCulture 2 | TREMOLAT (24), FRANCE",
+   "lat": 44.869416,
+   "lon": 0.835143,
+   "label": "AutreRadioAutreCulture 2 | TREMOLAT (24), FRANCE",
+   "version": "1.902.0",
+   "url": "http://sdr.autreradioautreculture.com:8074/",
+   "type": "KiwiSDR",
+   "grid": "JN04ku",
+   "gps_good": "8",
+   "loc_check": "4 km from JN04ku centre (limit 14)",
+   "band": "17m",
+   "probe_decodes": 36,
+   "probe_sample": [
+    "115300   7  0.2  569 ~  CQ UX7QV KN29",
+    "115300   8  0.3  846 ~  R9FDE R2AL 73",
+    "115300  13  0.3 2569 ~  R9ODK RD3FY 73",
+    "115300  -3  1.1 1690 ~  2I0EVH DL3KR 73",
+    "115300   6  0.2  672 ~  CQ RZ1AS KO59"
+   ],
+   "freq_khz": 18100.0
+  },
+  {
+   "station": "0,5-30 MHz SDR, Bad M\u00fcnstereifel",
+   "lat": 50.612055,
+   "lon": 6.822181,
+   "label": "0,5-30 MHz SDR, Bad M\u00fcnstereifel",
+   "version": "1.902.0",
+   "url": "http://5.10.166.25:8073/",
+   "type": "KiwiSDR",
+   "grid": "JO30jo",
+   "gps_good": "0",
+   "loc_check": "2 km from JO30jo centre (limit 14)",
+   "band": "17m",
+   "probe_decodes": 32,
+   "probe_sample": [
+    "115300  14  0.3  828 ~  R9FDE R2AL 73",
+    "115300  11  0.3 2551 ~  R9ODK RD3FY 73",
+    "115300  15 -0.1 2301 ~  N1NK SP4AZN R-06",
+    "115300  19  0.1  552 ~  CQ UX7QV KN29",
+    "115300  12  1.4 1179 ~  CQ R3XDT KO84"
+   ],
+   "freq_khz": 18100.0
+  },
+  {
+   "station": "0-30 MHz SDR | SULNIAC 56250 , France.",
+   "lat": 47.675406,
+   "lon": -2.570962,
+   "label": "0-30 MHz SDR | SULNIAC 56250 , France.",
+   "version": "1.902.0",
+   "url": "http://kiwisdr56.ddns.net:8073/",
+   "type": "KiwiSDR",
+   "grid": "IN87rq",
+   "gps_good": "1",
+   "loc_check": "3 km from IN87rq centre (limit 14)",
+   "band": "17m",
+   "probe_decodes": 32,
+   "probe_sample": [
+    "115300   3  1.3 1179 ~  CQ R3XDT KO84",
+    "115300 -13  0.1 2019 ~  2E0GCY S50XX JN65",
+    "115300  -4  0.2 2327 ~  CQ R1CBW KO59",
+    "115300  17  0.1  989 ~  IW9HPG S59G R-08",
+    "115300  -3  0.2 1715 ~  2E0GCY OE8RPK JN76"
+   ],
+   "freq_khz": 18100.0
+  }
+ ],
+ "kiwi_only": {
+  "date": "2026-11-17",
+  "why": "PLAN.md decision 5 / 2f: UberSDR receivers and spotters left out",
+  "moved_to": "excluded-ubersdr/ (with the original selection/session/manifest)"
+ }
+}

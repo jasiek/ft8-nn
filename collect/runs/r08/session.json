@@ -1,0 +1,51 @@
+{
+ "start_utc": 1794960240.0,
+ "until_utc": 1794962041.0,
+ "pskr_tail_s": 720,
+ "bands": [
+  "20m",
+  "30m"
+ ],
+ "topics": [
+  "pskr/filter/v2/20m/FT8/#",
+  "pskr/filter/v2/30m/FT8/#"
+ ],
+ "owrx_lead_s": 30,
+ "owrx_tail_s": 70,
+ "confirmers": [
+  [
+   "20m",
+   "http://138.118.215.154:8073/"
+  ],
+  [
+   "20m",
+   "http://nc-home.tgws.de:8773/"
+  ],
+  [
+   "20m",
+   "http://sdr.ukvpn.cloud:91/"
+  ],
+  [
+   "20m",
+   "http://webrx.ddns.net/"
+  ],
+  [
+   "20m",
+   "http://yu1ado.duckdns.org:443/"
+  ],
+  [
+   "20m",
+   "https://rx.xv2da.com/"
+  ],
+  [
+   "20m",
+   "https://sdr-serpuhov.ru/"
+  ],
+  [
+   "30m",
+   "https://sdr.wireless-access.de:9078/"
+  ]
+ ],
+ "pskr_feed_delay_s": 48.3,
+ "pskr_capture_end_utc": 1794962810.2
+}

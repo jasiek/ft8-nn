@@ -1,0 +1,25 @@
+{
+ "start_utc": 1795102260.0,
+ "until_utc": 1795104061.0,
+ "pskr_tail_s": 720,
+ "bands": [
+  "12m"
+ ],
+ "topics": [
+  "pskr/filter/v2/12m/FT8/#"
+ ],
+ "owrx_lead_s": 30,
+ "owrx_tail_s": 70,
+ "confirmers": [
+  [
+   "12m",
+   "https://14alt266.freeboxos.fr/openwebrx/"
+  ],
+  [
+   "12m",
+   "https://sdr.hosted.top/"
+  ]
+ ],
+ "pskr_feed_delay_s": 674.2,
+ "pskr_capture_end_utc": 1795105455.3
+}

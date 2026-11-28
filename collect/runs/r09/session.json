@@ -1,0 +1,79 @@
+{
+ "start_utc": 1794981825.0,
+ "until_utc": 1794983626.0,
+ "pskr_tail_s": 720,
+ "bands": [
+  "20m",
+  "30m"
+ ],
+ "topics": [
+  "pskr/filter/v2/20m/FT8/#",
+  "pskr/filter/v2/30m/FT8/#"
+ ],
+ "owrx_lead_s": 30,
+ "owrx_tail_s": 70,
+ "confirmers": [
+  [
+   "20m",
+   "http://138.118.215.154:8073/"
+  ],
+  [
+   "20m",
+   "http://82.67.147.130:8080/"
+  ],
+  [
+   "20m",
+   "http://nc-home.tgws.de:8773/"
+  ],
+  [
+   "20m",
+   "http://owrxbreezand.duckdns.org/"
+  ],
+  [
+   "20m",
+   "http://thomas0177.ddns.net:8077/"
+  ],
+  [
+   "20m",
+   "http://yo2cps.go.ro:8073/"
+  ],
+  [
+   "20m",
+   "https://14alt266.freeboxos.fr/openwebrx/"
+  ],
+  [
+   "20m",
+   "https://bn-rx.bluecylabs.com/"
+  ],
+  [
+   "20m",
+   "https://rxtb.hmpepca.com/"
+  ],
+  [
+   "20m",
+   "https://sdr-serpuhov.ru/"
+  ],
+  [
+   "20m",
+   "https://sdr.s59ekl.si/"
+  ],
+  [
+   "20m",
+   "https://ub3aww.ru:8073/"
+  ],
+  [
+   "20m",
+   "https://websdr.dl8ldn.de/"
+  ],
+  [
+   "30m",
+   "https://sdr.vanish125.netcraze.pro/"
+  ],
+  [
+   "30m",
+   "https://sdr.wireless-access.de:9078/"
+  ]
+ ],
+ "pskr_feed_delay_s": 48.6,
+ "pskr_capture_end_utc": 1794984397.7
+}
